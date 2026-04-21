@@ -1,45 +1,33 @@
 import {
-  Box,
   Grid,
-  Link,
-  List,
-  ListItemButton,
   Skeleton,
   Stack,
-  Typography,
 } from '@mui/material';
 import ApprovalOutlinedIcon from '@mui/icons-material/ApprovalOutlined';
+import AssignmentOutlinedIcon from '@mui/icons-material/AssignmentOutlined';
+import AssignmentTurnedInOutlinedIcon from '@mui/icons-material/AssignmentTurnedInOutlined';
 import CheckCircleOutlineOutlinedIcon from '@mui/icons-material/CheckCircleOutlineOutlined';
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import PendingActionsOutlinedIcon from '@mui/icons-material/PendingActionsOutlined';
 import PlaylistAddCheckOutlinedIcon from '@mui/icons-material/PlaylistAddCheckOutlined';
 import ReportGmailerrorredOutlinedIcon from '@mui/icons-material/ReportGmailerrorredOutlined';
+import RuleFolderOutlinedIcon from '@mui/icons-material/RuleFolderOutlined';
+import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined';
 import { useEffect, useMemo, useState } from 'react';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
-import AppTable from '../../components/common/AppTable';
-import DashboardCard from '../../components/common/DashboardCard';
+import AuditActivityPanel from '../../components/dashboard/AuditActivityPanel';
+import DashboardMetricGrid from '../../components/dashboard/DashboardMetricGrid';
+import RecentRequestsTable from '../../components/dashboard/RecentRequestsTable';
+import RequestListPanel from '../../components/dashboard/RequestListPanel';
 import ErrorState from '../../components/common/ErrorState';
-import InfoPanel from '../../components/common/InfoPanel';
 import PageHeader from '../../components/common/PageHeader';
 import PageSection from '../../components/common/PageSection';
-import StatusChip from '../../components/common/StatusChip';
-import TypeChip from '../../components/common/TypeChip';
 import WalletConnectCard from '../../components/wallet/WalletConnectCard';
 import useAuth from '../../hooks/useAuth';
+import { auditLogsApi } from '../../modules/auditLogs/auditLogs.api';
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
 import { REQUEST_STATUSES, ROLES } from '../../utils/constants';
-import { formatDateTime } from '../../utils/date';
-import { formatAmount, truncateMiddle } from '../../utils/format';
-
-const summaryConfig = [
-  // { key: 'totalRequests', label: 'Total Requests', icon: <PlaylistAddCheckOutlinedIcon fontSize="small" />, accent: 'primary.main' },
-  { key: 'pendingApprovals', label: 'Pending Approvals', icon: <PendingActionsOutlinedIcon fontSize="small" />, accent: 'warning.main' },
-  { key: 'approvedRequests', label: 'Approved', icon: <ApprovalOutlinedIcon fontSize="small" />, accent: 'primary.main' },
-  // { key: 'readyForExecution', label: 'Ready for Execution', icon: <FactCheckOutlinedIcon fontSize="small" />, accent: 'secondary.main' },
-  { key: 'executedRequests', label: 'Executed', icon: <CheckCircleOutlineOutlinedIcon fontSize="small" />, accent: 'success.main' },
-  { key: 'failedRequests', label: 'Failed', icon: <ReportGmailerrorredOutlinedIcon fontSize="small" />, accent: 'error.main' },
-];
 
 function DashboardSkeleton() {
   return (
@@ -50,9 +38,9 @@ function DashboardSkeleton() {
         <Skeleton height={22} width="55%" />
       </Stack>
       <Grid container spacing={2.5}>
-        {Array.from({ length: 6 }).map((_, index) => (
-          <Grid key={index} size={{ xs: 12, sm: 6, xl: 2 }}>
-            <Skeleton height={152} variant="rounded" />
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Grid key={index} size={{ xs: 12, sm: 6, xl: 3 }}>
+            <Skeleton height={148} variant="rounded" />
           </Grid>
         ))}
       </Grid>
@@ -61,10 +49,9 @@ function DashboardSkeleton() {
           <Skeleton height={420} variant="rounded" />
         </Grid>
         <Grid size={{ xs: 12, lg: 4 }}>
-          <Stack spacing={3}>
-            <Skeleton height={260} variant="rounded" />
-            <Skeleton height={260} variant="rounded" />
-            <Skeleton height={210} variant="rounded" />
+          <Stack spacing={2.5}>
+            <Skeleton height={240} variant="rounded" />
+            <Skeleton height={240} variant="rounded" />
           </Stack>
         </Grid>
       </Grid>
@@ -72,20 +59,106 @@ function DashboardSkeleton() {
   );
 }
 
+function getPrimaryRole(user) {
+  if (user?.roles?.includes(ROLES.ADMIN)) return ROLES.ADMIN;
+  if (user?.roles?.includes(ROLES.MAKER)) return ROLES.MAKER;
+  if (user?.roles?.includes(ROLES.CHECKER)) return ROLES.CHECKER;
+  if (user?.roles?.includes(ROLES.EXECUTOR)) return ROLES.EXECUTOR;
+  return null;
+}
+
+function metric(key, label, value, subtitle, icon, accent) {
+  return { key, label, value, subtitle, icon, accent };
+}
+
 function DashboardPage() {
-  const [data, setData] = useState(null);
+  const [state, setState] = useState({
+    overview: null,
+    drafts: [],
+    draftCount: 0,
+    rejected: [],
+    rejectedCount: 0,
+    reviewed: [],
+    reviewedCount: 0,
+    approvedQueue: [],
+    readyQueue: [],
+    auditTrail: [],
+  });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const dashboardRole = useMemo(() => getPrimaryRole(user), [user]);
 
   useEffect(() => {
     async function load() {
+      if (!user?.id) {
+        return;
+      }
+
       try {
         setLoading(true);
         setError('');
-        const response = await tokenRequestsApi.dashboard();
-        setData(response.data);
+
+        const overviewPromise = tokenRequestsApi.dashboard();
+        const requestsByStatus = (status, extra = {}) => tokenRequestsApi.list({ page: 1, limit: 5, status, ...extra });
+
+        const calls = [overviewPromise];
+
+        if (dashboardRole === ROLES.ADMIN) {
+          calls.push(
+            requestsByStatus(REQUEST_STATUSES.APPROVED),
+            requestsByStatus(REQUEST_STATUSES.READY_FOR_EXECUTION),
+            auditLogsApi.list({ page: 1, limit: 5 }),
+          );
+        } else if (dashboardRole === ROLES.MAKER) {
+          calls.push(
+            requestsByStatus(REQUEST_STATUSES.DRAFT, { makerUserId: user.id }),
+            requestsByStatus(REQUEST_STATUSES.REJECTED, { makerUserId: user.id }),
+          );
+        } else if (dashboardRole === ROLES.CHECKER) {
+          calls.push(tokenRequestsApi.list({ page: 1, limit: 5, checkerUserId: user.id }));
+        } else if (dashboardRole === ROLES.EXECUTOR) {
+          calls.push(
+            requestsByStatus(REQUEST_STATUSES.APPROVED),
+            requestsByStatus(REQUEST_STATUSES.READY_FOR_EXECUTION),
+          );
+        }
+
+        const results = await Promise.all(calls);
+        const [overviewResponse, ...rest] = results;
+
+        const nextState = {
+          overview: overviewResponse.data,
+          drafts: [],
+          draftCount: 0,
+          rejected: [],
+          rejectedCount: 0,
+          reviewed: [],
+          reviewedCount: 0,
+          approvedQueue: [],
+          readyQueue: [],
+          auditTrail: overviewResponse.data?.auditTrail || [],
+        };
+
+        if (dashboardRole === ROLES.ADMIN) {
+          nextState.approvedQueue = rest[0]?.data?.items || [];
+          nextState.readyQueue = rest[1]?.data?.items || [];
+          nextState.auditTrail = rest[2]?.data?.items || [];
+        } else if (dashboardRole === ROLES.MAKER) {
+          nextState.drafts = rest[0]?.data?.items || [];
+          nextState.draftCount = rest[0]?.data?.pagination?.totalItems || 0;
+          nextState.rejected = rest[1]?.data?.items || [];
+          nextState.rejectedCount = rest[1]?.data?.pagination?.totalItems || 0;
+        } else if (dashboardRole === ROLES.CHECKER) {
+          nextState.reviewed = rest[0]?.data?.items || [];
+          nextState.reviewedCount = rest[0]?.data?.pagination?.totalItems || 0;
+        } else if (dashboardRole === ROLES.EXECUTOR) {
+          nextState.approvedQueue = rest[0]?.data?.items || [];
+          nextState.readyQueue = rest[1]?.data?.items || [];
+        }
+
+        setState(nextState);
       } catch (loadError) {
         setError(loadError.message || 'Unable to load dashboard data.');
       } finally {
@@ -94,85 +167,103 @@ function DashboardPage() {
     }
 
     load();
-  }, []);
+  }, [dashboardRole, user?.id]);
 
-  const roleCopy = useMemo(() => {
-    if (user?.roles.includes(ROLES.ADMIN)) {
-      return {
-        // eyebrow: 'Overview',
-        // subtitle: 'Monitor approvals, execution readiness, and administrative activity across the full off-chain workflow.',
-        recentTitle: 'Recent Token Requests',
-      };
+  const overview = state.overview;
+
+  const pageCopy = useMemo(() => {
+    switch (dashboardRole) {
+      case ROLES.ADMIN:
+        return {
+          eyebrow: 'Admin Overview',
+          title: 'Dashboard',
+          subtitle: 'Monitor workflow volume, execution readiness, and recent control activity across the portal.',
+          recentTitle: 'Latest Token Requests',
+          recentSubtitle: 'Newest requests across makers, approvals, and execution stages.',
+        };
+      case ROLES.MAKER:
+        return {
+          eyebrow: 'Maker Workspace',
+          title: 'Dashboard',
+          subtitle: 'Track your drafts, submissions, and requests that need revision or follow-up.',
+          recentTitle: 'My Recent Requests',
+          recentSubtitle: 'The most recent requests you created across the workflow.',
+        };
+      case ROLES.CHECKER:
+        return {
+          eyebrow: 'Checker Queue',
+          title: 'Dashboard',
+          subtitle: 'Focus on the approval queue, review throughput, and recently processed requests.',
+          recentTitle: 'Recently Reviewed Requests',
+          recentSubtitle: 'Requests you reviewed or that still need checker attention.',
+        };
+      case ROLES.EXECUTOR:
+        return {
+          eyebrow: 'Execution Desk',
+          title: 'Dashboard',
+          subtitle: 'Focus on approved requests, ready queue depth, and execution outcomes.',
+          recentTitle: 'Execution Activity',
+          recentSubtitle: 'Requests currently moving toward on-chain execution.',
+        };
+      default:
+        return {
+          eyebrow: 'Overview',
+          title: 'Dashboard',
+          subtitle: 'Operational overview of token requests, approvals, and execution readiness.',
+          recentTitle: 'Recent Requests',
+          recentSubtitle: 'Recent workflow activity.',
+        };
+    }
+  }, [dashboardRole]);
+
+  const metrics = useMemo(() => {
+    const summary = overview?.summary || {};
+
+    switch (dashboardRole) {
+      case ROLES.ADMIN:
+        return [
+          metric('total', 'Total Requests', summary.totalRequests ?? 0, 'Across all visible workflows', <PlaylistAddCheckOutlinedIcon fontSize="small" />, 'primary.main'),
+          metric('pending', 'Pending Approvals', summary.pendingApprovals ?? 0, 'Waiting for checker action', <PendingActionsOutlinedIcon fontSize="small" />, 'warning.main'),
+          metric('ready', 'Ready for Execution', summary.readyForExecution ?? 0, 'Approved and queued for execution', <FactCheckOutlinedIcon fontSize="small" />, 'secondary.main'),
+          metric('failed', 'Failed', summary.failedRequests ?? 0, 'Need operational follow-up', <ReportGmailerrorredOutlinedIcon fontSize="small" />, 'error.main'),
+        ];
+      case ROLES.MAKER:
+        return [
+          metric('drafts', 'Drafts', state.draftCount, 'Still editable by you', <AssignmentOutlinedIcon fontSize="small" />, 'primary.main'),
+          metric('pending', 'Pending Review', summary.pendingApprovals ?? 0, 'Submitted and awaiting a checker', <PendingActionsOutlinedIcon fontSize="small" />, 'warning.main'),
+          metric('rejected', 'Rejected', state.rejectedCount, 'Need revision before resubmission', <RuleFolderOutlinedIcon fontSize="small" />, 'error.main'),
+          metric('approved', 'Approved', summary.approvedRequests ?? 0, 'Cleared for execution prep', <ApprovalOutlinedIcon fontSize="small" />, 'secondary.main'),
+        ];
+      case ROLES.CHECKER:
+        return [
+          metric('pending', 'Pending Approvals', summary.pendingApprovals ?? 0, 'Requests waiting in your queue', <PendingActionsOutlinedIcon fontSize="small" />, 'warning.main'),
+          metric('approved', 'Approved by Queue', summary.approvedRequests ?? 0, 'Currently approved in your view', <AssignmentTurnedInOutlinedIcon fontSize="small" />, 'primary.main'),
+          metric('reviewed', 'Reviewed Recently', state.reviewedCount, 'Latest decisions linked to you', <TaskAltOutlinedIcon fontSize="small" />, 'secondary.main'),
+          metric('failed', 'Failed Downstream', summary.failedRequests ?? 0, 'Approved items that later failed execution', <ReportGmailerrorredOutlinedIcon fontSize="small" />, 'error.main'),
+        ];
+      case ROLES.EXECUTOR:
+        return [
+          metric('approved', 'Approved Queue', summary.approvedRequests ?? 0, 'Approved and awaiting handoff', <ApprovalOutlinedIcon fontSize="small" />, 'primary.main'),
+          metric('ready', 'Ready for Execution', summary.readyForExecution ?? 0, 'Immediately actionable requests', <FactCheckOutlinedIcon fontSize="small" />, 'secondary.main'),
+          metric('executed', 'Executed', summary.executedRequests ?? 0, 'Successfully recorded outcomes', <CheckCircleOutlineOutlinedIcon fontSize="small" />, 'success.main'),
+          metric('failed', 'Failed', summary.failedRequests ?? 0, 'Need retry or investigation', <ReportGmailerrorredOutlinedIcon fontSize="small" />, 'error.main'),
+        ];
+      default:
+        return [];
+    }
+  }, [dashboardRole, overview, state.draftCount, state.rejectedCount, state.reviewedCount]);
+
+  const recentRows = useMemo(() => {
+    if (dashboardRole === ROLES.CHECKER) {
+      return state.reviewed.length ? state.reviewed : (overview?.pendingApprovals || []);
     }
 
-    if (user?.roles.includes(ROLES.MAKER)) {
-      return {
-        eyebrow: 'Maker Workspace',
-        subtitle: 'Track your drafts, submitted requests, and approval progress without leaving the workflow context.',
-        recentTitle: 'My Recent Requests',
-      };
+    if (dashboardRole === ROLES.EXECUTOR) {
+      return state.readyQueue.length ? state.readyQueue : state.approvedQueue;
     }
 
-    if (user?.roles.includes(ROLES.CHECKER)) {
-      return {
-        eyebrow: 'Checker Queue',
-        subtitle: 'Focus on pending approvals, review outcomes, and the requests that still require your decision.',
-        recentTitle: 'Recently Updated Requests',
-      };
-    }
-
-    if (user?.roles.includes(ROLES.EXECUTOR)) {
-      return {
-        eyebrow: 'Execution Desk',
-        subtitle: 'Stay on top of requests approved for execution and record transaction outcomes with clear status visibility.',
-        recentTitle: 'Execution Activity',
-      };
-    }
-
-    return {
-      eyebrow: 'Overview',
-      subtitle: 'Operational overview of token requests, approvals, and execution readiness.',
-      recentTitle: 'Recent Token Requests',
-    };
-  }, [user]);
-
-  const summarySubtext = useMemo(() => ({
-    totalRequests: user?.roles.includes(ROLES.MAKER) ? 'Requests owned by you' : 'Visible within your workspace',
-    pendingApprovals: `${data?.summary?.pendingApprovals ?? 0} awaiting decision`,
-    approvedRequests: `${data?.summary?.readyForExecution ?? 0} close to execution`,
-    readyForExecution: `${data?.summary?.executedRequests ?? 0} already completed`,
-    executedRequests: 'Successfully recorded on the workflow',
-    failedRequests: 'Execution attempts that need follow-up',
-  }), [data, user]);
-
-  const readyForExecutionItems = useMemo(() => {
-    const recent = data?.recentRequests || [];
-    return recent.filter((request) =>
-      [REQUEST_STATUSES.APPROVED, REQUEST_STATUSES.READY_FOR_EXECUTION].includes(request.status),
-    ).slice(0, 5);
-  }, [data]);
-
-  const summaryCards = useMemo(() => {
-    const priority = user?.roles.includes(ROLES.MAKER)
-      ? ['totalRequests', 'pendingApprovals', 'approvedRequests', 'readyForExecution', 'executedRequests', 'failedRequests']
-      : user?.roles.includes(ROLES.CHECKER)
-        ? ['pendingApprovals', 'approvedRequests', 'totalRequests', 'readyForExecution', 'executedRequests', 'failedRequests']
-        : user?.roles.includes(ROLES.EXECUTOR)
-          ? ['readyForExecution', 'approvedRequests', 'executedRequests', 'failedRequests', 'totalRequests', 'pendingApprovals']
-          : ['totalRequests', 'pendingApprovals', 'readyForExecution', 'approvedRequests', 'executedRequests', 'failedRequests'];
-
-    return priority
-      .map((key) => summaryConfig.find((item) => item.key === key))
-      .filter(Boolean);
-  }, [user]);
-
-  const showWalletReadiness = user?.roles.includes(ROLES.ADMIN) || user?.roles.includes(ROLES.EXECUTOR);
-  const showPendingPanel = user?.roles.includes(ROLES.ADMIN) || user?.roles.includes(ROLES.CHECKER) || user?.roles.includes(ROLES.MAKER);
-  const pendingPanelTitle = user?.roles.includes(ROLES.MAKER) ? 'Awaiting Review' : 'Pending Approvals';
-  const pendingPanelSubtitle = user?.roles.includes(ROLES.MAKER)
-    ? 'Requests you submitted that still need checker action.'
-    : 'Requests still waiting for a checker decision.';
-  const showReadyPanel = user?.roles.includes(ROLES.ADMIN) || user?.roles.includes(ROLES.EXECUTOR) || readyForExecutionItems.length > 0;
+    return overview?.recentRequests || [];
+  }, [dashboardRole, overview, state.reviewed, state.readyQueue, state.approvedQueue]);
 
   if (error) {
     return <ErrorState description={error} onAction={() => window.location.reload()} />;
@@ -184,192 +275,106 @@ function DashboardPage() {
 
   return (
     <Stack spacing={3.5} sx={{ width: '100%', minWidth: 0 }}>
-      <PageHeader
-        eyebrow={roleCopy.eyebrow}
-        title="Dashboard"
-        subtitle={roleCopy.subtitle}
-      />
+      <PageHeader eyebrow={pageCopy.eyebrow} subtitle={pageCopy.subtitle} title={pageCopy.title} />
 
       <PageSection>
-        <Box
-          sx={{
-            display: 'grid',
-            gap: 1.75,
-            gridTemplateColumns: {
-              xs: '1fr',
-              sm: 'repeat(2, minmax(0, 1fr))',
-              lg: 'repeat(3, minmax(0, 1fr))',
-              xl: 'repeat(4, minmax(0, 1fr))',
-            },
-          }}
-        >
-          {summaryCards.map((item) => (
-            <DashboardCard
-              key={item.key}
-              accent={item.accent}
-              icon={item.icon}
-              label={item.label}
-              subtitle={summarySubtext[item.key]}
-              value={data?.summary?.[item.key] ?? 0}
-            />
-          ))}
-        </Box>
+        <DashboardMetricGrid items={metrics} />
       </PageSection>
 
       <Grid container spacing={3.25}>
         <Grid size={{ xs: 12, lg: 8 }}>
-          <PageSection
-            subtitle="Recent activity across the token request lifecycle."
-            title={roleCopy.recentTitle}
-          >
-            <AppTable
-              columns={[
-                {
-                  key: 'id',
-                  label: 'Request ID',
-                  width: 170,
-                  render: (row) => (
-                    <Link
-                      component={RouterLink}
-                      sx={{ fontWeight: 700, textDecoration: 'none' }}
-                      to={`/token-requests/${row.id}`}
-                    >
-                      {truncateMiddle(row.id, 10, 5)}
-                    </Link>
-                  ),
-                },
-                {
-                  key: 'requestType',
-                  label: 'Type',
-                  width: 120,
-                  render: (row) => <TypeChip value={row.requestType} />,
-                },
-                {
-                  key: 'amount',
-                  label: 'Amount',
-                  align: 'right',
-                  width: 120,
-                  render: (row) => formatAmount(row.amount),
-                },
-                {
-                  key: 'status',
-                  label: 'Status',
-                  width: 180,
-                  render: (row) => <StatusChip value={row.status} />,
-                },
-                {
-                  key: 'createdAt',
-                  label: 'Created',
-                  width: 180,
-                  render: (row) => (
-                    <Typography color="text.secondary" variant="body2">
-                      {formatDateTime(row.createdAt)}
-                    </Typography>
-                  ),
-                },
-              ]}
-              emptyDescription="Recent request activity will appear here once token operations are created."
-              minWidth={760}
+          <PageSection subtitle={pageCopy.recentSubtitle} title={pageCopy.recentTitle}>
+            <RecentRequestsTable
               onRowClick={(row) => navigate(`/token-requests/${row.id}`)}
-              pagination={null}
-              rows={data?.recentRequests || []}
+              rows={recentRows}
             />
           </PageSection>
         </Grid>
 
         <Grid size={{ xs: 12, lg: 4 }}>
           <Stack spacing={2.25}>
-            {showPendingPanel ? (
-              <InfoPanel
-                action={
-                  data?.pendingApprovals?.length ? (
-                    <Link component={RouterLink} sx={{ fontWeight: 700, textDecoration: 'none' }} to={user?.roles.includes(ROLES.MAKER) ? '/my-requests' : '/pending-approvals'}>
-                      View queue
-                    </Link>
-                  ) : null
-                }
-                subtitle={pendingPanelSubtitle}
-                title={pendingPanelTitle}
-              >
-                <List disablePadding sx={{ display: 'grid', gap: 1 }}>
-                  {(data?.pendingApprovals || []).length ? (
-                    (data?.pendingApprovals || []).slice(0, 4).map((request) => (
-                      <ListItemButton
-                        key={request.id}
-                        onClick={() => navigate(`/token-requests/${request.id}`)}
-                        sx={{ alignItems: 'flex-start', px: 1.25, py: 1 }}
-                      >
-                        <Stack spacing={1.05} sx={{ width: '100%' }}>
-                          <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
-                            <Typography sx={{ fontWeight: 700 }} variant="body2">
-                              {truncateMiddle(request.id, 10, 5)}
-                            </Typography>
-                            <StatusChip value={request.status} />
-                          </Stack>
-                          <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
-                            <TypeChip value={request.requestType} />
-                            <Typography color="text.secondary" variant="body2">
-                              {formatAmount(request.amount)}
-                            </Typography>
-                          </Stack>
-                        </Stack>
-                      </ListItemButton>
-                    ))
-                  ) : (
-                    <Typography color="text.secondary" variant="body2">
-                      No requests currently need approval.
-                    </Typography>
-                  )}
-                </List>
-              </InfoPanel>
+            {dashboardRole === ROLES.ADMIN ? (
+              <>
+                <RequestListPanel
+                  actionLabel="View execution desk"
+                  actionTo="/ready-for-execution"
+                  emptyText="No approved requests are waiting for execution prep."
+                  items={state.approvedQueue}
+                  onSelect={(row) => navigate(`/token-requests/${row.id}`)}
+                  subtitle="Approved requests waiting to move into execution handling."
+                  title="Approved Queue"
+                />
+                <AuditActivityPanel items={state.auditTrail} />
+              </>
             ) : null}
 
-            {showReadyPanel ? (
-              <InfoPanel
-                action={
-                  readyForExecutionItems.length ? (
-                    <Link component={RouterLink} sx={{ fontWeight: 700, textDecoration: 'none' }} to="/ready-for-execution">
-                      View execution desk
-                    </Link>
-                  ) : null
-                }
-                subtitle="Approved and execution-ready requests that may require the next operational step."
-                title="Ready for Execution"
-              >
-                <List disablePadding sx={{ display: 'grid', gap: 1 }}>
-                  {readyForExecutionItems.length ? (
-                    readyForExecutionItems.slice(0, 4).map((request) => (
-                      <ListItemButton
-                        key={request.id}
-                        onClick={() => navigate(`/token-requests/${request.id}`)}
-                        sx={{ alignItems: 'flex-start', px: 1.25, py: 1 }}
-                      >
-                        <Stack spacing={1.2} sx={{ width: '100%' }}>
-                          <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
-                            <Typography sx={{ fontWeight: 700 }} variant="body2">
-                              {truncateMiddle(request.id, 10, 5)}
-                            </Typography>
-                            <StatusChip value={request.status} />
-                          </Stack>
-                          <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
-                            <TypeChip value={request.requestType} />
-                            <Typography color="text.secondary" variant="body2">
-                              {formatAmount(request.amount)}
-                            </Typography>
-                          </Stack>
-                        </Stack>
-                      </ListItemButton>
-                    ))
-                  ) : (
-                    <Typography color="text.secondary" variant="body2">
-                      Nothing is waiting at the execution stage right now.
-                    </Typography>
-                  )}
-                </List>
-              </InfoPanel>
+            {dashboardRole === ROLES.MAKER ? (
+              <>
+                <RequestListPanel
+                  actionLabel="View my requests"
+                  actionTo="/my-requests"
+                  emptyText="No draft requests are open right now."
+                  items={state.drafts}
+                  onSelect={(row) => navigate(`/token-requests/${row.id}`)}
+                  subtitle="Draft requests you can still edit before submission."
+                  title="Draft Requests"
+                />
+                <RequestListPanel
+                  actionLabel="View my requests"
+                  actionTo="/my-requests"
+                  emptyText="No rejected requests need revision right now."
+                  items={state.rejected}
+                  onSelect={(row) => navigate(`/token-requests/${row.id}`)}
+                  subtitle="Rejected requests that need revision before resubmission."
+                  title="Needs Revision"
+                />
+              </>
             ) : null}
 
-            {showWalletReadiness ? <WalletConnectCard /> : null}
+            {dashboardRole === ROLES.CHECKER ? (
+              <>
+                <RequestListPanel
+                  actionLabel="Open approvals"
+                  actionTo="/pending-approvals"
+                  emptyText="Nothing is waiting in the approval queue."
+                  items={overview?.pendingApprovals || []}
+                  onSelect={(row) => navigate(`/token-requests/${row.id}`)}
+                  subtitle="Requests currently waiting for checker action."
+                  title="Approval Queue"
+                />
+                <RequestListPanel
+                  emptyText="No recently reviewed requests are available."
+                  items={state.reviewed}
+                  onSelect={(row) => navigate(`/token-requests/${row.id}`)}
+                  subtitle="Latest requests where you are recorded as the checker."
+                  title="Recently Reviewed"
+                />
+              </>
+            ) : null}
+
+            {dashboardRole === ROLES.EXECUTOR ? (
+              <>
+                <RequestListPanel
+                  actionLabel="View execution desk"
+                  actionTo="/ready-for-execution"
+                  emptyText="No approved requests are waiting for your handoff."
+                  items={state.approvedQueue}
+                  onSelect={(row) => navigate(`/token-requests/${row.id}`)}
+                  subtitle="Approved requests that still need to be marked ready."
+                  title="Approved Queue"
+                />
+                <RequestListPanel
+                  actionLabel="View execution desk"
+                  actionTo="/ready-for-execution"
+                  emptyText="Nothing is waiting in the ready-for-execution queue."
+                  items={state.readyQueue}
+                  onSelect={(row) => navigate(`/token-requests/${row.id}`)}
+                  subtitle="Requests ready for transaction submission and result recording."
+                  title="Ready Queue"
+                />
+                <WalletConnectCard />
+              </>
+            ) : null}
           </Stack>
         </Grid>
       </Grid>
