@@ -1,0 +1,159 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  ADMIN
+  MAKER
+  CHECKER
+  EXECUTOR
+}
+
+enum TokenRequestType {
+  MINT
+  TRANSFER
+  BURN
+}
+
+enum TokenRequestStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  READY_FOR_EXECUTION
+  EXECUTED
+  FAILED
+}
+
+enum ApprovalAction {
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id                   String         @id @default(uuid()) @db.Uuid
+  fullName             String
+  email                String         @unique
+  passwordHash         String
+  isActive             Boolean        @default(true)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  roles                UserRole[]
+  wallets              Wallet[]
+  madeTokenRequests    TokenRequest[] @relation("MakerTokenRequests")
+  checkedTokenRequests TokenRequest[] @relation("CheckerTokenRequests")
+  approvals            RequestApproval[]
+  auditLogs            AuditLog[]     @relation("AuditActorLogs")
+
+  @@map("users")
+}
+
+model Role {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      RoleName  @unique
+  createdAt DateTime  @default(now())
+  userRoles UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  roleId    String   @db.Uuid
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@map("user_roles")
+}
+
+model Wallet {
+  id                         String         @id @default(uuid()) @db.Uuid
+  userId                     String         @db.Uuid
+  walletAddress              String         @unique
+  label                      String?
+  isPrimary                  Boolean        @default(false)
+  isActive                   Boolean        @default(true)
+  createdAt                  DateTime       @default(now())
+  updatedAt                  DateTime       @updatedAt
+  user                       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceTokenRequests        TokenRequest[] @relation("SourceWalletTokenRequests")
+  destinationTokenRequests   TokenRequest[] @relation("DestinationWalletTokenRequests")
+
+  @@index([userId])
+  @@map("wallets")
+}
+
+model TokenRequest {
+  id                  String             @id @default(uuid()) @db.Uuid
+  requestType         TokenRequestType
+  tokenMintAddress    String
+  amount              Decimal            @db.Decimal(30, 10)
+  sourceWalletId      String?            @db.Uuid
+  destinationWalletId String?            @db.Uuid
+  makerUserId         String             @db.Uuid
+  checkerUserId       String?            @db.Uuid
+  status              TokenRequestStatus @default(DRAFT)
+  remarks             String?
+  rejectionReason     String?
+  txSignature         String?
+  explorerUrl         String?
+  executionError      String?
+  approvedAt          DateTime?
+  rejectedAt          DateTime?
+  executedAt          DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  sourceWallet        Wallet?            @relation("SourceWalletTokenRequests", fields: [sourceWalletId], references: [id], onDelete: Restrict)
+  destinationWallet   Wallet?            @relation("DestinationWalletTokenRequests", fields: [destinationWalletId], references: [id], onDelete: Restrict)
+  makerUser           User               @relation("MakerTokenRequests", fields: [makerUserId], references: [id], onDelete: Restrict)
+  checkerUser         User?              @relation("CheckerTokenRequests", fields: [checkerUserId], references: [id], onDelete: Restrict)
+  approvals           RequestApproval[]
+
+  @@index([status])
+  @@index([requestType])
+  @@index([makerUserId])
+  @@index([checkerUserId])
+  @@index([createdAt])
+  @@map("token_requests")
+}
+
+model RequestApproval {
+  id             String         @id @default(uuid()) @db.Uuid
+  tokenRequestId String         @db.Uuid
+  checkerUserId  String         @db.Uuid
+  action         ApprovalAction
+  comment        String?
+  createdAt      DateTime       @default(now())
+  tokenRequest   TokenRequest   @relation(fields: [tokenRequestId], references: [id], onDelete: Cascade)
+  checkerUser    User           @relation(fields: [checkerUserId], references: [id], onDelete: Restrict)
+
+  @@index([tokenRequestId])
+  @@index([checkerUserId])
+  @@map("request_approvals")
+}
+
+model AuditLog {
+  id          String    @id @default(uuid()) @db.Uuid
+  actorUserId String?   @db.Uuid
+  entityType  String
+  entityId    String
+  action      String
+  metadata    Json
+  createdAt   DateTime  @default(now())
+  actorUser   User?     @relation("AuditActorLogs", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
