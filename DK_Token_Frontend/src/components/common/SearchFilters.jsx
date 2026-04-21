@@ -1,12 +1,14 @@
-import { Box, Paper, Stack } from '@mui/material';
+import { Box, Stack } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 
 function SearchFilters({ children, actions }) {
   return (
-    <Paper
+    <Box
       sx={{
         mb: 3.5,
-        p: { xs: 2, md: 3 },
-        backgroundColor: 'background.paper',
+        p: { xs: 1.5, md: 2 },
+        backgroundColor: alpha('#ffffff', 0.55),
+        borderBottom: `1px solid ${alpha('#0f172a', 0.05)}`,
       }}
     >
       <Stack spacing={2.5}>
@@ -28,12 +30,17 @@ function SearchFilters({ children, actions }) {
           {children}
         </Box>
         {actions ? (
-          <Stack alignItems={{ xs: 'stretch', sm: 'center' }} direction={{ xs: 'column', sm: 'row' }} justifyContent="flex-end">
+          <Stack
+            alignItems={{ xs: 'stretch', sm: 'center' }}
+            direction={{ xs: 'column', sm: 'row' }}
+            justifyContent="flex-end"
+            spacing={1}
+          >
             {actions}
           </Stack>
         ) : null}
       </Stack>
-    </Paper>
+    </Box>
   );
 }
 

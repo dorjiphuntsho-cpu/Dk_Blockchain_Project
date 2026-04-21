@@ -54,8 +54,8 @@ function StatusChip({ value, kind = 'status' }) {
       sx={{
         backgroundColor: styles.bg,
         color: styles.color,
-        fontWeight: 700,
-        minWidth: kind === 'status' ? 154 : 98,
+        fontWeight: 600,
+        minWidth: kind === 'status' ? 144 : 92,
         justifyContent: 'flex-start',
         '& .MuiChip-icon': {
           color: styles.color,

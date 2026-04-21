@@ -4,13 +4,13 @@ const theme = createTheme({
   palette: {
     mode: 'light',
     primary: {
-      main: '#2563eb',
-      dark: '#1d4ed8',
-      light: '#dbeafe',
+      main: '#2457d6',
+      dark: '#1d46ab',
+      light: '#edf3ff',
     },
     secondary: {
       main: '#0f766e',
-      light: '#ccfbf1',
+      light: '#e8faf7',
     },
     success: {
       main: '#15803d',
@@ -30,7 +30,7 @@ const theme = createTheme({
       light: '#dbeafe',
     },
     background: {
-      default: '#f4f7fb',
+      default: '#f7f8fb',
       paper: '#ffffff',
     },
     text: {
@@ -90,15 +90,15 @@ const theme = createTheme({
     },
   },
   shape: {
-    borderRadius: 14,
+    borderRadius: 12,
   },
   components: {
     MuiPaper: {
       styleOverrides: {
         root: {
-          borderRadius: 14,
-          boxShadow: '0 18px 42px rgba(15, 23, 42, 0.06)',
-          border: `1px solid ${alpha('#0f172a', 0.05)}`,
+          borderRadius: 12,
+          boxShadow: '0 6px 20px rgba(15, 23, 42, 0.03)',
+          border: 'none',
           backgroundImage: 'none',
         },
       },
@@ -106,16 +106,16 @@ const theme = createTheme({
     MuiCard: {
       styleOverrides: {
         root: {
-          borderRadius: 18,
-          boxShadow: '0 18px 42px rgba(15, 23, 42, 0.06)',
-          border: `1px solid ${alpha('#0f172a', 0.05)}`,
+          borderRadius: 12,
+          boxShadow: '0 6px 20px rgba(15, 23, 42, 0.03)',
+          border: 'none',
         },
       },
     },
     MuiAppBar: {
       styleOverrides: {
         root: {
-          backgroundColor: alpha('#ffffff', 0.92),
+          backgroundColor: alpha('#ffffff', 0.88),
           color: '#111827',
           boxShadow: 'none',
           backgroundImage: 'none',
@@ -128,30 +128,33 @@ const theme = createTheme({
       },
       styleOverrides: {
         root: {
-          borderRadius: 12,
-          minHeight: 40,
-          paddingInline: 16,
+          borderRadius: 10,
+          minHeight: 38,
+          paddingInline: 14,
           transition: 'transform 0.16s ease, background-color 0.16s ease, border-color 0.16s ease',
           '&:hover': {
             transform: 'translateY(-1px)',
           },
         },
         contained: {
-          boxShadow: '0 10px 20px rgba(37, 99, 235, 0.12)',
+          boxShadow: '0 8px 18px rgba(36, 87, 214, 0.12)',
+        },
+        text: {
+          paddingInline: 8,
         },
         outlined: {
           borderColor: alpha('#0f172a', 0.1),
-          backgroundColor: '#ffffff',
+          backgroundColor: alpha('#ffffff', 0.92),
         },
       },
     },
     MuiIconButton: {
       styleOverrides: {
         root: {
-          borderRadius: 12,
+          borderRadius: 10,
           transition: 'background-color 0.16s ease, transform 0.16s ease',
           '&:hover': {
-            backgroundColor: alpha('#2563eb', 0.08),
+            backgroundColor: alpha('#2457d6', 0.06),
             transform: 'translateY(-1px)',
           },
         },
@@ -160,11 +163,14 @@ const theme = createTheme({
     MuiOutlinedInput: {
       styleOverrides: {
         root: {
-          borderRadius: 12,
-          backgroundColor: '#ffffff',
+          borderRadius: 10,
+          backgroundColor: alpha('#ffffff', 0.92),
           transition: 'border-color 0.16s ease, box-shadow 0.16s ease',
           '&:hover .MuiOutlinedInput-notchedOutline': {
-            borderColor: alpha('#2563eb', 0.3),
+            borderColor: alpha('#2457d6', 0.26),
+          },
+          '& .MuiOutlinedInput-notchedOutline': {
+            borderColor: alpha('#0f172a', 0.08),
           },
         },
       },
@@ -184,8 +190,8 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           borderRadius: 999,
-          fontWeight: 700,
-          height: 30,
+          fontWeight: 600,
+          height: 28,
           letterSpacing: '0.01em',
         },
         filledDefault: {
@@ -198,13 +204,14 @@ const theme = createTheme({
       styleOverrides: {
         paper: {
           borderRadius: 0,
+          backgroundColor: '#fbfcfe',
         },
       },
     },
     MuiListItemButton: {
       styleOverrides: {
         root: {
-          borderRadius: 12,
+          borderRadius: 10,
           transition: 'background-color 0.16s ease, transform 0.16s ease',
           '&:hover': {
             transform: 'translateX(1px)',
@@ -220,7 +227,7 @@ const theme = createTheme({
           marginBlock: 2,
           minHeight: 40,
           '&:hover': {
-            backgroundColor: alpha('#2563eb', 0.08),
+            backgroundColor: alpha('#2457d6', 0.06),
           },
         },
       },
@@ -230,16 +237,16 @@ const theme = createTheme({
         head: {
           fontWeight: 700,
           color: '#475467',
-          backgroundColor: alpha('#0f172a', 0.02),
+          backgroundColor: alpha('#ffffff', 0.96),
           fontSize: '0.78rem',
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
         },
         root: {
-          borderBottom: `1px solid ${alpha('#0f172a', 0.06)}`,
-          paddingTop: 14,
-          paddingBottom: 14,
-          fontSize: '0.9rem',
+          borderBottom: `1px solid ${alpha('#0f172a', 0.05)}`,
+          paddingTop: 11,
+          paddingBottom: 11,
+          fontSize: '0.88rem',
         },
       },
     },
@@ -253,8 +260,8 @@ const theme = createTheme({
     MuiTablePagination: {
       styleOverrides: {
         toolbar: {
-          paddingInline: 20,
-          minHeight: 60,
+          paddingInline: 16,
+          minHeight: 56,
         },
       },
     },

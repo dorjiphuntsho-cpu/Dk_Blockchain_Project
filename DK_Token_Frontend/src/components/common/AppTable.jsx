@@ -38,9 +38,19 @@ function AppTable({
   }
 
   return (
-    <Paper sx={{ overflow: 'hidden' }}>
+    <Paper
+      sx={{
+        overflow: 'hidden',
+        backgroundColor: alpha('#ffffff', 0.92),
+      }}
+    >
       {loading ? <LinearProgress /> : null}
-      <TableContainer sx={{ maxHeight: pagination ? undefined : 640, overflowX: 'auto' }}>
+      <TableContainer
+        sx={{
+          maxHeight: pagination ? undefined : 640,
+          overflowX: 'auto',
+        }}
+      >
         <Table stickyHeader sx={{ minWidth }}>
           <TableHead>
             <TableRow>
@@ -72,7 +82,7 @@ function AppTable({
                   sx={{
                     cursor: onRowClick ? 'pointer' : 'default',
                     '&:hover': {
-                      backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.025),
+                      backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.03),
                     },
                   }}
                 >
@@ -81,9 +91,16 @@ function AppTable({
                       key={column.key}
                       align={column.align || 'left'}
                       onClick={column.disableRowClick ? (event) => event.stopPropagation() : undefined}
-                      sx={{ verticalAlign: 'top', ...column.sx }}
+                      sx={{ verticalAlign: 'middle', ...column.sx }}
                     >
-                      <Box sx={{ minHeight: 24 }}>
+                      <Box
+                        sx={{
+                          minHeight: 22,
+                          display: 'flex',
+                          alignItems: column.align === 'right' ? 'flex-end' : 'center',
+                          justifyContent: column.align === 'right' ? 'flex-end' : 'flex-start',
+                        }}
+                      >
                         {column.render ? column.render(row) : row[column.key]}
                       </Box>
                     </TableCell>
@@ -103,6 +120,10 @@ function AppTable({
           page={Math.max((pagination.page || 1) - 1, 0)}
           rowsPerPage={pagination.limit || 10}
           rowsPerPageOptions={[5, 10, 25, 50]}
+          sx={{
+            borderTop: `1px solid ${alpha('#0f172a', 0.05)}`,
+            backgroundColor: alpha('#ffffff', 0.82),
+          }}
         />
       ) : null}
     </Paper>

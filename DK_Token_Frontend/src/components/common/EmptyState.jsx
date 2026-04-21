@@ -8,6 +8,7 @@ function EmptyState({ title, description, actionLabel, onAction }) {
         p: { xs: 4, md: 5 },
         textAlign: 'center',
         backgroundColor: 'background.paper',
+        boxShadow: 'none',
       }}
     >
       <Stack alignItems="center" spacing={1.5}>

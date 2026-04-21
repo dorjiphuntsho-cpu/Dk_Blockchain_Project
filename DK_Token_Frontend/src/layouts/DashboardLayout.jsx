@@ -99,32 +99,35 @@ function DashboardLayout() {
   const drawerContent = (
     <Stack sx={{ height: '100%' }}>
       <Box sx={{ p: 3 }}>
-        <Stack direction="row" spacing={1.5}>
+        <Stack
+          alignItems="center"
+          direction="row"
+          justifyContent={(!sidebarCollapsed || !isDesktop) ? 'center' : 'flex-start'}
+          spacing={1.5}
+        >
           <Box
             sx={{
               alignItems: 'center',
-              backgroundColor: 'primary.main',
-              color: 'primary.contrastText',
+              backgroundColor: 'primary.light',
+              color: 'primary.main',
               display: 'inline-flex',
-              height: 42,
+              height: 38,
               justifyContent: 'center',
-              minWidth: 42,
+              minWidth: 38,
             }}
           >
             <DashboardOutlinedIcon fontSize="small" />
           </Box>
           {!sidebarCollapsed || !isDesktop ? (
-            <Stack spacing={0.5}>
+            <Stack spacing={0.5} sx={{ textAlign: 'center' }}>
               <Typography variant="h6">Token Admin Portal</Typography>
-              <Typography color="text.secondary" variant="body2">
-                Off-chain operations console
-              </Typography>
+          
             </Stack>
           ) : null}
         </Stack>
       </Box>
       <Divider />
-      <Box sx={{ flex: 1, overflowY: 'auto', px: 1.5, py: 2 }}>
+      <Box sx={{ flex: 1, overflowY: 'auto', px: 1.25, py: 1.75 }}>
         {Object.entries(navigationGroups).map(([section, items]) => (
           <Box key={section} sx={{ mb: 2.5 }}>
             {!sidebarCollapsed || !isDesktop ? (
@@ -149,17 +152,20 @@ function DashboardLayout() {
         ))}
       </Box>
       <Divider />
-      <Box sx={{ mt: 'auto', p: 2.5 }}>
+      <Box sx={{ mt: 'auto', p: 2.25 }}>
         {!sidebarCollapsed || !isDesktop ? (
-          <Stack spacing={1.25}>
-            <Stack direction="row" spacing={1}>
-              {(user?.roles || []).slice(0, 2).map((role) => (
+          <Stack spacing={1.25} sx={{ backgroundColor: 'background.default', p: 1.5 }}>
+            <Stack direction="row" spacing={0.75}>
+              {(user?.roles || []).slice(0, 1).map((role) => (
                 <Chip key={role} label={role} size="small" sx={{ backgroundColor: 'primary.light', color: 'primary.dark' }} />
               ))}
             </Stack>
-            <Typography color="text.secondary" variant="body2">
-              Signed in as {user?.fullName}
+            <Typography sx={{ fontWeight: 600 }} variant="body2">
+              {user?.fullName}
             </Typography>
+            {/* <Typography color="text.secondary" variant="caption">
+              Off-chain operations workspace
+            </Typography> */}
           </Stack>
         ) : (
           <Stack alignItems="center">
@@ -226,7 +232,7 @@ function DashboardLayout() {
             borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
           }}
         >
-          <Toolbar sx={{ gap: 2, minHeight: 72 }}>
+          <Toolbar sx={{ gap: 2, minHeight: 68 }}>
             <IconButton onClick={isDesktop ? toggleSidebar : () => setMobileSidebarOpen(true)}>
               <MenuIcon />
             </IconButton>
@@ -234,12 +240,8 @@ function DashboardLayout() {
               <Typography color="text.secondary" variant="caption">
                 {currentSection} / {currentTitle}
               </Typography>
-              <Typography noWrap variant="subtitle1">
-                Solana testnet token management
-              </Typography>
             </Stack>
             <Stack alignItems="center" direction="row" spacing={1}>
-              <Chip label="Testnet Ready" size="small" sx={{ display: { xs: 'none', md: 'inline-flex' } }} />
               <Chip
                 label={user?.roles?.[0] || 'USER'}
                 size="small"

@@ -37,10 +37,10 @@ function LoginPage() {
   return (
     <Stack spacing={4}>
       <Box>
-        <Typography variant="h4">Token Management Admin Portal</Typography>
-        <Typography color="text.secondary" sx={{ mt: 1 }}>
+        <Typography variant="h4"> Lizard Token Portal</Typography>
+        {/* <Typography color="text.secondary" sx={{ mt: 1 }}>
           Sign in to manage off-chain token workflows, approvals, and execution readiness.
-        </Typography>
+        </Typography> */}
       </Box>
       <Alert severity="info">
         Mock credentials: `admin@example.com`, `maker@example.com`, `checker@example.com`, `executor@example.com`

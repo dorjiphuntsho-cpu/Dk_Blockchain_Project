@@ -11,7 +11,7 @@ function WalletConnectCard() {
       title="Solana Wallet Readiness"
     >
       <Stack spacing={2}>
-        <Alert severity="info">
+        <Alert severity="info" sx={{ backgroundColor: 'primary.light', color: 'primary.dark', border: 'none' }}>
           TODO: plug in Solana wallet adapter and browser extension signing flow here.
         </Alert>
         <Stack

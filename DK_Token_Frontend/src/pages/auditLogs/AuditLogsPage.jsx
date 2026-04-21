@@ -1,4 +1,4 @@
-import { Button, MenuItem, Stack, TextField, Typography } from '@mui/material';
+import { Button, Chip, MenuItem, Stack, TextField, Typography } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 
 import AppDrawer from '../../components/common/AppDrawer';
@@ -11,6 +11,7 @@ import usePagination from '../../hooks/usePagination';
 import { auditLogsApi } from '../../modules/auditLogs/auditLogs.api';
 import { AUDIT_ACTIONS, ENTITY_TYPES } from '../../utils/constants';
 import { formatDateTime } from '../../utils/date';
+import { truncateMiddle } from '../../utils/format';
 
 function AuditLogsPage() {
   const { setPage, setLimit, paginationQuery } = usePagination();
@@ -41,15 +42,27 @@ function AuditLogsPage() {
 
   const columns = useMemo(() => [
     { key: 'actorUser', label: 'Actor', render: (row) => row.actorUser?.fullName || 'System' },
-    { key: 'entityType', label: 'Entity Type' },
-    { key: 'entityId', label: 'Entity ID' },
-    { key: 'action', label: 'Action' },
-    { key: 'createdAt', label: 'Created', render: (row) => formatDateTime(row.createdAt) },
+    {
+      key: 'entityType',
+      label: 'Entity Type',
+      render: (row) => <Chip label={row.entityType} sx={{ backgroundColor: 'grey.100', color: 'text.secondary' }} />,
+    },
+    { key: 'entityId', label: 'Entity ID', render: (row) => truncateMiddle(row.entityId, 10, 6) },
+    { key: 'action', label: 'Action', render: (row) => <Chip label={row.action} sx={{ backgroundColor: 'primary.light', color: 'primary.dark' }} /> },
+    {
+      key: 'createdAt',
+      label: 'Created',
+      render: (row) => (
+        <Typography color="text.secondary" variant="body2">
+          {formatDateTime(row.createdAt)}
+        </Typography>
+      ),
+    },
     {
       key: 'metadata',
       label: 'Metadata Preview',
       render: (row) => (
-        <Typography color="text.secondary" noWrap sx={{ maxWidth: 260 }} variant="body2">
+        <Typography color="text.secondary" noWrap sx={{ maxWidth: 240 }} variant="body2">
           {JSON.stringify(row.metadata)}
         </Typography>
       ),
@@ -57,7 +70,9 @@ function AuditLogsPage() {
     {
       key: 'actions',
       label: 'Actions',
-      render: (row) => <Button onClick={() => setSelectedLog(row)} size="small">View</Button>,
+      align: 'right',
+      disableRowClick: true,
+      render: (row) => <Button onClick={() => setSelectedLog(row)} size="small" variant="text">View</Button>,
     },
   ], []);
 
@@ -97,6 +112,7 @@ function AuditLogsPage() {
         columns={columns}
         error={error}
         loading={loading}
+        onRowClick={(row) => setSelectedLog(row)}
         onPageChange={setPage}
         onRowsPerPageChange={setLimit}
         onRetry={() => window.location.reload()}

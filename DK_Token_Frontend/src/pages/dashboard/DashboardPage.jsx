@@ -1,4 +1,5 @@
 import {
+  Box,
   Grid,
   Link,
   List,
@@ -21,6 +22,7 @@ import DashboardCard from '../../components/common/DashboardCard';
 import ErrorState from '../../components/common/ErrorState';
 import InfoPanel from '../../components/common/InfoPanel';
 import PageHeader from '../../components/common/PageHeader';
+import PageSection from '../../components/common/PageSection';
 import StatusChip from '../../components/common/StatusChip';
 import TypeChip from '../../components/common/TypeChip';
 import WalletConnectCard from '../../components/wallet/WalletConnectCard';
@@ -31,10 +33,10 @@ import { formatDateTime } from '../../utils/date';
 import { formatAmount, truncateMiddle } from '../../utils/format';
 
 const summaryConfig = [
-  { key: 'totalRequests', label: 'Total Requests', icon: <PlaylistAddCheckOutlinedIcon fontSize="small" />, accent: 'primary.main' },
+  // { key: 'totalRequests', label: 'Total Requests', icon: <PlaylistAddCheckOutlinedIcon fontSize="small" />, accent: 'primary.main' },
   { key: 'pendingApprovals', label: 'Pending Approvals', icon: <PendingActionsOutlinedIcon fontSize="small" />, accent: 'warning.main' },
   { key: 'approvedRequests', label: 'Approved', icon: <ApprovalOutlinedIcon fontSize="small" />, accent: 'primary.main' },
-  { key: 'readyForExecution', label: 'Ready for Execution', icon: <FactCheckOutlinedIcon fontSize="small" />, accent: 'secondary.main' },
+  // { key: 'readyForExecution', label: 'Ready for Execution', icon: <FactCheckOutlinedIcon fontSize="small" />, accent: 'secondary.main' },
   { key: 'executedRequests', label: 'Executed', icon: <CheckCircleOutlineOutlinedIcon fontSize="small" />, accent: 'success.main' },
   { key: 'failedRequests', label: 'Failed', icon: <ReportGmailerrorredOutlinedIcon fontSize="small" />, accent: 'error.main' },
 ];
@@ -97,8 +99,8 @@ function DashboardPage() {
   const roleCopy = useMemo(() => {
     if (user?.roles.includes(ROLES.ADMIN)) {
       return {
-        eyebrow: 'Overview',
-        subtitle: 'Monitor approvals, execution readiness, and administrative activity across the full off-chain workflow.',
+        // eyebrow: 'Overview',
+        // subtitle: 'Monitor approvals, execution readiness, and administrative activity across the full off-chain workflow.',
         recentTitle: 'Recent Token Requests',
       };
     }
@@ -150,6 +152,28 @@ function DashboardPage() {
     ).slice(0, 5);
   }, [data]);
 
+  const summaryCards = useMemo(() => {
+    const priority = user?.roles.includes(ROLES.MAKER)
+      ? ['totalRequests', 'pendingApprovals', 'approvedRequests', 'readyForExecution', 'executedRequests', 'failedRequests']
+      : user?.roles.includes(ROLES.CHECKER)
+        ? ['pendingApprovals', 'approvedRequests', 'totalRequests', 'readyForExecution', 'executedRequests', 'failedRequests']
+        : user?.roles.includes(ROLES.EXECUTOR)
+          ? ['readyForExecution', 'approvedRequests', 'executedRequests', 'failedRequests', 'totalRequests', 'pendingApprovals']
+          : ['totalRequests', 'pendingApprovals', 'readyForExecution', 'approvedRequests', 'executedRequests', 'failedRequests'];
+
+    return priority
+      .map((key) => summaryConfig.find((item) => item.key === key))
+      .filter(Boolean);
+  }, [user]);
+
+  const showWalletReadiness = user?.roles.includes(ROLES.ADMIN) || user?.roles.includes(ROLES.EXECUTOR);
+  const showPendingPanel = user?.roles.includes(ROLES.ADMIN) || user?.roles.includes(ROLES.CHECKER) || user?.roles.includes(ROLES.MAKER);
+  const pendingPanelTitle = user?.roles.includes(ROLES.MAKER) ? 'Awaiting Review' : 'Pending Approvals';
+  const pendingPanelSubtitle = user?.roles.includes(ROLES.MAKER)
+    ? 'Requests you submitted that still need checker action.'
+    : 'Requests still waiting for a checker decision.';
+  const showReadyPanel = user?.roles.includes(ROLES.ADMIN) || user?.roles.includes(ROLES.EXECUTOR) || readyForExecutionItems.length > 0;
+
   if (error) {
     return <ErrorState description={error} onAction={() => window.location.reload()} />;
   }
@@ -166,23 +190,35 @@ function DashboardPage() {
         subtitle={roleCopy.subtitle}
       />
 
-      <Grid container spacing={2.5}>
-        {summaryConfig.map((item) => (
-          <Grid key={item.key} size={{ xs: 12, sm: 6, md: 4, xl: 2 }}>
+      <PageSection>
+        <Box
+          sx={{
+            display: 'grid',
+            gap: 1.75,
+            gridTemplateColumns: {
+              xs: '1fr',
+              sm: 'repeat(2, minmax(0, 1fr))',
+              lg: 'repeat(3, minmax(0, 1fr))',
+              xl: 'repeat(4, minmax(0, 1fr))',
+            },
+          }}
+        >
+          {summaryCards.map((item) => (
             <DashboardCard
+              key={item.key}
               accent={item.accent}
               icon={item.icon}
               label={item.label}
               subtitle={summarySubtext[item.key]}
               value={data?.summary?.[item.key] ?? 0}
             />
-          </Grid>
-        ))}
-      </Grid>
+          ))}
+        </Box>
+      </PageSection>
 
-      <Grid container spacing={3}>
+      <Grid container spacing={3.25}>
         <Grid size={{ xs: 12, lg: 8 }}>
-          <InfoPanel
+          <PageSection
             subtitle="Recent activity across the token request lifecycle."
             title={roleCopy.recentTitle}
           >
@@ -238,98 +274,102 @@ function DashboardPage() {
               pagination={null}
               rows={data?.recentRequests || []}
             />
-          </InfoPanel>
+          </PageSection>
         </Grid>
 
         <Grid size={{ xs: 12, lg: 4 }}>
-          <Stack spacing={3}>
-            <InfoPanel
-              action={
-                data?.pendingApprovals?.length ? (
-                  <Link component={RouterLink} sx={{ fontWeight: 700, textDecoration: 'none' }} to="/pending-approvals">
-                    View queue
-                  </Link>
-                ) : null
-              }
-              subtitle="Requests still waiting for a checker decision."
-              title="Pending Approvals"
-            >
-              <List disablePadding sx={{ display: 'grid', gap: 1.25 }}>
-                {(data?.pendingApprovals || []).length ? (
-                  (data?.pendingApprovals || []).map((request) => (
-                    <ListItemButton
-                      key={request.id}
-                      onClick={() => navigate(`/token-requests/${request.id}`)}
-                      sx={{ alignItems: 'flex-start', px: 1.5, py: 1.25 }}
-                    >
-                      <Stack spacing={1.2} sx={{ width: '100%' }}>
-                        <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
-                          <Typography sx={{ fontWeight: 700 }} variant="body2">
-                            {truncateMiddle(request.id, 10, 5)}
-                          </Typography>
-                          <StatusChip value={request.status} />
+          <Stack spacing={2.25}>
+            {showPendingPanel ? (
+              <InfoPanel
+                action={
+                  data?.pendingApprovals?.length ? (
+                    <Link component={RouterLink} sx={{ fontWeight: 700, textDecoration: 'none' }} to={user?.roles.includes(ROLES.MAKER) ? '/my-requests' : '/pending-approvals'}>
+                      View queue
+                    </Link>
+                  ) : null
+                }
+                subtitle={pendingPanelSubtitle}
+                title={pendingPanelTitle}
+              >
+                <List disablePadding sx={{ display: 'grid', gap: 1 }}>
+                  {(data?.pendingApprovals || []).length ? (
+                    (data?.pendingApprovals || []).slice(0, 4).map((request) => (
+                      <ListItemButton
+                        key={request.id}
+                        onClick={() => navigate(`/token-requests/${request.id}`)}
+                        sx={{ alignItems: 'flex-start', px: 1.25, py: 1 }}
+                      >
+                        <Stack spacing={1.05} sx={{ width: '100%' }}>
+                          <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
+                            <Typography sx={{ fontWeight: 700 }} variant="body2">
+                              {truncateMiddle(request.id, 10, 5)}
+                            </Typography>
+                            <StatusChip value={request.status} />
+                          </Stack>
+                          <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
+                            <TypeChip value={request.requestType} />
+                            <Typography color="text.secondary" variant="body2">
+                              {formatAmount(request.amount)}
+                            </Typography>
+                          </Stack>
                         </Stack>
-                        <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
-                          <TypeChip value={request.requestType} />
-                          <Typography sx={{ fontWeight: 700 }} variant="body2">
-                            {formatAmount(request.amount)}
-                          </Typography>
-                        </Stack>
-                      </Stack>
-                    </ListItemButton>
-                  ))
-                ) : (
-                  <Typography color="text.secondary" variant="body2">
-                    No requests currently need approval.
-                  </Typography>
-                )}
-              </List>
-            </InfoPanel>
+                      </ListItemButton>
+                    ))
+                  ) : (
+                    <Typography color="text.secondary" variant="body2">
+                      No requests currently need approval.
+                    </Typography>
+                  )}
+                </List>
+              </InfoPanel>
+            ) : null}
 
-            <InfoPanel
-              action={
-                readyForExecutionItems.length ? (
-                  <Link component={RouterLink} sx={{ fontWeight: 700, textDecoration: 'none' }} to="/ready-for-execution">
-                    View execution desk
-                  </Link>
-                ) : null
-              }
-              subtitle="Approved and execution-ready requests that may require the next operational step."
-              title="Ready for Execution"
-            >
-              <List disablePadding sx={{ display: 'grid', gap: 1.25 }}>
-                {readyForExecutionItems.length ? (
-                  readyForExecutionItems.map((request) => (
-                    <ListItemButton
-                      key={request.id}
-                      onClick={() => navigate(`/token-requests/${request.id}`)}
-                      sx={{ alignItems: 'flex-start', px: 1.5, py: 1.25 }}
-                    >
-                      <Stack spacing={1.2} sx={{ width: '100%' }}>
-                        <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
-                          <Typography sx={{ fontWeight: 700 }} variant="body2">
-                            {truncateMiddle(request.id, 10, 5)}
-                          </Typography>
-                          <StatusChip value={request.status} />
+            {showReadyPanel ? (
+              <InfoPanel
+                action={
+                  readyForExecutionItems.length ? (
+                    <Link component={RouterLink} sx={{ fontWeight: 700, textDecoration: 'none' }} to="/ready-for-execution">
+                      View execution desk
+                    </Link>
+                  ) : null
+                }
+                subtitle="Approved and execution-ready requests that may require the next operational step."
+                title="Ready for Execution"
+              >
+                <List disablePadding sx={{ display: 'grid', gap: 1 }}>
+                  {readyForExecutionItems.length ? (
+                    readyForExecutionItems.slice(0, 4).map((request) => (
+                      <ListItemButton
+                        key={request.id}
+                        onClick={() => navigate(`/token-requests/${request.id}`)}
+                        sx={{ alignItems: 'flex-start', px: 1.25, py: 1 }}
+                      >
+                        <Stack spacing={1.2} sx={{ width: '100%' }}>
+                          <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
+                            <Typography sx={{ fontWeight: 700 }} variant="body2">
+                              {truncateMiddle(request.id, 10, 5)}
+                            </Typography>
+                            <StatusChip value={request.status} />
+                          </Stack>
+                          <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
+                            <TypeChip value={request.requestType} />
+                            <Typography color="text.secondary" variant="body2">
+                              {formatAmount(request.amount)}
+                            </Typography>
+                          </Stack>
                         </Stack>
-                        <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
-                          <TypeChip value={request.requestType} />
-                          <Typography color="text.secondary" variant="body2">
-                            {formatAmount(request.amount)}
-                          </Typography>
-                        </Stack>
-                      </Stack>
-                    </ListItemButton>
-                  ))
-                ) : (
-                  <Typography color="text.secondary" variant="body2">
-                    Nothing is waiting at the execution stage right now.
-                  </Typography>
-                )}
-              </List>
-            </InfoPanel>
+                      </ListItemButton>
+                    ))
+                  ) : (
+                    <Typography color="text.secondary" variant="body2">
+                      Nothing is waiting at the execution stage right now.
+                    </Typography>
+                  )}
+                </List>
+              </InfoPanel>
+            ) : null}
 
-            <WalletConnectCard />
+            {showWalletReadiness ? <WalletConnectCard /> : null}
           </Stack>
         </Grid>
       </Grid>

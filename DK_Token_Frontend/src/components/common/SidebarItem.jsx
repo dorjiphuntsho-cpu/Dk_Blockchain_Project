@@ -1,4 +1,5 @@
 import { Box, ListItemButton, ListItemIcon, ListItemText, Tooltip } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import { NavLink } from 'react-router-dom';
 
 function SidebarItem({ collapsed, icon, label, path, selected, onClick }) {
@@ -8,12 +9,12 @@ function SidebarItem({ collapsed, icon, label, path, selected, onClick }) {
       onClick={onClick}
       selected={selected}
       sx={(theme) => ({
-        minHeight: 46,
-        px: collapsed ? 1.5 : 1.75,
-        gap: 1.5,
+        minHeight: 42,
+        px: collapsed ? 1.25 : 1.5,
+        gap: 1.25,
         position: 'relative',
         '&.Mui-selected': {
-          backgroundColor: theme.palette.primary.light,
+          backgroundColor: alpha(theme.palette.primary.main, 0.08),
           color: theme.palette.primary.dark,
           '& .MuiListItemIcon-root': {
             color: theme.palette.primary.main,
@@ -22,9 +23,9 @@ function SidebarItem({ collapsed, icon, label, path, selected, onClick }) {
             content: '""',
             position: 'absolute',
             left: 0,
-            top: 10,
-            bottom: 10,
-            width: 3,
+            top: 8,
+            bottom: 8,
+            width: 2,
             backgroundColor: theme.palette.primary.main,
           },
         },
@@ -44,19 +45,8 @@ function SidebarItem({ collapsed, icon, label, path, selected, onClick }) {
         <ListItemText
           primary={label}
           primaryTypographyProps={{
-            fontSize: '0.92rem',
-            fontWeight: selected ? 700 : 600,
-          }}
-        />
-      ) : null}
-      {selected ? (
-        <Box
-          sx={{
-            ml: 'auto',
-            width: 7,
-            height: 7,
-            borderRadius: 999,
-            backgroundColor: 'primary.main',
+            fontSize: '0.9rem',
+            fontWeight: selected ? 700 : 500,
           }}
         />
       ) : null}
