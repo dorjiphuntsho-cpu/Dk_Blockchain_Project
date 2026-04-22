@@ -49,6 +49,7 @@ model User {
   checkedTokenRequests TokenRequest[] @relation("CheckerTokenRequests")
   approvals            RequestApproval[]
   auditLogs            AuditLog[]     @relation("AuditActorLogs")
+  createdManagedTokens ManagedToken[] @relation("ManagedTokenCreator")
 
   @@map("users")
 }
@@ -156,4 +157,23 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model ManagedToken {
+  id                String   @id @default(uuid()) @db.Uuid
+  mintAddress       String   @unique
+  decimals          Int
+  mintAuthority     String?
+  freezeAuthority   String?
+  tokenAuthority    String
+  createdTxSignature String?
+  explorerUrl       String?
+  creatorUserId     String?  @db.Uuid
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  creatorUser       User?    @relation("ManagedTokenCreator", fields: [creatorUserId], references: [id], onDelete: SetNull)
+
+  @@index([creatorUserId])
+  @@index([createdAt])
+  @@map("managed_tokens")
 }
