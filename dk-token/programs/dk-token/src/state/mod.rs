@@ -1,5 +1,5 @@
 pub mod config;
-pub mod mint_request;
+pub mod token_request;
 
 pub use config::Config;
-pub use mint_request::{MintRequest, RequestStatus};
+pub use token_request::{RequestStatus, RequestType, TokenRequest};

@@ -1,12 +1,15 @@
 use anchor_lang::prelude::*;
 use crate::error::ErrorCode;
 use crate::state::config::Config;
-use crate::state::mint_request::MintRequest;
+use crate::state::token_request::{RequestStatus, TokenRequest};
 
 #[derive(Accounts)]
 pub struct RejectRequest<'info> {
-    #[account(mut)]
-    pub request: Account<'info, MintRequest>,
+    #[account(
+        mut,
+        constraint = request.config == config.key() @ ErrorCode::InvalidConfig
+    )]
+    pub request: Account<'info, TokenRequest>,
 
     pub config: Account<'info, Config>,
 
@@ -19,21 +22,18 @@ pub fn handler(ctx: Context<RejectRequest>) -> Result<()> {
     let checker = ctx.accounts.checker.key();
 
     require!(
-        request.status == crate::state::mint_request::RequestStatus::Pending,
+        request.status == RequestStatus::Pending,
         ErrorCode::AlreadyProcessed
     );
 
     require!(
-        request.config == ctx.accounts.config.key(),
-        ErrorCode::InvalidConfig
-    );
-
-    require!(
-        config.checkers.contains(&checker),
+        config.has_checker(&checker),
         ErrorCode::UnauthorizedChecker
     );
 
-    request.status = crate::state::mint_request::RequestStatus::Rejected;
+    require!(checker != request.maker, ErrorCode::SelfApprovalNotAllowed);
+
+    request.status = RequestStatus::Rejected;
     request.checker = Some(checker);
 
     Ok(())

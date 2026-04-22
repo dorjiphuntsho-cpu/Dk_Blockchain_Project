@@ -1,5 +1,5 @@
 [toolchain]
-package_manager = "yarn"
+package_manager = "npm"
 
 [features]
 resolution = true
@@ -7,14 +7,14 @@ skip-lint = false
 
 
 [programs.localnet]
-dk_token = "8Kxsa814MpA7dmC5HNXy53TuQ4PWyi2JhqcUhAGYczY5"
+dk_token = "49fwAJRLMtbCLLqZDZTBKZtwDaBTgm1oA1FWnidYDQJp"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
 cluster = "localnet"
-wallet = "~/.config/solana/id.json"
+wallet = "/home/tandin/.config/solana/admin.json"
 
 [scripts]
-test = "anchor test"
+test = "npx ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"

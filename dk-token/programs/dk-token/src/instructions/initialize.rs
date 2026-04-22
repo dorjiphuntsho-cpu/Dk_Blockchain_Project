@@ -6,7 +6,7 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = admin,
-        space = 8 + 32 + (4 + 32 * 10)
+        space = 8 + Config::LEN
     )]
     pub config: Account<'info, Config>,
 
