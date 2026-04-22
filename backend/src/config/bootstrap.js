@@ -4,6 +4,7 @@ const path = require('path');
 
 const env = require('./env');
 const logger = require('../utils/logger');
+const solanaService = require('../services/solana.service');
 
 function getPrismaBinaryPath() {
   const binaryName = process.platform === 'win32' ? 'prisma.cmd' : 'prisma';
@@ -61,6 +62,13 @@ async function bootstrapApplication() {
   const prisma = require('./prisma');
   await prisma.$connect();
   logger.info('Database connection established.');
+
+  if (env.SOLANA_AUTO_BOOTSTRAP) {
+    const solanaBootstrap = await solanaService.bootstrapOnChainConfig();
+    logger.info(
+      `Solana config ready at ${solanaBootstrap.configAddress}. Checker ${solanaBootstrap.checkerAddress} is configured.`,
+    );
+  }
 }
 
 module.exports = {

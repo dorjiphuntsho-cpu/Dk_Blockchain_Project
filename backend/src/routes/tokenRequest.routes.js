@@ -49,6 +49,12 @@ router.post(
   asyncHandler(tokenRequestController.markReadyForExecution),
 );
 router.post(
+  '/:id/execute',
+  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.EXECUTOR),
+  validate(tokenRequestIdParamSchema),
+  asyncHandler(tokenRequestController.executeReadyRequest),
+);
+router.post(
   '/:id/record-execution',
   authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.EXECUTOR),
   validate(recordExecutionSchema),

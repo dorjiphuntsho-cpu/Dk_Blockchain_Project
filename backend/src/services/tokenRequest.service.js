@@ -433,6 +433,119 @@ async function recordExecution(id, payload, actorUserId) {
   return tokenRequest;
 }
 
+async function executeReadyRequest(id, actorUserId) {
+  const existingRequest = await getTokenRequestOrThrow(id);
+
+  if (existingRequest.status !== TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION) {
+    throw new ApiError(400, 'Only READY_FOR_EXECUTION requests can be executed');
+  }
+
+  let executionResult;
+  try {
+    executionResult = await blockchainService.executeReadyRequest(id);
+  } catch (error) {
+    await prisma.$transaction(async (tx) => {
+      await blockchainService.recordTransactionResult(
+        id,
+        null,
+        null,
+        TOKEN_REQUEST_STATUSES.FAILED,
+        error.message,
+        tx,
+      );
+
+      await auditLogService.createAuditLog(
+        {
+          actorUserId,
+          entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+          entityId: id,
+          action: AUDIT_ACTIONS.RECORD_EXECUTION,
+          metadata: {
+            previousStatus: existingRequest.status,
+            newStatus: TOKEN_REQUEST_STATUSES.FAILED,
+            txSignature: null,
+            explorerUrl: null,
+            executionError: error.message,
+          },
+        },
+        tx,
+      );
+
+      await auditLogService.createAuditLog(
+        {
+          actorUserId,
+          entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+          entityId: id,
+          action: AUDIT_ACTIONS.STATUS_CHANGE,
+          metadata: {
+            previousStatus: existingRequest.status,
+            newStatus: TOKEN_REQUEST_STATUSES.FAILED,
+          },
+        },
+        tx,
+      );
+    });
+
+    throw error;
+  }
+
+  const tokenRequest = await prisma.$transaction(async (tx) => {
+    await blockchainService.recordTransactionResult(
+      id,
+      executionResult.txSignature,
+      executionResult.explorerUrl,
+      TOKEN_REQUEST_STATUSES.EXECUTED,
+      null,
+      tx,
+    );
+
+    const updatedRequest = await tx.tokenRequest.findUnique({
+      where: { id },
+      include: tokenRequestInclude,
+    });
+
+    await auditLogService.createAuditLog(
+      {
+        actorUserId,
+        entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+        entityId: id,
+        action: AUDIT_ACTIONS.RECORD_EXECUTION,
+        metadata: {
+          previousStatus: existingRequest.status,
+          newStatus: TOKEN_REQUEST_STATUSES.EXECUTED,
+          txSignature: executionResult.txSignature,
+          explorerUrl: executionResult.explorerUrl,
+          onChainRequestAddress: executionResult.onChainRequestAddress,
+          createSignature: executionResult.createSignature,
+          approveSignature: executionResult.approveSignature,
+        },
+      },
+      tx,
+    );
+
+    await auditLogService.createAuditLog(
+      {
+        actorUserId,
+        entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+        entityId: id,
+        action: AUDIT_ACTIONS.STATUS_CHANGE,
+        metadata: {
+          previousStatus: existingRequest.status,
+          newStatus: TOKEN_REQUEST_STATUSES.EXECUTED,
+        },
+      },
+      tx,
+    );
+
+    return updatedRequest;
+  });
+
+  return {
+    tokenRequest,
+    execution: executionResult,
+  };
+}
+
 async function prepareExecutionPayload(id) {
   const tokenRequest = await getTokenRequestOrThrow(id);
 
@@ -455,5 +568,6 @@ module.exports = {
   submitTokenRequest,
   markReadyForExecution,
   recordExecution,
+  executeReadyRequest,
   prepareExecutionPayload,
 };

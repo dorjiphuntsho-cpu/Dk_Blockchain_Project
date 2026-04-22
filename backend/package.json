@@ -24,7 +24,9 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
     "@prisma/client": "^6.7.0",
+    "@solana/spl-token": "^0.4.13",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

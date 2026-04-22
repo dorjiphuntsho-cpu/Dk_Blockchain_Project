@@ -63,7 +63,7 @@ backend/
 - Maker-checker approval enforcement
 - Audit logging for important business actions
 - Pagination, filtering, and sorting on list endpoints
-- Placeholder blockchain service for future Solana execution integration
+- Local-validator Solana execution integration for server-managed flows
 - Health check endpoint at `GET /health`
 
 ## Request Workflow
@@ -328,12 +328,39 @@ Example defaults from `.env.example`:
 }
 ```
 
-## Future Solana Integration
+## Solana Integration
 
-- `src/services/blockchain.service.js` is the placeholder adapter for future execution integration.
-- `prepareMintExecutionPayload`, `prepareTransferExecutionPayload`, and `prepareBurnExecutionPayload` already shape requests into execution-ready payloads.
-- `recordTransactionResult` is the intended bridge for future execution workers or Solana listeners.
-- Off-chain approvals and audit trails are intentionally isolated from on-chain concerns.
+The backend can now execute token requests against the local validator using the Anchor program in `../dk-token`.
+
+Required environment variables:
+
+- `SOLANA_RPC_URL`
+- `SOLANA_PROGRAM_ID`
+- `SOLANA_PROGRAM_IDL_PATH`
+- `SOLANA_CONFIG_ADDRESS`
+- `SOLANA_CONFIG_KEYPAIR_PATH`
+- `SOLANA_ADMIN_KEYPAIR_PATH`
+- `SOLANA_MAKER_KEYPAIR_PATH`
+- `SOLANA_CHECKER_KEYPAIR_PATH`
+- `SOLANA_AUTO_BOOTSTRAP`
+
+Bootstrap behavior:
+
+- If `SOLANA_AUTO_BOOTSTRAP=true`, backend startup will ensure the on-chain `Config` account exists.
+- If `SOLANA_CONFIG_KEYPAIR_PATH` points to a missing file, the backend will generate a new config keypair there.
+- If the config account is missing on chain, the backend will call `initialize`.
+- If the configured checker wallet is not yet registered, the backend will call `add_checker`.
+
+Execution behavior:
+
+- `prepareMintExecutionPayload`, `prepareTransferExecutionPayload`, and `prepareBurnExecutionPayload` now return real local-validator execution context.
+- `POST /api/token-requests/:id/execute` executes a `READY_FOR_EXECUTION` request on chain and records the result automatically.
+- The backend uses configured server-managed maker and checker wallets for local execution.
+
+Current limitation:
+
+- For `TRANSFER` and `BURN`, the source wallet in the request must match the configured backend maker wallet because the backend must sign both the token delegation and the on-chain request creation step.
+- This is suitable for local-validator integration and admin-portal demos, but browser-wallet-driven user custody will still require frontend signing flows later.
 
 ## Windows and WSL Notes
 

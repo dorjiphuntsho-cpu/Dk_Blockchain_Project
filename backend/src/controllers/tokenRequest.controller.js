@@ -70,6 +70,15 @@ async function recordExecution(req, res) {
   });
 }
 
+async function executeReadyRequest(req, res) {
+  const result = await tokenRequestService.executeReadyRequest(req.params.id, req.user.id);
+
+  return successResponse(res, {
+    message: 'Token request executed successfully',
+    data: result,
+  });
+}
+
 module.exports = {
   createTokenRequest,
   getTokenRequests,
@@ -78,4 +87,5 @@ module.exports = {
   submitTokenRequest,
   markReadyForExecution,
   recordExecution,
+  executeReadyRequest,
 };

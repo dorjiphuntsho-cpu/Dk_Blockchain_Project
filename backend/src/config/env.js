@@ -5,6 +5,15 @@ const { applyDatabaseUrl } = require('../utils/databaseUrl');
 dotenv.config();
 applyDatabaseUrl(process.env);
 
+const optionalNonEmptyString = z.preprocess((value) => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const normalized = String(value).trim();
+  return normalized === '' ? undefined : normalized;
+}, z.string().min(1).optional());
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(5000),
@@ -48,6 +57,26 @@ const envSchema = z.object({
   DEFAULT_CHECKER_PASSWORD: z.string().optional(),
   DEFAULT_EXECUTOR_EMAIL: z.string().email().optional(),
   DEFAULT_EXECUTOR_PASSWORD: z.string().optional(),
+  SOLANA_RPC_URL: z.string().url().default('http://127.0.0.1:8899'),
+  SOLANA_COMMITMENT: z.enum(['processed', 'confirmed', 'finalized']).default('confirmed'),
+  SOLANA_PROGRAM_ID: optionalNonEmptyString,
+  SOLANA_PROGRAM_IDL_PATH: z.string().min(1).default('dk-token/target/idl/dk_token.json'),
+  SOLANA_CONFIG_ADDRESS: optionalNonEmptyString,
+  SOLANA_CONFIG_KEYPAIR_PATH: optionalNonEmptyString,
+  SOLANA_ADMIN_KEYPAIR_PATH: optionalNonEmptyString,
+  SOLANA_MAKER_KEYPAIR_PATH: optionalNonEmptyString,
+  SOLANA_CHECKER_KEYPAIR_PATH: optionalNonEmptyString,
+  SOLANA_AUTO_BOOTSTRAP: z.preprocess((value) => {
+    if (value === undefined) {
+      return true;
+    }
+
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    return String(value).toLowerCase() === 'true';
+  }, z.boolean()),
 });
 
 const parsed = envSchema.safeParse(process.env);
