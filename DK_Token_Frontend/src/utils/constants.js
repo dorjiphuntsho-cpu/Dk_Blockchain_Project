@@ -22,7 +22,7 @@ export const REQUEST_STATUSES = {
 };
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-export const ENABLE_MOCK_API = String(import.meta.env.VITE_ENABLE_MOCK_API ?? 'true') === 'true';
+export const ENABLE_MOCK_API = String(import.meta.env.VITE_ENABLE_MOCK_API ?? 'false') === 'true';
 
 export const ROLE_OPTIONS = Object.values(ROLES).map((role) => ({
   label: role,
@@ -42,9 +42,12 @@ export const REQUEST_STATUS_OPTIONS = Object.values(REQUEST_STATUSES).map((statu
 export const NAV_ITEMS = [
   { label: 'Dashboard', path: '/dashboard', roles: Object.values(ROLES), section: 'Overview', icon: 'dashboard' },
   { label: 'Token Requests', path: '/token-requests', roles: [ROLES.ADMIN], section: 'Operations', icon: 'request' },
+  { label: 'My Wallets', path: '/my-wallets', roles: Object.values(ROLES), section: 'Overview', icon: 'wallets' },
   { label: 'My Requests', path: '/my-requests', roles: [ROLES.MAKER], section: 'Operations', icon: 'myRequests' },
   { label: 'Pending Approvals', path: '/pending-approvals', roles: [ROLES.CHECKER], section: 'Operations', icon: 'approvals' },
   { label: 'Ready for Execution', path: '/ready-for-execution', roles: [ROLES.ADMIN, ROLES.EXECUTOR], section: 'Operations', icon: 'execution' },
+  { label: 'Solana Admin', path: '/solana-admin', roles: [ROLES.ADMIN], section: 'Admin', icon: 'solana' },
+  { label: 'Managed Tokens', path: '/managed-tokens', roles: [ROLES.ADMIN], section: 'Admin', icon: 'request' },
   { label: 'Users', path: '/users', roles: [ROLES.ADMIN], section: 'Admin', icon: 'users' },
   { label: 'Wallets', path: '/wallets', roles: [ROLES.ADMIN], section: 'Admin', icon: 'wallets' },
   { label: 'Audit Logs', path: '/audit-logs', roles: [ROLES.ADMIN], section: 'Logs', icon: 'logs' },
@@ -54,6 +57,7 @@ export const NAV_PREFIX_MATCHES = ['/users/', '/wallets/', '/token-requests/'];
 
 export const ROUTE_TITLES = {
   '/dashboard': 'Dashboard',
+  '/my-wallets': 'My Wallets',
   '/users': 'Users',
   '/users/new': 'Create User',
   '/wallets': 'Wallets',
@@ -63,6 +67,8 @@ export const ROUTE_TITLES = {
   '/my-requests': 'My Token Requests',
   '/pending-approvals': 'Pending Approvals',
   '/ready-for-execution': 'Ready for Execution',
+  '/solana-admin': 'Solana Admin',
+  '/managed-tokens': 'Managed Tokens',
   '/audit-logs': 'Audit Logs',
   '/login': 'Login',
 };

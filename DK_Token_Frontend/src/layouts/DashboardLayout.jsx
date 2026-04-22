@@ -23,6 +23,7 @@ import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalance
 import PlayCircleOutlineOutlinedIcon from '@mui/icons-material/PlayCircleOutlineOutlined';
 import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
 import AssignmentOutlinedIcon from '@mui/icons-material/AssignmentOutlined';
+import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import { useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
@@ -41,6 +42,7 @@ const NAV_ICONS = {
   myRequests: <AssignmentOutlinedIcon fontSize="small" />,
   approvals: <FactCheckOutlinedIcon fontSize="small" />,
   execution: <PlayCircleOutlineOutlinedIcon fontSize="small" />,
+  solana: <HubOutlinedIcon fontSize="small" />,
   users: <GroupsOutlinedIcon fontSize="small" />,
   wallets: <AccountBalanceWalletOutlinedIcon fontSize="small" />,
   logs: <ReceiptLongOutlinedIcon fontSize="small" />,

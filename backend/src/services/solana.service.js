@@ -6,6 +6,7 @@ const {
   TOKEN_PROGRAM_ID,
   approve: approveDelegate,
   getAssociatedTokenAddressSync,
+  getMint,
   getOrCreateAssociatedTokenAccount,
 } = require('@solana/spl-token');
 const env = require('../config/env');
@@ -144,6 +145,10 @@ function getProgram(keypair) {
   return new anchor.Program(idl, getProvider(keypair));
 }
 
+async function fetchConfigAccount(configAddress, keypair = getAdminKeypair()) {
+  return getProgram(keypair).account.config.fetchNullable(configAddress);
+}
+
 function requireConfigAddress() {
   const configKeypair = getConfigKeypair();
   if (configKeypair) {
@@ -249,7 +254,7 @@ async function bootstrapOnChainConfig() {
   }
 
   const configAddress = configKeypair ? configKeypair.publicKey : requireConfigAddress();
-  const existingConfig = await adminProgram.account.config.fetchNullable(configAddress);
+  const existingConfig = await fetchConfigAccount(configAddress, adminKeypair);
 
   if (!existingConfig) {
     if (!configKeypair) {
@@ -271,11 +276,16 @@ async function bootstrapOnChainConfig() {
   }
 
   const config = await adminProgram.account.config.fetch(configAddress);
+  const adminSignerMatchesOnChain = config.admin.equals(adminKeypair.publicKey);
   const checkerExists = config.checkers.some((existingChecker) =>
     existingChecker.equals(checkerKeypair.publicKey),
   );
 
-  if (!checkerExists && !checkerKeypair.publicKey.equals(adminKeypair.publicKey)) {
+  if (
+    adminSignerMatchesOnChain &&
+    !checkerExists &&
+    !checkerKeypair.publicKey.equals(adminKeypair.publicKey)
+  ) {
     await adminProgram.methods
       .addChecker(checkerKeypair.publicKey)
       .accounts({
@@ -286,10 +296,201 @@ async function bootstrapOnChainConfig() {
       .rpc();
   }
 
-  return {
+  return getConfigStatus();
+}
+
+async function getConfigStatus() {
+  const configAddress = requireConfigAddress();
+  const adminKeypair = getAdminKeypair();
+  const makerKeypair = getMakerKeypair();
+  const checkerKeypair = getCheckerKeypair();
+  const config = await fetchConfigAccount(configAddress, adminKeypair);
+
+  const configuredSigners = {
+    admin: adminKeypair.publicKey.toBase58(),
+    maker: makerKeypair.publicKey.toBase58(),
+    checker: checkerKeypair.publicKey.toBase58(),
+  };
+
+  const status = {
+    rpcUrl: env.SOLANA_RPC_URL,
+    commitment: env.SOLANA_COMMITMENT,
+    programId: getProgramId().toBase58(),
     configAddress: configAddress.toBase58(),
-    adminAddress: adminKeypair.publicKey.toBase58(),
-    checkerAddress: checkerKeypair.publicKey.toBase58(),
+    idlPath: resolveConfiguredPath(env.SOLANA_PROGRAM_IDL_PATH),
+    autoBootstrapEnabled: env.SOLANA_AUTO_BOOTSTRAP,
+    configExists: Boolean(config),
+    configuredSigners,
+    onChain: null,
+    adminSignerMatchesOnChain: false,
+    checkerSignerConfiguredOnChain: false,
+    canManageOnChainConfig: false,
+    warnings: [],
+  };
+
+  if (!config) {
+    status.warnings.push('On-chain config account does not exist yet.');
+    return status;
+  }
+
+  const onChainAdmin = config.admin.toBase58();
+  const onChainCheckers = config.checkers.map((checker) => checker.toBase58());
+
+  status.onChain = {
+    admin: onChainAdmin,
+    checkers: onChainCheckers,
+  };
+  status.adminSignerMatchesOnChain = onChainAdmin === configuredSigners.admin;
+  status.checkerSignerConfiguredOnChain = onChainCheckers.includes(configuredSigners.checker);
+  status.canManageOnChainConfig = status.adminSignerMatchesOnChain;
+
+  if (!status.adminSignerMatchesOnChain) {
+    status.warnings.push(
+      `Configured backend admin signer ${configuredSigners.admin} does not match on-chain admin ${onChainAdmin}.`,
+    );
+  }
+
+  if (!status.checkerSignerConfiguredOnChain) {
+    status.warnings.push(
+      `Configured backend checker signer ${configuredSigners.checker} is not registered on chain.`,
+    );
+  }
+
+  return status;
+}
+
+async function requireAdminManagedConfig() {
+  const configAddress = requireConfigAddress();
+  const adminKeypair = getAdminKeypair();
+  const adminProgram = getProgram(adminKeypair);
+  const config = await adminProgram.account.config.fetchNullable(configAddress);
+
+  if (!config) {
+    throw new ApiError(404, `On-chain config account ${configAddress.toBase58()} does not exist`);
+  }
+
+  if (!config.admin.equals(adminKeypair.publicKey)) {
+    throw new ApiError(
+      409,
+      `Configured admin signer ${adminKeypair.publicKey.toBase58()} is not the current on-chain admin ${config.admin.toBase58()}`,
+    );
+  }
+
+  return {
+    adminKeypair,
+    adminProgram,
+    configAddress,
+    config,
+  };
+}
+
+async function addChecker(checkerAddress) {
+  const checkerPublicKey = parsePublicKey(checkerAddress, 'checkerAddress');
+  const { adminKeypair, adminProgram, configAddress } = await requireAdminManagedConfig();
+
+  await adminProgram.methods
+    .addChecker(checkerPublicKey)
+    .accounts({
+      config: configAddress,
+      admin: adminKeypair.publicKey,
+    })
+    .signers([adminKeypair])
+    .rpc();
+
+  return getConfigStatus();
+}
+
+async function removeChecker(checkerAddress) {
+  const checkerPublicKey = parsePublicKey(checkerAddress, 'checkerAddress');
+  const { adminKeypair, adminProgram, configAddress } = await requireAdminManagedConfig();
+
+  await adminProgram.methods
+    .removeChecker(checkerPublicKey)
+    .accounts({
+      config: configAddress,
+      admin: adminKeypair.publicKey,
+    })
+    .signers([adminKeypair])
+    .rpc();
+
+  return getConfigStatus();
+}
+
+async function setAdmin(newAdminAddress) {
+  const newAdminPublicKey = parsePublicKey(newAdminAddress, 'newAdminAddress');
+  const { adminKeypair, adminProgram, configAddress } = await requireAdminManagedConfig();
+
+  await adminProgram.methods
+    .setAdmin(newAdminPublicKey)
+    .accounts({
+      config: configAddress,
+      admin: adminKeypair.publicKey,
+    })
+    .signers([adminKeypair])
+    .rpc();
+
+  return getConfigStatus();
+}
+
+async function createTokenMint(decimals) {
+  const { adminKeypair, adminProgram, configAddress } = await requireAdminManagedConfig();
+  const mintKeypair = Keypair.generate();
+  const tokenAuthority = getTokenAuthority(configAddress);
+
+  const txSignature = await adminProgram.methods
+    .createTokenMint(decimals)
+    .accounts({
+      config: configAddress,
+      mint: mintKeypair.publicKey,
+      tokenAuthority,
+      admin: adminKeypair.publicKey,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+    })
+    .signers([adminKeypair, mintKeypair])
+    .rpc();
+
+  const mintAccount = await getMint(getConnection(), mintKeypair.publicKey, env.SOLANA_COMMITMENT);
+
+  return {
+    mintAddress: mintKeypair.publicKey.toBase58(),
+    decimals: mintAccount.decimals,
+    mintAuthority: mintAccount.mintAuthority?.toBase58() || null,
+    freezeAuthority: mintAccount.freezeAuthority?.toBase58() || null,
+    supply: mintAccount.supply.toString(),
+    tokenAuthority: tokenAuthority.toBase58(),
+    txSignature,
+    explorerUrl: buildExplorerUrl(txSignature),
+  };
+}
+
+async function hydrateManagedToken(token) {
+  let onChain = null;
+  let warning = null;
+
+  try {
+    const mintAccount = await getMint(
+      getConnection(),
+      parsePublicKey(token.mintAddress, 'mintAddress'),
+      env.SOLANA_COMMITMENT,
+    );
+
+    onChain = {
+      supply: mintAccount.supply.toString(),
+      decimals: mintAccount.decimals,
+      mintAuthority: mintAccount.mintAuthority?.toBase58() || null,
+      freezeAuthority: mintAccount.freezeAuthority?.toBase58() || null,
+      isInitialized: mintAccount.isInitialized,
+    };
+  } catch (error) {
+    warning = error.message;
+  }
+
+  return {
+    ...token,
+    onChain,
+    warning,
   };
 }
 
@@ -532,10 +733,42 @@ function getExecutionContext(tokenRequest) {
   return payload;
 }
 
+async function getWalletTokenBalances(ownerAddress) {
+  const ownerPublicKey = parsePublicKey(ownerAddress, 'walletAddress');
+  const response = await getConnection().getParsedTokenAccountsByOwner(
+    ownerPublicKey,
+    { programId: TOKEN_PROGRAM_ID },
+    env.SOLANA_COMMITMENT,
+  );
+
+  return response.value
+    .map(({ pubkey, account }) => {
+      const parsedInfo = account.data.parsed?.info;
+      const tokenAmount = parsedInfo?.tokenAmount;
+
+      return {
+        tokenAccountAddress: pubkey.toBase58(),
+        mintAddress: parsedInfo?.mint || null,
+        rawAmount: tokenAmount?.amount || '0',
+        decimals: tokenAmount?.decimals ?? 0,
+        amount: tokenAmount?.uiAmountString || '0',
+      };
+    })
+    .filter((item) => item.mintAddress)
+    .sort((left, right) => left.mintAddress.localeCompare(right.mintAddress));
+}
+
 module.exports = {
+  addChecker,
   bootstrapOnChainConfig,
+  createTokenMint,
   executeOnChainRequest,
+  getConfigStatus,
   getAdminKeypair,
   getExecutionContext,
   getProgramId,
+  hydrateManagedToken,
+  getWalletTokenBalances,
+  removeChecker,
+  setAdmin,
 };

@@ -252,11 +252,33 @@ function createInitialDb() {
     },
   ];
 
+  const solanaConfig = {
+    rpcUrl: 'http://127.0.0.1:8899',
+    commitment: 'confirmed',
+    programId: '49fwAJRLMtbCLLqZDZTBKZtwDaBTgm1oA1FWnidYDQJp',
+    configAddress: '9Qv8s7mpaQv7Z5Lb4Y4N6A5cgM4L4QX1Cj2sL8zj9s1P',
+    idlPath: 'dk-token/target/idl/dk_token.json',
+    autoBootstrapEnabled: true,
+    configuredSigners: {
+      admin: wallets[0].walletAddress,
+      maker: wallets[1].walletAddress,
+      checker: wallets[2].walletAddress,
+    },
+    onChain: {
+      admin: wallets[0].walletAddress,
+      checkers: [wallets[0].walletAddress, wallets[2].walletAddress],
+    },
+  };
+
+  const managedTokens = [];
+
   return {
     users,
     wallets,
     tokenRequests,
     auditLogs,
+    solanaConfig,
+    managedTokens,
   };
 }
 
@@ -427,6 +449,49 @@ function getActor(actorUser) {
   }
 
   return actorUser;
+}
+
+function serializeSolanaConfig(db) {
+  const config = db.solanaConfig;
+  const adminSignerMatchesOnChain = config.onChain.admin === config.configuredSigners.admin;
+  const checkerSignerConfiguredOnChain = config.onChain.checkers.includes(config.configuredSigners.checker);
+  const warnings = [];
+
+  if (!adminSignerMatchesOnChain) {
+    warnings.push(
+      `Configured backend admin signer ${config.configuredSigners.admin} does not match on-chain admin ${config.onChain.admin}.`,
+    );
+  }
+
+  if (!checkerSignerConfiguredOnChain) {
+    warnings.push(
+      `Configured backend checker signer ${config.configuredSigners.checker} is not registered on chain.`,
+    );
+  }
+
+  return {
+    ...clone(config),
+    configExists: true,
+    adminSignerMatchesOnChain,
+    checkerSignerConfiguredOnChain,
+    canManageOnChainConfig: adminSignerMatchesOnChain,
+    warnings,
+  };
+}
+
+function serializeManagedToken(db, token) {
+  return {
+    ...token,
+    creatorUser: token.creatorUserId ? basicUser(db.users.find((user) => user.id === token.creatorUserId)) : null,
+    onChain: {
+      supply: token.supply,
+      decimals: token.decimals,
+      mintAuthority: token.mintAuthority,
+      freezeAuthority: token.freezeAuthority,
+      isInitialized: true,
+    },
+    warning: null,
+  };
 }
 
 export const mockAdapter = {
@@ -630,6 +695,46 @@ export const mockAdapter = {
         }
 
         return createDetailResponse('Wallet fetched successfully', serializeWallet(db, wallet));
+      }),
+    getTokenBalances: async (id) =>
+      perform(() => {
+        const db = getDb();
+        const wallet = db.wallets.find((item) => item.id === id);
+
+        if (!wallet) {
+          throw new Error('Wallet not found');
+        }
+
+        const balances = db.tokenRequests
+          .filter((request) => request.status === REQUEST_STATUSES.EXECUTED)
+          .reduce((accumulator, request) => {
+            const current = accumulator.get(request.tokenMintAddress) || 0;
+
+            if (request.destinationWalletId === id) {
+              accumulator.set(request.tokenMintAddress, current + Number(request.amount));
+            }
+
+            if (request.sourceWalletId === id) {
+              accumulator.set(request.tokenMintAddress, current - Number(request.amount));
+            }
+
+            return accumulator;
+          }, new Map());
+
+        const items = Array.from(balances.entries())
+          .filter(([, amount]) => amount !== 0)
+          .map(([mintAddress, amount]) => ({
+            tokenAccountAddress: `mock-token-account-${id}-${mintAddress}`,
+            mintAddress,
+            rawAmount: String(amount),
+            decimals: 0,
+            amount: String(amount),
+          }));
+
+        return createDetailResponse('Wallet token balances fetched successfully', {
+          wallet: serializeWallet(db, wallet),
+          balances: items,
+        });
       }),
     create: async (payload, actorUser) =>
       perform(() => {
@@ -950,7 +1055,56 @@ export const mockAdapter = {
         });
         setDb(db);
 
-        return createDetailResponse('Request marked ready successfully', serializeTokenRequest(db, request));
+        return createDetailResponse('Request marked ready successfully', {
+          tokenRequest: serializeTokenRequest(db, request),
+          executionPayload: {
+            integrationReady: true,
+            executionMode: 'mock-local-validator',
+            operation: request.requestType,
+            requestId: request.id,
+          },
+        });
+      }),
+    execute: async (id, actorUser) =>
+      perform(() => {
+        const db = getDb();
+        const actor = getActor(actorUser);
+        const request = db.tokenRequests.find((item) => item.id === id);
+
+        if (!request || request.status !== REQUEST_STATUSES.READY_FOR_EXECUTION) {
+          throw new Error('Only ready requests can be executed');
+        }
+
+        const now = new Date().toISOString();
+        const txSignature = `mock-tx-${Math.random().toString(36).slice(2, 14)}`;
+        request.status = REQUEST_STATUSES.EXECUTED;
+        request.txSignature = txSignature;
+        request.explorerUrl = `https://explorer.solana.com/tx/${txSignature}?cluster=custom`;
+        request.executionError = null;
+        request.executedAt = now;
+        request.updatedAt = now;
+
+        addAuditLog(db, {
+          actorUserId: actor.id,
+          entityType: ENTITY_TYPES.TOKEN_REQUEST,
+          entityId: id,
+          action: AUDIT_ACTIONS.RECORD_EXECUTION,
+          metadata: {
+            status: REQUEST_STATUSES.EXECUTED,
+            txSignature,
+            explorerUrl: request.explorerUrl,
+          },
+        });
+        setDb(db);
+
+        return createDetailResponse('Token request executed successfully', {
+          tokenRequest: serializeTokenRequest(db, request),
+          execution: {
+            txSignature,
+            explorerUrl: request.explorerUrl,
+            executionMode: 'mock-local-validator',
+          },
+        });
       }),
     recordExecution: async (id, payload, actorUser) =>
       perform(() => {
@@ -1040,6 +1194,99 @@ export const mockAdapter = {
         logs = sortItems(logs, query.sortBy || 'createdAt', query.sortOrder || 'desc');
         const result = paginate(logs, query);
         return createListResponse('Audit logs fetched successfully', result.items, result.pagination);
+      }),
+  },
+  solanaAdmin: {
+    getConfigStatus: async () =>
+      perform(() => {
+        const db = getDb();
+        return createDetailResponse('Solana config status fetched successfully', serializeSolanaConfig(db));
+      }),
+    createTokenMint: async (decimals = 0) =>
+      perform(() => {
+        const db = getDb();
+        const mintAddress = `mint-${Math.random().toString(36).slice(2, 14)}`;
+        const token = {
+          id: generateId('managed-token'),
+          mintAddress,
+          decimals: Number(decimals),
+          mintAuthority: db.solanaConfig.configuredSigners.admin,
+          freezeAuthority: db.solanaConfig.configuredSigners.admin,
+          supply: '0',
+          tokenAuthority: db.solanaConfig.configuredSigners.admin,
+          txSignature: `mock-mint-${Math.random().toString(36).slice(2, 14)}`,
+          explorerUrl: 'https://explorer.solana.com/?cluster=custom',
+          createdTxSignature: `mock-mint-${Math.random().toString(36).slice(2, 14)}`,
+          creatorUserId: 'user-admin-1',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        db.managedTokens.unshift(token);
+        setDb(db);
+        return createDetailResponse('Managed token mint created successfully', serializeManagedToken(db, token));
+      }),
+    addChecker: async (checkerAddress) =>
+      perform(() => {
+        const db = getDb();
+        if (!db.solanaConfig.onChain.checkers.includes(checkerAddress)) {
+          db.solanaConfig.onChain.checkers.push(checkerAddress);
+          setDb(db);
+        }
+
+        return createDetailResponse('Checker added successfully', serializeSolanaConfig(db));
+      }),
+    removeChecker: async (checkerAddress) =>
+      perform(() => {
+        const db = getDb();
+        if (db.solanaConfig.onChain.admin === checkerAddress) {
+          throw new Error('Admin checker cannot be removed');
+        }
+
+        db.solanaConfig.onChain.checkers = db.solanaConfig.onChain.checkers.filter((address) => address !== checkerAddress);
+        setDb(db);
+
+        return createDetailResponse('Checker removed successfully', serializeSolanaConfig(db));
+      }),
+    setAdmin: async (newAdminAddress) =>
+      perform(() => {
+        const db = getDb();
+        db.solanaConfig.onChain.admin = newAdminAddress;
+        if (!db.solanaConfig.onChain.checkers.includes(newAdminAddress)) {
+          db.solanaConfig.onChain.checkers.push(newAdminAddress);
+        }
+        setDb(db);
+
+        return createDetailResponse('On-chain admin updated successfully', serializeSolanaConfig(db));
+      }),
+  },
+  managedTokens: {
+    list: async (query = {}) =>
+      perform(() => {
+        const db = getDb();
+        let items = db.managedTokens.map((token) => serializeManagedToken(db, token));
+
+        if (query.search) {
+          const search = query.search.toLowerCase();
+          items = items.filter((token) =>
+            token.mintAddress.toLowerCase().includes(search)
+            || token.tokenAuthority.toLowerCase().includes(search),
+          );
+        }
+
+        items = sortItems(items, query.sortBy || 'createdAt', query.sortOrder || 'desc');
+        const result = paginate(items, query);
+        return createListResponse('Managed tokens fetched successfully', result.items, result.pagination);
+      }),
+    getById: async (id) =>
+      perform(() => {
+        const db = getDb();
+        const token = db.managedTokens.find((item) => item.id === id);
+
+        if (!token) {
+          throw new Error('Managed token not found');
+        }
+
+        return createDetailResponse('Managed token fetched successfully', serializeManagedToken(db, token));
       }),
   },
 };

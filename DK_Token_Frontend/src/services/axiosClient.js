@@ -14,6 +14,12 @@ axiosClient.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
+  if (config.params && typeof config.params === 'object') {
+    config.params = Object.fromEntries(
+      Object.entries(config.params).filter(([, value]) => value !== '' && value !== null && value !== undefined),
+    );
+  }
+
   return config;
 });
 

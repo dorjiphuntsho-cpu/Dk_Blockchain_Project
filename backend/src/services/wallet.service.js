@@ -4,6 +4,7 @@ const { buildPagination, getPagination, getSortOptions } = require('../utils/pag
 const { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } = require('../utils/enums');
 const { walletInclude } = require('../models/wallet.model');
 const auditLogService = require('./auditLog.service');
+const solanaService = require('./solana.service');
 
 async function ensureUserExists(userId, tx = prisma) {
   const user = await tx.user.findUnique({
@@ -108,6 +109,24 @@ async function getWalletById(id) {
   }
 
   return wallet;
+}
+
+async function getWalletTokenBalances(id) {
+  const wallet = await prisma.wallet.findUnique({
+    where: { id },
+    include: walletInclude,
+  });
+
+  if (!wallet) {
+    throw new ApiError(404, 'Wallet not found');
+  }
+
+  const balances = await solanaService.getWalletTokenBalances(wallet.walletAddress);
+
+  return {
+    wallet,
+    balances,
+  };
 }
 
 async function updateWallet(id, payload, actorUserId) {
@@ -219,6 +238,7 @@ module.exports = {
   createWallet,
   listWallets,
   getWalletById,
+  getWalletTokenBalances,
   updateWallet,
   updateWalletStatus,
 };

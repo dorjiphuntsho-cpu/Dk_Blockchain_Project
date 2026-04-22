@@ -1,6 +1,7 @@
 const {
   optionalBooleanFromUnknown,
-  optionalTrimmedString,
+  optionalEnumQuerySchema,
+  optionalTrimmedQueryString,
   requiredTrimmedString,
   uuidSchema,
   z,
@@ -31,10 +32,10 @@ const listUsersQuerySchema = z.object({
   query: z.object({
     page: z.coerce.number().int().positive().optional(),
     limit: z.coerce.number().int().positive().optional(),
-    search: optionalTrimmedString,
+    search: optionalTrimmedQueryString,
     isActive: optionalBooleanFromUnknown,
-    sortBy: z.enum(['fullName', 'email', 'createdAt', 'updatedAt']).optional(),
-    sortOrder: z.enum(['asc', 'desc']).optional(),
+    sortBy: optionalEnumQuerySchema(z.enum(['fullName', 'email', 'createdAt', 'updatedAt'])),
+    sortOrder: optionalEnumQuerySchema(z.enum(['asc', 'desc'])),
   }),
 });
 

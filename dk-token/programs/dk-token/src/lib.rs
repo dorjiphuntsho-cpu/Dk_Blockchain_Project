@@ -37,6 +37,13 @@ pub mod dk_token {
         create_request::handler(ctx, amount)
     }
 
+    pub fn create_token_mint(
+        ctx: Context<CreateTokenMint>,
+        decimals: u8,
+    ) -> Result<()> {
+        create_token_mint::handler(ctx, decimals)
+    }
+
     pub fn create_transfer_request(
         ctx: Context<CreateTransferRequest>,
         amount: u64,

@@ -1,10 +1,21 @@
 const { z } = require('zod');
 
 const uuidSchema = z.string().uuid('Invalid UUID');
+const emptyStringToUndefined = (value) => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
+};
 
 const trimmedString = z.string().trim();
 const requiredTrimmedString = trimmedString.min(1, 'This field is required');
 const optionalTrimmedString = trimmedString.min(1).optional();
+const optionalUuidQuerySchema = z.preprocess(emptyStringToUndefined, uuidSchema.optional());
+const optionalTrimmedQueryString = z.preprocess(emptyStringToUndefined, trimmedString.optional());
+const optionalEnumQuerySchema = (enumSchema) => z.preprocess(emptyStringToUndefined, enumSchema.optional());
 
 const booleanFromUnknown = z.preprocess((value) => {
   if (typeof value === 'boolean') {
@@ -22,7 +33,7 @@ const booleanFromUnknown = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
-const optionalBooleanFromUnknown = booleanFromUnknown.optional();
+const optionalBooleanFromUnknown = z.preprocess(emptyStringToUndefined, booleanFromUnknown.optional());
 
 const numericStringSchema = z.preprocess((value) => {
   if (typeof value === 'number') {
@@ -53,9 +64,13 @@ const dateStringSchema = z.string().datetime({ offset: true }).or(z.string().dat
 module.exports = {
   z,
   uuidSchema,
+  emptyStringToUndefined,
   trimmedString,
   requiredTrimmedString,
   optionalTrimmedString,
+  optionalUuidQuerySchema,
+  optionalTrimmedQueryString,
+  optionalEnumQuerySchema,
   booleanFromUnknown,
   optionalBooleanFromUnknown,
   numericStringSchema,

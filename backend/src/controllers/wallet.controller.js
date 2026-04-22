@@ -30,6 +30,15 @@ async function getWalletById(req, res) {
   });
 }
 
+async function getWalletTokenBalances(req, res) {
+  const result = await walletService.getWalletTokenBalances(req.params.id);
+
+  return successResponse(res, {
+    message: 'Wallet token balances fetched successfully',
+    data: result,
+  });
+}
+
 async function updateWallet(req, res) {
   const wallet = await walletService.updateWallet(req.params.id, req.validated.body, req.user.id);
 
@@ -52,6 +61,7 @@ module.exports = {
   createWallet,
   getWallets,
   getWalletById,
+  getWalletTokenBalances,
   updateWallet,
   updateWalletStatus,
 };

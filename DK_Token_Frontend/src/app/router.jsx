@@ -12,6 +12,7 @@ import UserDetailsPage from '../pages/users/UserDetailsPage';
 import WalletsPage from '../pages/wallets/WalletsPage';
 import WalletCreatePage from '../pages/wallets/WalletCreatePage';
 import WalletDetailsPage from '../pages/wallets/WalletDetailsPage';
+import MyWalletsPage from '../pages/wallets/MyWalletsPage';
 import TokenRequestsPage from '../pages/tokenRequests/TokenRequestsPage';
 import TokenRequestCreatePage from '../pages/tokenRequests/TokenRequestCreatePage';
 import TokenRequestDetailsPage from '../pages/tokenRequests/TokenRequestDetailsPage';
@@ -19,6 +20,8 @@ import MyTokenRequestsPage from '../pages/tokenRequests/MyTokenRequestsPage';
 import PendingApprovalsPage from '../pages/tokenRequests/PendingApprovalsPage';
 import ReadyForExecutionPage from '../pages/tokenRequests/ReadyForExecutionPage';
 import AuditLogsPage from '../pages/auditLogs/AuditLogsPage';
+import SolanaAdminPage from '../pages/solana/SolanaAdminPage';
+import ManagedTokensPage from '../pages/solana/ManagedTokensPage';
 import NotFoundPage from '../pages/notFound/NotFoundPage';
 import { ROLES } from '../utils/constants';
 
@@ -37,6 +40,7 @@ const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate replace to="/dashboard" /> },
           { path: 'dashboard', element: <DashboardPage /> },
+          { path: 'my-wallets', element: <MyWalletsPage /> },
           {
             element: <RoleGuard roles={[ROLES.ADMIN]} />,
             children: [
@@ -46,6 +50,8 @@ const router = createBrowserRouter([
               { path: 'wallets', element: <WalletsPage /> },
               { path: 'wallets/new', element: <WalletCreatePage /> },
               { path: 'wallets/:id', element: <WalletDetailsPage /> },
+              { path: 'solana-admin', element: <SolanaAdminPage /> },
+              { path: 'managed-tokens', element: <ManagedTokensPage /> },
               { path: 'token-requests', element: <TokenRequestsPage /> },
               { path: 'audit-logs', element: <AuditLogsPage /> },
             ],

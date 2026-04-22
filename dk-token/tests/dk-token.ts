@@ -3,7 +3,6 @@ import { Program } from "@coral-xyz/anchor";
 import {
   TOKEN_PROGRAM_ID,
   approve,
-  createMint,
   getAccount,
   getMint,
   getOrCreateAssociatedTokenAccount,
@@ -23,6 +22,7 @@ describe("dk_token local test", () => {
   const checker = anchor.web3.Keypair.generate();
   const recipient = anchor.web3.Keypair.generate();
   const config = anchor.web3.Keypair.generate();
+  const mintKeypair = anchor.web3.Keypair.generate();
 
   let mint: anchor.web3.PublicKey;
   let makerTokenAccount: anchor.web3.PublicKey;
@@ -65,7 +65,21 @@ describe("dk_token local test", () => {
       program.programId,
     );
 
-    mint = await createMint(provider.connection, payer, tokenAuthority, null, 0);
+    await program.methods
+      .createTokenMint(0)
+      .accounts({
+        config: config.publicKey,
+        mint: mintKeypair.publicKey,
+        tokenAuthority,
+        admin,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      })
+      .signers([mintKeypair])
+      .rpc();
+
+    mint = mintKeypair.publicKey;
 
     makerTokenAccount = (
       await getOrCreateAssociatedTokenAccount(
@@ -84,6 +98,15 @@ describe("dk_token local test", () => {
         recipient.publicKey,
       )
     ).address;
+  });
+
+  it("creates a managed token mint controlled by the program authority", async () => {
+    const mintAccount = await getMint(provider.connection, mint);
+
+    assert.equal(mintAccount.address.toBase58(), mint.toBase58());
+    assert.equal(mintAccount.mintAuthority?.toBase58(), tokenAuthority.toBase58());
+    assert.equal(mintAccount.freezeAuthority?.toBase58(), tokenAuthority.toBase58());
+    assert.equal(mintAccount.decimals, 0);
   });
 
   it("rotates admin, removes checker, and re-adds checker", async () => {
@@ -214,6 +237,44 @@ describe("dk_token local test", () => {
     assert.equal(makerAccount.amount.toString(), "1000");
   });
 
+  it("allows additional approved mint requests to increase supply later", async () => {
+    const followUpMintRequest = anchor.web3.Keypair.generate();
+
+    await program.methods
+      .createMintRequest(new anchor.BN(250))
+      .accounts({
+        request: followUpMintRequest.publicKey,
+        config: config.publicKey,
+        mint,
+        destinationTokenAccount: makerTokenAccount,
+        maker: maker.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([maker, followUpMintRequest])
+      .rpc();
+
+    await program.methods
+      .approveRequest()
+      .accounts({
+        request: followUpMintRequest.publicKey,
+        config: config.publicKey,
+        mint,
+        sourceTokenAccount: null,
+        destinationTokenAccount: makerTokenAccount,
+        tokenAuthority,
+        checker: checker.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([checker])
+      .rpc();
+
+    const makerAccount = await getAccount(provider.connection, makerTokenAccount);
+    const mintAccount = await getMint(provider.connection, mint);
+
+    assert.equal(makerAccount.amount.toString(), "1250");
+    assert.equal(mintAccount.supply.toString(), "1250");
+  });
+
   it("approves a transfer request and moves delegated tokens", async () => {
     const transferRequest = anchor.web3.Keypair.generate();
 
@@ -266,7 +327,7 @@ describe("dk_token local test", () => {
 
     assert.property(storedRequest.requestType as object, "transfer");
     assert.property(storedRequest.status as object, "approved");
-    assert.equal(makerAccount.amount.toString(), "600");
+    assert.equal(makerAccount.amount.toString(), "850");
     assert.equal(recipientAccount.amount.toString(), "400");
   });
 
@@ -318,7 +379,7 @@ describe("dk_token local test", () => {
 
     assert.property(storedRequest.requestType as object, "burn");
     assert.property(storedRequest.status as object, "approved");
-    assert.equal(makerAccount.amount.toString(), "450");
-    assert.equal(mintAccount.supply.toString(), "850");
+    assert.equal(makerAccount.amount.toString(), "700");
+    assert.equal(mintAccount.supply.toString(), "1100");
   });
 });

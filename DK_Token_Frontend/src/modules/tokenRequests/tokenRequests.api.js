@@ -24,6 +24,8 @@ export const tokenRequestsApi = {
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.reject(id, payload, actor()) : (await axiosClient.post(`/token-requests/${id}/reject`, payload)).data),
   markReady: async (id) =>
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.markReady(id, actor()) : (await axiosClient.post(`/token-requests/${id}/mark-ready`)).data),
+  execute: async (id) =>
+    (ENABLE_MOCK_API ? mockAdapter.tokenRequests.execute(id, actor()) : (await axiosClient.post(`/token-requests/${id}/execute`)).data),
   recordExecution: async (id, payload) =>
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.recordExecution(id, payload, actor()) : (await axiosClient.post(`/token-requests/${id}/record-execution`, payload)).data),
   dashboard: async () =>

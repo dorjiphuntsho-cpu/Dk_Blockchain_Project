@@ -39,3 +39,7 @@ export function canRecordExecution(user, request) {
   return hasRole(user, [ROLES.ADMIN, ROLES.EXECUTOR]) &&
     request?.status === REQUEST_STATUSES.READY_FOR_EXECUTION;
 }
+
+export function canExecuteRequest(user, request) {
+  return canRecordExecution(user, request);
+}

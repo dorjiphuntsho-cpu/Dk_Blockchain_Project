@@ -24,15 +24,15 @@ import StatusChip from '../../components/common/StatusChip';
 import WalletConnectCard from '../../components/wallet/WalletConnectCard';
 import useAuth from '../../hooks/useAuth';
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
-import { executionSchema, rejectionSchema } from '../../modules/tokenRequests/tokenRequests.schemas';
+import { rejectionSchema } from '../../modules/tokenRequests/tokenRequests.schemas';
 import { getStatusTimeline } from '../../modules/tokenRequests/tokenRequests.utils';
 import { formatDateTime } from '../../utils/date';
 import { formatAmount, truncateMiddle } from '../../utils/format';
 import {
   canApproveRequest,
   canEditDraftRequest,
+  canExecuteRequest,
   canMarkReady,
-  canRecordExecution,
   canRejectRequest,
   canSubmitDraftRequest,
 } from '../../utils/permissions';
@@ -48,10 +48,6 @@ function TokenRequestDetailsPage() {
   const [dialogType, setDialogType] = useState(null);
   const [formState, setFormState] = useState({
     rejectionReason: '',
-    status: 'EXECUTED',
-    txSignature: '',
-    explorerUrl: '',
-    executionError: '',
   });
 
   useEffect(() => {
@@ -134,9 +130,24 @@ function TokenRequestDetailsPage() {
             Mark Ready
           </Button>
         ) : null}
-        {canRecordExecution(user, request) ? (
-          <Button onClick={() => setDialogType('execute')} variant="contained">
-            Record Execution
+        {canExecuteRequest(user, request) ? (
+          <Button
+            onClick={async () => {
+              try {
+                const response = await tokenRequestsApi.execute(request.id);
+                const signature = response?.data?.execution?.txSignature;
+                enqueueSnackbar(
+                  signature ? `Execution submitted: ${truncateMiddle(signature, 8, 6)}` : 'Request executed',
+                  { variant: 'success' },
+                );
+                reload();
+              } catch (executionError) {
+                enqueueSnackbar(executionError.message || 'Execution failed', { variant: 'error' });
+              }
+            }}
+            variant="contained"
+          >
+            Execute On Chain
           </Button>
         ) : null}
       </Stack>
@@ -300,62 +311,6 @@ function TokenRequestDetailsPage() {
         />
       </AppDialog>
 
-      <AppDialog
-        actions={
-          <>
-            <Button onClick={() => setDialogType(null)}>Cancel</Button>
-            <Button
-              onClick={async () => {
-                const parsed = executionSchema.safeParse(formState);
-                if (!parsed.success) {
-                  enqueueSnackbar(parsed.error.issues[0]?.message || 'Execution form is invalid', { variant: 'error' });
-                  return;
-                }
-                await tokenRequestsApi.recordExecution(request.id, parsed.data);
-                enqueueSnackbar('Execution result recorded', { variant: 'success' });
-                setDialogType(null);
-                reload();
-              }}
-              variant="contained"
-            >
-              Save Execution
-            </Button>
-          </>
-        }
-        onClose={() => setDialogType(null)}
-        open={dialogType === 'execute'}
-        title="Record Execution"
-      >
-        <Stack spacing={2}>
-          <TextField
-            label="Status"
-            onChange={(event) => setFormState((current) => ({ ...current, status: event.target.value }))}
-            select
-            value={formState.status}
-          >
-            <MenuItem value="EXECUTED">EXECUTED</MenuItem>
-            <MenuItem value="FAILED">FAILED</MenuItem>
-          </TextField>
-          <TextField
-            label="Transaction Signature"
-            onChange={(event) => setFormState((current) => ({ ...current, txSignature: event.target.value }))}
-            value={formState.txSignature}
-          />
-          <TextField
-            label="Explorer URL"
-            onChange={(event) => setFormState((current) => ({ ...current, explorerUrl: event.target.value }))}
-            value={formState.explorerUrl}
-          />
-          <TextField
-            disabled={formState.status !== 'FAILED'}
-            label="Execution Error"
-            multiline
-            minRows={3}
-            onChange={(event) => setFormState((current) => ({ ...current, executionError: event.target.value }))}
-            value={formState.executionError}
-          />
-        </Stack>
-      </AppDialog>
     </Stack>
   );
 }

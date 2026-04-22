@@ -1,4 +1,4 @@
-import { Button, Link, MenuItem, Stack, TextField } from '@mui/material';
+import { Alert, Button, Link, Stack, Typography } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
@@ -11,7 +11,6 @@ import PageHeader from '../../components/common/PageHeader';
 import StatusChip from '../../components/common/StatusChip';
 import TypeChip from '../../components/common/TypeChip';
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
-import { executionSchema } from '../../modules/tokenRequests/tokenRequests.schemas';
 import { formatAmount, truncateMiddle } from '../../utils/format';
 
 function ReadyForExecutionPage() {
@@ -21,12 +20,7 @@ function ReadyForExecutionPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedRequest, setSelectedRequest] = useState(null);
-  const [executionForm, setExecutionForm] = useState({
-    status: 'EXECUTED',
-    txSignature: '',
-    explorerUrl: '',
-    executionError: '',
-  });
+  const [submitting, setSubmitting] = useState(false);
 
   async function load() {
     try {
@@ -84,7 +78,7 @@ function ReadyForExecutionPage() {
             </Button>
           ) : (
             <Button onClick={() => setSelectedRequest(row)} size="small" variant="outlined">
-              Record Execution
+              Execute
             </Button>
           )}
         </Stack>
@@ -111,54 +105,40 @@ function ReadyForExecutionPage() {
             <Button onClick={() => setSelectedRequest(null)}>Cancel</Button>
             <Button
               onClick={async () => {
-                const parsed = executionSchema.safeParse(executionForm);
-                if (!parsed.success) {
-                  enqueueSnackbar(parsed.error.issues[0]?.message || 'Execution form is invalid', { variant: 'error' });
-                  return;
+                try {
+                  setSubmitting(true);
+                  const response = await tokenRequestsApi.execute(selectedRequest.id);
+                  const signature = response?.data?.execution?.txSignature;
+                  enqueueSnackbar(
+                    signature ? `Execution submitted: ${truncateMiddle(signature, 8, 6)}` : 'Execution completed',
+                    { variant: 'success' },
+                  );
+                  setSelectedRequest(null);
+                  load();
+                } catch (submitError) {
+                  enqueueSnackbar(submitError.message || 'Execution failed', { variant: 'error' });
+                } finally {
+                  setSubmitting(false);
                 }
-                await tokenRequestsApi.recordExecution(selectedRequest.id, parsed.data);
-                enqueueSnackbar('Execution result recorded', { variant: 'success' });
-                setSelectedRequest(null);
-                load();
               }}
+              disabled={submitting}
               variant="contained"
             >
-              Save Result
+              Execute On Chain
             </Button>
           </>
         }
         onClose={() => setSelectedRequest(null)}
         open={Boolean(selectedRequest)}
-        title="Record Execution Result"
+        title="Execute Request"
       >
         <Stack spacing={2}>
-          <TextField
-            label="Status"
-            onChange={(event) => setExecutionForm((current) => ({ ...current, status: event.target.value }))}
-            select
-            value={executionForm.status}
-          >
-            <MenuItem value="EXECUTED">EXECUTED</MenuItem>
-            <MenuItem value="FAILED">FAILED</MenuItem>
-          </TextField>
-          <TextField
-            label="Transaction Signature"
-            onChange={(event) => setExecutionForm((current) => ({ ...current, txSignature: event.target.value }))}
-            value={executionForm.txSignature}
-          />
-          <TextField
-            label="Explorer URL"
-            onChange={(event) => setExecutionForm((current) => ({ ...current, explorerUrl: event.target.value }))}
-            value={executionForm.explorerUrl}
-          />
-          <TextField
-            disabled={executionForm.status !== 'FAILED'}
-            label="Execution Error"
-            multiline
-            minRows={3}
-            onChange={(event) => setExecutionForm((current) => ({ ...current, executionError: event.target.value }))}
-            value={executionForm.executionError}
-          />
+          <Alert severity="info">
+            The backend will create the on-chain request, submit the approval transaction, and record the execution result automatically on the local validator.
+          </Alert>
+          <Typography color="text.secondary" variant="body2">
+            This uses the server-managed maker and checker wallets configured in the backend. For transfer and burn, the source wallet must match the configured maker wallet.
+          </Typography>
         </Stack>
       </AppDialog>
     </Stack>

@@ -11,9 +11,30 @@ function getPrismaBinaryPath() {
   return path.join(process.cwd(), 'node_modules', '.bin', binaryName);
 }
 
+function getPrismaClientPath() {
+  return path.join(process.cwd(), 'node_modules', '.prisma', 'client', 'index.js');
+}
+
 function hasGeneratedPrismaClient() {
-  const prismaClientPath = path.join(process.cwd(), 'node_modules', '.prisma', 'client', 'index.js');
-  return fs.existsSync(prismaClientPath);
+  return fs.existsSync(getPrismaClientPath());
+}
+
+function shouldRegeneratePrismaClient() {
+  if (!hasGeneratedPrismaClient()) {
+    return true;
+  }
+
+  const prismaClientPath = getPrismaClientPath();
+  const schemaPath = path.join(process.cwd(), 'prisma', 'schema.prisma');
+
+  if (!fs.existsSync(schemaPath)) {
+    return false;
+  }
+
+  const clientStat = fs.statSync(prismaClientPath);
+  const schemaStat = fs.statSync(schemaPath);
+
+  return schemaStat.mtimeMs > clientStat.mtimeMs;
 }
 
 function runPrismaCommand(args) {
@@ -46,11 +67,11 @@ function runPrismaCommand(args) {
 
 async function bootstrapApplication() {
   if (env.AUTO_GENERATE_PRISMA) {
-    if (hasGeneratedPrismaClient()) {
-      logger.info('Prisma client already present. Skipping generate.');
-    } else {
+    if (shouldRegeneratePrismaClient()) {
       logger.info('Generating Prisma client...');
       await runPrismaCommand(['generate']);
+    } else {
+      logger.info('Prisma client already up to date. Skipping generate.');
     }
   }
 
@@ -66,8 +87,12 @@ async function bootstrapApplication() {
   if (env.SOLANA_AUTO_BOOTSTRAP) {
     const solanaBootstrap = await solanaService.bootstrapOnChainConfig();
     logger.info(
-      `Solana config ready at ${solanaBootstrap.configAddress}. Checker ${solanaBootstrap.checkerAddress} is configured.`,
+      `Solana config loaded at ${solanaBootstrap.configAddress}. On-chain admin: ${solanaBootstrap.onChain?.admin || 'not initialized'}.`,
     );
+
+    if (solanaBootstrap.warnings?.length) {
+      solanaBootstrap.warnings.forEach((warning) => logger.warn(warning));
+    }
   }
 }
 

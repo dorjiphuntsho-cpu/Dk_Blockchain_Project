@@ -1,22 +1,27 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Button, Card, CardContent, MenuItem, Stack, Typography } from '@mui/material';
 import { FormProvider, useForm } from 'react-hook-form';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 
+import AppTable from '../../components/common/AppTable';
+import ErrorState from '../../components/common/ErrorState';
 import LoadingScreen from '../../components/common/LoadingScreen';
 import PageHeader from '../../components/common/PageHeader';
 import FormTextField from '../../components/form/FormTextField';
 import { usersApi } from '../../modules/users/users.api';
 import { walletsApi } from '../../modules/wallets/wallets.api';
 import { walletSchema } from '../../modules/wallets/wallets.schemas';
+import { truncateMiddle } from '../../utils/format';
 
 function WalletDetailsPage() {
   const { id } = useParams();
   const { enqueueSnackbar } = useSnackbar();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
+  const [balances, setBalances] = useState([]);
+  const [balanceError, setBalanceError] = useState('');
   const methods = useForm({
     defaultValues: {
       userId: '',
@@ -29,25 +34,66 @@ function WalletDetailsPage() {
 
   async function loadWallet() {
     setLoading(true);
-    const [walletResponse, usersResponse] = await Promise.all([
-      walletsApi.getById(id),
-      usersApi.list({ page: 1, limit: 100 }),
-    ]);
+    setBalanceError('');
 
-    const wallet = walletResponse.data;
-    methods.reset({
-      userId: wallet.userId,
-      walletAddress: wallet.walletAddress,
-      label: wallet.label || '',
-      isPrimary: wallet.isPrimary,
-    });
-    setUsers(usersResponse.data.items);
-    setLoading(false);
+    try {
+      const [walletResponse, usersResponse] = await Promise.all([
+        walletsApi.getById(id),
+        usersApi.list({ page: 1, limit: 100 }),
+      ]);
+
+      const wallet = walletResponse.data;
+      methods.reset({
+        userId: wallet.userId,
+        walletAddress: wallet.walletAddress,
+        label: wallet.label || '',
+        isPrimary: wallet.isPrimary,
+      });
+      setUsers(usersResponse.data.items);
+
+      try {
+        const balancesResponse = await walletsApi.getTokenBalances(id);
+        setBalances(balancesResponse.data.balances || []);
+      } catch (loadError) {
+        setBalances([]);
+        setBalanceError(loadError.message || 'Unable to load token balances.');
+      }
+    } catch (loadError) {
+      throw loadError;
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    loadWallet();
+    loadWallet().catch((error) => {
+      enqueueSnackbar(error.message || 'Unable to load wallet details.', { variant: 'error' });
+      setLoading(false);
+    });
   }, [id]);
+
+  const balanceColumns = useMemo(() => [
+    {
+      key: 'mintAddress',
+      label: 'Mint',
+      render: (row) => truncateMiddle(row.mintAddress, 12, 10),
+    },
+    {
+      key: 'amount',
+      label: 'Balance',
+      align: 'right',
+    },
+    {
+      key: 'decimals',
+      label: 'Decimals',
+      align: 'right',
+    },
+    {
+      key: 'tokenAccountAddress',
+      label: 'Token Account',
+      render: (row) => truncateMiddle(row.tokenAccountAddress, 12, 10),
+    },
+  ], []);
 
   const handleSubmit = methods.handleSubmit(async (values) => {
     await walletsApi.update(id, {
@@ -100,6 +146,32 @@ function WalletDetailsPage() {
               </Stack>
             </Stack>
           </FormProvider>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent>
+          <Stack spacing={2}>
+            <Typography variant="h6">Token Balances</Typography>
+            <Typography color="text.secondary">
+              Live SPL token balances for this wallet from the connected Solana RPC.
+            </Typography>
+            {balanceError ? (
+              <ErrorState
+                actionLabel="Reload Balances"
+                description={balanceError}
+                onAction={() => loadWallet().catch(() => {})}
+                title="Unable to load token balances"
+              />
+            ) : (
+              <AppTable
+                columns={balanceColumns}
+                emptyDescription="No SPL token balances were found for this wallet on the current Solana RPC."
+                emptyTitle="No token balances"
+                pagination={null}
+                rows={balances}
+              />
+            )}
+          </Stack>
         </CardContent>
       </Card>
     </Stack>

@@ -30,6 +30,12 @@ router.get(
   validate(walletIdParamSchema),
   asyncHandler(walletController.getWalletById),
 );
+router.get(
+  '/:id/token-balances',
+  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.MAKER, ROLE_NAMES.CHECKER, ROLE_NAMES.EXECUTOR),
+  validate(walletIdParamSchema),
+  asyncHandler(walletController.getWalletTokenBalances),
+);
 router.patch('/:id', authorize(ROLE_NAMES.ADMIN), validate(updateWalletSchema), asyncHandler(walletController.updateWallet));
 router.patch(
   '/:id/status',

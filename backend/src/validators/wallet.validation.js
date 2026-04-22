@@ -1,5 +1,8 @@
 const {
   optionalBooleanFromUnknown,
+  optionalEnumQuerySchema,
+  optionalTrimmedQueryString,
+  optionalUuidQuerySchema,
   optionalTrimmedString,
   uuidSchema,
   walletAddressSchema,
@@ -23,12 +26,12 @@ const listWalletsQuerySchema = z.object({
   query: z.object({
     page: z.coerce.number().int().positive().optional(),
     limit: z.coerce.number().int().positive().optional(),
-    userId: uuidSchema.optional(),
+    userId: optionalUuidQuerySchema,
     isActive: optionalBooleanFromUnknown,
     isPrimary: optionalBooleanFromUnknown,
-    walletAddress: optionalTrimmedString,
-    sortBy: z.enum(['createdAt', 'updatedAt', 'walletAddress']).optional(),
-    sortOrder: z.enum(['asc', 'desc']).optional(),
+    walletAddress: optionalTrimmedQueryString,
+    sortBy: optionalEnumQuerySchema(z.enum(['createdAt', 'updatedAt', 'walletAddress'])),
+    sortOrder: optionalEnumQuerySchema(z.enum(['asc', 'desc'])),
   }),
 });
 
