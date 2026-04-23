@@ -4,6 +4,7 @@ const { buildPagination, getPagination, getSortOptions } = require('../utils/pag
 const {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
+  ROLE_NAMES,
   TOKEN_REQUEST_STATUSES,
   TOKEN_REQUEST_TYPES,
   VALID_STATUS_TRANSITIONS,
@@ -18,6 +19,100 @@ function assertTransition(currentStatus, nextStatus) {
   if (!allowedStatuses.includes(nextStatus)) {
     throw new ApiError(400, `Invalid status transition from ${currentStatus} to ${nextStatus}`);
   }
+}
+
+function hasElevatedExecutionAccess(actorUser) {
+  return actorUser.roles.some((role) =>
+    [ROLE_NAMES.ADMIN, ROLE_NAMES.CHECKER, ROLE_NAMES.EXECUTOR].includes(role),
+  );
+}
+
+function hasRole(actorUser, roleName) {
+  return actorUser.roles.includes(roleName);
+}
+
+function isOnChainPendingStatus(status) {
+  return [
+    TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION,
+    TOKEN_REQUEST_STATUSES.ON_CHAIN_PENDING,
+  ].includes(status);
+}
+
+function normalizeOnChainPendingStatus(status) {
+  if (status === TOKEN_REQUEST_STATUSES.ON_CHAIN_PENDING) {
+    return TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION;
+  }
+
+  return status;
+}
+
+function assertExecutionPreparationAccess(actorUser, tokenRequest) {
+  if (tokenRequest.makerUserId === actorUser.id) {
+    return;
+  }
+
+  if (hasElevatedExecutionAccess(actorUser)) {
+    return;
+  }
+
+  throw new ApiError(403, 'You do not have access to execution preparation for this token request');
+}
+
+function assertMakerPreparationAccess(actorUser, tokenRequest) {
+  if (hasRole(actorUser, ROLE_NAMES.ADMIN)) {
+    return;
+  }
+
+  if (hasRole(actorUser, ROLE_NAMES.MAKER) && tokenRequest.makerUserId === actorUser.id) {
+    return;
+  }
+
+  throw new ApiError(403, 'Only the request maker or an admin can prepare maker wallet payloads');
+}
+
+function assertCheckerPreparationAccess(actorUser, tokenRequest) {
+  if (hasRole(actorUser, ROLE_NAMES.ADMIN)) {
+    return;
+  }
+
+  if (!hasRole(actorUser, ROLE_NAMES.CHECKER)) {
+    throw new ApiError(403, 'Only checker or admin users can prepare checker wallet payloads');
+  }
+
+  if (!tokenRequest.checkerUserId) {
+    throw new ApiError(400, 'Checker preparation is only available after off-chain approval is recorded');
+  }
+
+  if (tokenRequest.checkerUserId !== actorUser.id) {
+    throw new ApiError(403, 'Only the checker who approved this request can prepare checker wallet payloads');
+  }
+}
+
+function assertReadyForExecution(tokenRequest) {
+  if (!isOnChainPendingStatus(tokenRequest.status)) {
+    throw new ApiError(400, 'Only on-chain pending requests can be prepared for browser signing');
+  }
+}
+
+async function createPreparationAuditLog({
+  actorUserId,
+  tokenRequest,
+  preparationType,
+  payload,
+}) {
+  await auditLogService.createAuditLog({
+    actorUserId,
+    entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+    entityId: tokenRequest.id,
+    action: AUDIT_ACTIONS.PREPARE_EXECUTION,
+    metadata: {
+      preparationType,
+      requestType: tokenRequest.requestType,
+      status: tokenRequest.status,
+      operation: payload.operation || null,
+      onChainRequestAddress: tokenRequest.onChainRequestAddress || null,
+    },
+  });
 }
 
 async function ensureWalletState(walletId, fieldName, tx = prisma) {
@@ -142,7 +237,7 @@ async function listTokenRequests(query) {
   );
 
   const where = {
-    ...(query.status ? { status: query.status } : {}),
+    ...(query.status ? { status: normalizeOnChainPendingStatus(query.status) } : {}),
     ...(query.requestType ? { requestType: query.requestType } : {}),
     ...(query.makerUserId ? { makerUserId: query.makerUserId } : {}),
     ...(query.checkerUserId ? { checkerUserId: query.checkerUserId } : {}),
@@ -320,7 +415,7 @@ async function markReadyForExecution(id, actorUserId) {
   const existingRequest = await getTokenRequestOrThrow(id);
 
   if (existingRequest.status !== TOKEN_REQUEST_STATUSES.APPROVED) {
-    throw new ApiError(400, 'Only APPROVED requests can be marked ready for execution');
+    throw new ApiError(400, 'Only APPROVED requests can be marked on-chain pending');
   }
 
   assertTransition(existingRequest.status, TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION);
@@ -368,11 +463,185 @@ async function markReadyForExecution(id, actorUserId) {
   return tokenRequest;
 }
 
+async function prepareExecution(id, actorUser) {
+  const existingRequest = await getTokenRequestOrThrow(id);
+
+  assertReadyForExecution(existingRequest);
+
+  assertExecutionPreparationAccess(actorUser, existingRequest);
+
+  const payload = await blockchainService.prepareExecutionPayload(id);
+  await createPreparationAuditLog({
+    actorUserId: actorUser.id,
+    tokenRequest: existingRequest,
+    preparationType: 'EXECUTION_GENERIC',
+    payload,
+  });
+
+  return payload;
+}
+
+async function prepareMintRequest(id, actorUser) {
+  const existingRequest = await getTokenRequestOrThrow(id);
+  assertReadyForExecution(existingRequest);
+  assertMakerPreparationAccess(actorUser, existingRequest);
+
+  if (existingRequest.requestType !== TOKEN_REQUEST_TYPES.MINT) {
+    throw new ApiError(400, 'This endpoint only supports MINT requests');
+  }
+
+  const payload = await blockchainService.prepareMintRequestPayload(id);
+  await createPreparationAuditLog({
+    actorUserId: actorUser.id,
+    tokenRequest: existingRequest,
+    preparationType: 'MAKER_MINT_REQUEST',
+    payload,
+  });
+
+  return payload;
+}
+
+async function prepareTransferRequest(id, actorUser) {
+  const existingRequest = await getTokenRequestOrThrow(id);
+  assertReadyForExecution(existingRequest);
+  assertMakerPreparationAccess(actorUser, existingRequest);
+
+  if (existingRequest.requestType !== TOKEN_REQUEST_TYPES.TRANSFER) {
+    throw new ApiError(400, 'This endpoint only supports TRANSFER requests');
+  }
+
+  const payload = await blockchainService.prepareTransferRequestPayload(id);
+  await createPreparationAuditLog({
+    actorUserId: actorUser.id,
+    tokenRequest: existingRequest,
+    preparationType: 'MAKER_TRANSFER_REQUEST',
+    payload,
+  });
+
+  return payload;
+}
+
+async function prepareBurnRequest(id, actorUser) {
+  const existingRequest = await getTokenRequestOrThrow(id);
+  assertReadyForExecution(existingRequest);
+  assertMakerPreparationAccess(actorUser, existingRequest);
+
+  if (existingRequest.requestType !== TOKEN_REQUEST_TYPES.BURN) {
+    throw new ApiError(400, 'This endpoint only supports BURN requests');
+  }
+
+  const payload = await blockchainService.prepareBurnRequestPayload(id);
+  await createPreparationAuditLog({
+    actorUserId: actorUser.id,
+    tokenRequest: existingRequest,
+    preparationType: 'MAKER_BURN_REQUEST',
+    payload,
+  });
+
+  return payload;
+}
+
+async function prepareCheckerApproval(id, actorUser) {
+  const existingRequest = await getTokenRequestOrThrow(id);
+  assertReadyForExecution(existingRequest);
+  assertCheckerPreparationAccess(actorUser, existingRequest);
+
+  if (!existingRequest.onChainRequestAddress) {
+    throw new ApiError(
+      400,
+      'Maker wallet initiation must be recorded before checker approval can be prepared',
+    );
+  }
+
+  const payload = await blockchainService.prepareCheckerApprovalPayload(id);
+  await createPreparationAuditLog({
+    actorUserId: actorUser.id,
+    tokenRequest: existingRequest,
+    preparationType: 'CHECKER_APPROVAL',
+    payload,
+  });
+
+  return payload;
+}
+
+async function prepareCheckerRejection(id, actorUser) {
+  const existingRequest = await getTokenRequestOrThrow(id);
+  assertReadyForExecution(existingRequest);
+  assertCheckerPreparationAccess(actorUser, existingRequest);
+
+  if (!existingRequest.onChainRequestAddress) {
+    throw new ApiError(
+      400,
+      'Maker wallet initiation must be recorded before checker rejection can be prepared',
+    );
+  }
+
+  const payload = await blockchainService.prepareCheckerRejectionPayload(id);
+  await createPreparationAuditLog({
+    actorUserId: actorUser.id,
+    tokenRequest: existingRequest,
+    preparationType: 'CHECKER_REJECTION',
+    payload,
+  });
+
+  return payload;
+}
+
+async function recordInitiation(id, payload, actorUserId) {
+  const existingRequest = await getTokenRequestOrThrow(id);
+
+  if (existingRequest.makerUserId !== actorUserId) {
+    throw new ApiError(403, 'You can only record initiation for your own token requests');
+  }
+
+  if (!isOnChainPendingStatus(existingRequest.status)) {
+    throw new ApiError(400, 'Only on-chain pending requests can record wallet initiation');
+  }
+
+  // Phase A: All request types now support browser wallet initiation including MINT
+  const expectedMakerWalletAddress = existingRequest.sourceWallet?.walletAddress || existingRequest.makerWalletAddress;
+  if (expectedMakerWalletAddress && payload.makerWalletAddress !== expectedMakerWalletAddress) {
+    throw new ApiError(
+      400,
+      `makerWalletAddress must match the expected wallet address ${expectedMakerWalletAddress}`,
+    );
+  }
+
+  const tokenRequest = await prisma.$transaction(async (tx) => {
+    const updatedRequest = await blockchainService.recordInitiationResult(id, payload, tx);
+
+    await auditLogService.createAuditLog(
+      {
+        actorUserId,
+        entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+        entityId: id,
+        action: AUDIT_ACTIONS.RECORD_INITIATION,
+        metadata: {
+          previousExecutionMode: existingRequest.executionMode,
+          newExecutionMode: updatedRequest.executionMode,
+          makerWalletAddress: updatedRequest.makerWalletAddress,
+          onChainRequestAddress: updatedRequest.onChainRequestAddress,
+          initiationTxSignature: updatedRequest.initiationTxSignature,
+          initiationExplorerUrl: updatedRequest.initiationExplorerUrl,
+        },
+      },
+      tx,
+    );
+
+    return tx.tokenRequest.findUnique({
+      where: { id },
+      include: tokenRequestInclude,
+    });
+  });
+
+  return tokenRequest;
+}
+
 async function recordExecution(id, payload, actorUserId) {
   const existingRequest = await getTokenRequestOrThrow(id);
 
-  if (existingRequest.status !== TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION) {
-    throw new ApiError(400, 'Only READY_FOR_EXECUTION requests can record execution results');
+  if (!isOnChainPendingStatus(existingRequest.status)) {
+    throw new ApiError(400, 'Only on-chain pending requests can record execution results');
   }
 
   assertTransition(existingRequest.status, payload.status);
@@ -389,6 +658,11 @@ async function recordExecution(id, payload, actorUserId) {
       payload.status,
       payload.status === TOKEN_REQUEST_STATUSES.EXECUTED ? null : payload.executionError,
       tx,
+      {
+        onChainRequestAddress: existingRequest.onChainRequestAddress,
+        sourceTokenAccountAddress: existingRequest.sourceTokenAccountAddress,
+        destinationTokenAccountAddress: existingRequest.destinationTokenAccountAddress,
+      },
     );
 
     const updatedRequest = await tx.tokenRequest.findUnique({
@@ -436,14 +710,18 @@ async function recordExecution(id, payload, actorUserId) {
 async function executeReadyRequest(id, actorUserId) {
   const existingRequest = await getTokenRequestOrThrow(id);
 
-  if (existingRequest.status !== TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION) {
-    throw new ApiError(400, 'Only READY_FOR_EXECUTION requests can be executed');
+  if (!isOnChainPendingStatus(existingRequest.status)) {
+    throw new ApiError(400, 'Only on-chain pending requests can be executed');
   }
 
   let executionResult;
   try {
     executionResult = await blockchainService.executeReadyRequest(id);
   } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
     await prisma.$transaction(async (tx) => {
       await blockchainService.recordTransactionResult(
         id,
@@ -452,6 +730,11 @@ async function executeReadyRequest(id, actorUserId) {
         TOKEN_REQUEST_STATUSES.FAILED,
         error.message,
         tx,
+        {
+          onChainRequestAddress: existingRequest.onChainRequestAddress,
+          sourceTokenAccountAddress: existingRequest.sourceTokenAccountAddress,
+          destinationTokenAccountAddress: existingRequest.destinationTokenAccountAddress,
+        },
       );
 
       await auditLogService.createAuditLog(
@@ -497,6 +780,11 @@ async function executeReadyRequest(id, actorUserId) {
       TOKEN_REQUEST_STATUSES.EXECUTED,
       null,
       tx,
+      {
+        onChainRequestAddress: executionResult.onChainRequestAddress,
+        sourceTokenAccountAddress: executionResult.sourceTokenAccount,
+        destinationTokenAccountAddress: executionResult.destinationTokenAccount,
+      },
     );
 
     const updatedRequest = await tx.tokenRequest.findUnique({
@@ -546,20 +834,6 @@ async function executeReadyRequest(id, actorUserId) {
   };
 }
 
-async function prepareExecutionPayload(id) {
-  const tokenRequest = await getTokenRequestOrThrow(id);
-
-  if (tokenRequest.requestType === TOKEN_REQUEST_TYPES.MINT) {
-    return blockchainService.prepareMintExecutionPayload(id);
-  }
-
-  if (tokenRequest.requestType === TOKEN_REQUEST_TYPES.TRANSFER) {
-    return blockchainService.prepareTransferExecutionPayload(id);
-  }
-
-  return blockchainService.prepareBurnExecutionPayload(id);
-}
-
 module.exports = {
   createTokenRequest,
   listTokenRequests,
@@ -567,7 +841,13 @@ module.exports = {
   updateTokenRequest,
   submitTokenRequest,
   markReadyForExecution,
+  prepareExecution,
+  prepareMintRequest,
+  prepareTransferRequest,
+  prepareBurnRequest,
+  prepareCheckerApproval,
+  prepareCheckerRejection,
+  recordInitiation,
   recordExecution,
   executeReadyRequest,
-  prepareExecutionPayload,
 };

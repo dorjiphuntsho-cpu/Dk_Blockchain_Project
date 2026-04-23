@@ -16,7 +16,13 @@ import AppTable from '../../components/common/AppTable';
 import ErrorState from '../../components/common/ErrorState';
 import LoadingScreen from '../../components/common/LoadingScreen';
 import PageHeader from '../../components/common/PageHeader';
+import useSolanaWallet from '../../hooks/useSolanaWallet';
 import { solanaAdminApi } from '../../modules/solana/solana.api';
+import {
+  buildAdminMintCreationTransaction,
+  buildExplorerTransactionUrl,
+  signAndSendWalletTransaction,
+} from '../../modules/solana/walletExecution';
 import { truncateMiddle } from '../../utils/format';
 
 function DetailRow({ label, value }) {
@@ -30,12 +36,16 @@ function DetailRow({ label, value }) {
 
 function SolanaAdminPage() {
   const { enqueueSnackbar } = useSnackbar();
+  const { address: connectedWalletAddress, connected: walletConnected, provider: walletProvider, connect } = useSolanaWallet();
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [checkerAddress, setCheckerAddress] = useState('');
   const [newAdminAddress, setNewAdminAddress] = useState('');
   const [mintDecimals, setMintDecimals] = useState('0');
+  const [mintName, setMintName] = useState('');
+  const [mintSymbol, setMintSymbol] = useState('');
+  const [mintUri, setMintUri] = useState('');
   const [latestMint, setLatestMint] = useState(null);
   const [submitting, setSubmitting] = useState({
     createMint: false,
@@ -70,6 +80,12 @@ function SolanaAdminPage() {
         isConfiguredChecker: status?.configuredSigners?.checker === address,
       })),
     [status],
+  );
+  const adminWalletMismatch = Boolean(
+    walletConnected
+      && connectedWalletAddress
+      && status?.configuredSigners?.admin
+      && connectedWalletAddress !== status.configuredSigners.admin,
   );
 
   if (loading && !status) {
@@ -114,6 +130,17 @@ function SolanaAdminPage() {
                     size="small"
                   />
                 </Stack>
+                {walletConnected ? (
+                  <Alert severity={adminWalletMismatch ? 'warning' : 'success'}>
+                    {adminWalletMismatch
+                      ? `Connected wallet ${connectedWalletAddress} does not match the configured admin signer ${status?.configuredSigners?.admin}.`
+                      : `Connected admin wallet: ${connectedWalletAddress}`}
+                  </Alert>
+                ) : (
+                  <Alert severity="info">
+                    Connect the admin Phantom wallet before creating a managed token mint in the browser.
+                  </Alert>
+                )}
 
                 <Typography variant="h6">Network Status</Typography>
                 <Grid container spacing={2}>
@@ -163,6 +190,29 @@ function SolanaAdminPage() {
                   <Alert severity="info">
                     The new mint will be owned by the program PDA, so approved mint requests can increase supply later.
                   </Alert>
+                  {!walletConnected ? (
+                    <Button onClick={connect} variant="outlined">
+                      Connect Wallet
+                    </Button>
+                  ) : null}
+                  <TextField
+                    fullWidth
+                    label="Token Name"
+                    onChange={(event) => setMintName(event.target.value)}
+                    value={mintName}
+                  />
+                  <TextField
+                    fullWidth
+                    label="Token Symbol"
+                    onChange={(event) => setMintSymbol(event.target.value)}
+                    value={mintSymbol}
+                  />
+                  <TextField
+                    fullWidth
+                    label="Metadata URI"
+                    onChange={(event) => setMintUri(event.target.value)}
+                    value={mintUri}
+                  />
                   <TextField
                     fullWidth
                     inputProps={{ min: 0, max: 9 }}
@@ -172,12 +222,50 @@ function SolanaAdminPage() {
                     value={mintDecimals}
                   />
                   <Button
-                    disabled={submitting.createMint}
+                    disabled={submitting.createMint || !mintName.trim() || !mintSymbol.trim() || !mintUri.trim() || !walletConnected || adminWalletMismatch}
                     onClick={async () => {
                       try {
                         setSubmitting((current) => ({ ...current, createMint: true }));
-                        const response = await solanaAdminApi.createTokenMint(Number(mintDecimals || 0));
-                        setLatestMint(response.data);
+                        if (!walletProvider) {
+                          throw new Error('Wallet provider is not available.');
+                        }
+
+                        const preparationResponse = await solanaAdminApi.prepareMintCreation();
+                        const executionPayload = preparationResponse.data;
+                        if (executionPayload.expectedAdminWalletAddress && executionPayload.expectedAdminWalletAddress !== connectedWalletAddress) {
+                          throw new Error(`Connected wallet must match the configured admin wallet ${executionPayload.expectedAdminWalletAddress}.`);
+                        }
+
+                        const builtTransaction = await buildAdminMintCreationTransaction({
+                          executionPayload,
+                          adminWalletAddress: connectedWalletAddress,
+                          decimals: Number(mintDecimals || 0),
+                        });
+
+                        const txSignature = await signAndSendWalletTransaction({
+                          connection: builtTransaction.connection,
+                          provider: walletProvider,
+                          transaction: builtTransaction.transaction,
+                          partialSigners: [builtTransaction.mintKeypair],
+                        });
+
+                        const recordResponse = await solanaAdminApi.recordCreatedTokenMint({
+                          decimals: Number(mintDecimals || 0),
+                          name: mintName.trim(),
+                          symbol: mintSymbol.trim(),
+                          metadataUri: mintUri.trim(),
+                          mintAddress: builtTransaction.mintAddress,
+                          tokenAuthority: executionPayload.tokenAuthority,
+                          txSignature,
+                          explorerUrl: buildExplorerTransactionUrl(txSignature, executionPayload.rpcUrl),
+                          adminWalletAddress: connectedWalletAddress,
+                          mintAuthority: executionPayload.tokenAuthority,
+                          freezeAuthority: executionPayload.tokenAuthority,
+                        });
+                        setLatestMint(recordResponse.data);
+                        setMintName('');
+                        setMintSymbol('');
+                        setMintUri('');
                         enqueueSnackbar('Managed token mint created', { variant: 'success' });
                       } catch (actionError) {
                         enqueueSnackbar(actionError.message || 'Unable to create token mint', { variant: 'error' });
@@ -187,17 +275,22 @@ function SolanaAdminPage() {
                     }}
                     variant="contained"
                   >
-                    Create Token Mint
+                    Create Token Mint With Wallet
                   </Button>
                   {latestMint ? (
                     <Stack spacing={1}>
                       <Typography color="text.secondary" variant="body2">Latest Created Mint</Typography>
                       <Alert severity="success">
-                        Mint: {latestMint.mintAddress}
+                        {latestMint.name} ({latestMint.symbol}) - {latestMint.mintAddress}
                       </Alert>
                       <Typography color="text.secondary" variant="body2">
                         Use this address in the token request form. Current supply is {latestMint.supply} and decimals are {latestMint.decimals}.
                       </Typography>
+                      {latestMint.metadataUri ? (
+                        <Typography color="text.secondary" variant="body2">
+                          Metadata URI: {latestMint.metadataUri}
+                        </Typography>
+                      ) : null}
                     </Stack>
                   ) : null}
                 </Stack>
@@ -336,3 +429,4 @@ function SolanaAdminPage() {
 }
 
 export default SolanaAdminPage;
+

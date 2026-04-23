@@ -84,14 +84,22 @@ async function bootstrapApplication() {
   await prisma.$connect();
   logger.info('Database connection established.');
 
-  if (env.SOLANA_AUTO_BOOTSTRAP) {
-    const solanaBootstrap = await solanaService.bootstrapOnChainConfig();
-    logger.info(
-      `Solana config loaded at ${solanaBootstrap.configAddress}. On-chain admin: ${solanaBootstrap.onChain?.admin || 'not initialized'}.`,
-    );
+  if (env.SOLANA_BOOTSTRAP_MODE !== 'disabled') {
+    try {
+      const solanaBootstrap = await solanaService.bootstrapOnChainConfig();
+      logger.info(
+        `Solana config loaded at ${solanaBootstrap.configAddress}. On-chain admin: ${solanaBootstrap.onChain?.admin || 'not initialized'}.`,
+      );
 
-    if (solanaBootstrap.warnings?.length) {
-      solanaBootstrap.warnings.forEach((warning) => logger.warn(warning));
+      if (solanaBootstrap.warnings?.length) {
+        solanaBootstrap.warnings.forEach((warning) => logger.warn(warning));
+      }
+    } catch (error) {
+      if (env.SOLANA_BOOTSTRAP_MODE === 'warn') {
+        logger.warn(`Solana bootstrap warning: ${error.message}`);
+      } else {
+        throw error;
+      }
     }
   }
 }

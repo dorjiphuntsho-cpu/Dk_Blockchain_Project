@@ -1,6 +1,7 @@
 const { successResponse } = require('../utils/apiResponse');
 const solanaService = require('../services/solana.service');
 const managedTokenService = require('../services/managedToken.service');
+const blockchainService = require('../services/blockchain.service');
 
 async function getConfigStatus(_req, res) {
   const status = await solanaService.getConfigStatus();
@@ -38,9 +39,30 @@ async function setAdmin(req, res) {
   });
 }
 
+async function prepareMintCreation(_req, res) {
+  const payload = await blockchainService.prepareMintCreationPayload();
+
+  return successResponse(res, {
+    message: 'Mint creation payload prepared successfully',
+    data: payload,
+  });
+}
+
+async function recordCreatedTokenMint(req, res) {
+  const persistedMint = await managedTokenService.createManagedTokenRecord(req.validated.body, req.user.id);
+  const hydratedMint = await solanaService.hydrateManagedToken(persistedMint);
+
+  return successResponse(res, {
+    statusCode: 201,
+    message: 'Managed token mint recorded successfully',
+    data: hydratedMint,
+  });
+}
+
 async function createTokenMint(req, res) {
-  const mint = await solanaService.createTokenMint(req.validated.body.decimals);
-  const persistedMint = await managedTokenService.createManagedTokenRecord(mint, req.user.id);
+  const mint = await solanaService.createTokenMint(req.validated.body);
+  const mintWithAdmin = { ...mint, adminWalletAddress: req.validated.body.adminWalletAddress };
+  const persistedMint = await managedTokenService.createManagedTokenRecord(mintWithAdmin, req.user.id);
   const hydratedMint = await solanaService.hydrateManagedToken(persistedMint);
 
   return successResponse(res, {
@@ -53,6 +75,8 @@ async function createTokenMint(req, res) {
 module.exports = {
   addChecker,
   createTokenMint,
+  recordCreatedTokenMint,
+  prepareMintCreation,
   getConfigStatus,
   removeChecker,
   setAdmin,

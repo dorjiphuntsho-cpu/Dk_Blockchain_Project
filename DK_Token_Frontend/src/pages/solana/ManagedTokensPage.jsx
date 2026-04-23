@@ -42,6 +42,20 @@ function ManagedTokensPage() {
 
   const columns = useMemo(() => [
     {
+      key: 'name',
+      label: 'Token',
+      render: (row) => (
+        <Stack spacing={0.35}>
+          <Typography sx={{ fontWeight: 700 }} variant="body2">
+            {row.name || row.onChain?.metadata?.name || 'Unnamed Token'}
+          </Typography>
+          <Typography color="text.secondary" variant="caption">
+            {row.symbol || row.onChain?.metadata?.symbol || '-'}
+          </Typography>
+        </Stack>
+      ),
+    },
+    {
       key: 'mintAddress',
       label: 'Mint Address',
       render: (row) => (
@@ -124,7 +138,7 @@ function ManagedTokensPage() {
 
       <SearchFilters>
         <TextField
-          label="Search mint or authority"
+          label="Search name, symbol, mint, or authority"
           onChange={(event) => setFilters({ search: event.target.value })}
           value={filters.search}
         />

@@ -17,12 +17,25 @@ export const REQUEST_STATUSES = {
   APPROVED: 'APPROVED',
   REJECTED: 'REJECTED',
   READY_FOR_EXECUTION: 'READY_FOR_EXECUTION',
+  ON_CHAIN_PENDING: 'ON_CHAIN_PENDING',
   EXECUTED: 'EXECUTED',
   FAILED: 'FAILED',
 };
 
+export const ON_CHAIN_PENDING_STATUSES = [
+  REQUEST_STATUSES.READY_FOR_EXECUTION,
+  REQUEST_STATUSES.ON_CHAIN_PENDING,
+];
+
+export const EXECUTION_MODES = {
+  SERVER_MANAGED: 'SERVER_MANAGED',
+  BROWSER_WALLET: 'BROWSER_WALLET',
+};
+
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 export const ENABLE_MOCK_API = String(import.meta.env.VITE_ENABLE_MOCK_API ?? 'false') === 'true';
+export const SOLANA_CLUSTER = import.meta.env.VITE_SOLANA_CLUSTER || 'localnet';
+export const SOLANA_RPC_URL = import.meta.env.VITE_SOLANA_RPC_URL || 'http://127.0.0.1:8899';
 
 export const ROLE_OPTIONS = Object.values(ROLES).map((role) => ({
   label: role,
@@ -34,7 +47,15 @@ export const REQUEST_TYPE_OPTIONS = Object.values(REQUEST_TYPES).map((type) => (
   value: type,
 }));
 
-export const REQUEST_STATUS_OPTIONS = Object.values(REQUEST_STATUSES).map((status) => ({
+export const REQUEST_STATUS_OPTIONS = [
+  REQUEST_STATUSES.DRAFT,
+  REQUEST_STATUSES.PENDING_APPROVAL,
+  REQUEST_STATUSES.APPROVED,
+  REQUEST_STATUSES.REJECTED,
+  REQUEST_STATUSES.ON_CHAIN_PENDING,
+  REQUEST_STATUSES.EXECUTED,
+  REQUEST_STATUSES.FAILED,
+].map((status) => ({
   label: status.replaceAll('_', ' '),
   value: status,
 }));
@@ -45,7 +66,7 @@ export const NAV_ITEMS = [
   { label: 'My Wallets', path: '/my-wallets', roles: Object.values(ROLES), section: 'Overview', icon: 'wallets' },
   { label: 'My Requests', path: '/my-requests', roles: [ROLES.MAKER], section: 'Operations', icon: 'myRequests' },
   { label: 'Pending Approvals', path: '/pending-approvals', roles: [ROLES.CHECKER], section: 'Operations', icon: 'approvals' },
-  { label: 'Ready for Execution', path: '/ready-for-execution', roles: [ROLES.ADMIN, ROLES.EXECUTOR], section: 'Operations', icon: 'execution' },
+  { label: 'On-chain Pending', path: '/ready-for-execution', roles: [ROLES.ADMIN, ROLES.EXECUTOR], section: 'Operations', icon: 'execution' },
   { label: 'Solana Admin', path: '/solana-admin', roles: [ROLES.ADMIN], section: 'Admin', icon: 'solana' },
   { label: 'Managed Tokens', path: '/managed-tokens', roles: [ROLES.ADMIN], section: 'Admin', icon: 'request' },
   { label: 'Users', path: '/users', roles: [ROLES.ADMIN], section: 'Admin', icon: 'users' },
@@ -66,7 +87,7 @@ export const ROUTE_TITLES = {
   '/token-requests/new': 'Create Token Request',
   '/my-requests': 'My Token Requests',
   '/pending-approvals': 'Pending Approvals',
-  '/ready-for-execution': 'Ready for Execution',
+  '/ready-for-execution': 'On-chain Pending',
   '/solana-admin': 'Solana Admin',
   '/managed-tokens': 'Managed Tokens',
   '/audit-logs': 'Audit Logs',

@@ -30,6 +30,11 @@ enum TokenRequestStatus {
   FAILED
 }
 
+enum ExecutionMode {
+  SERVER_MANAGED
+  BROWSER_WALLET
+}
+
 enum ApprovalAction {
   APPROVED
   REJECTED
@@ -93,35 +98,46 @@ model Wallet {
 }
 
 model TokenRequest {
-  id                  String             @id @default(uuid()) @db.Uuid
-  requestType         TokenRequestType
-  tokenMintAddress    String
-  amount              Decimal            @db.Decimal(30, 10)
-  sourceWalletId      String?            @db.Uuid
-  destinationWalletId String?            @db.Uuid
-  makerUserId         String             @db.Uuid
-  checkerUserId       String?            @db.Uuid
-  status              TokenRequestStatus @default(DRAFT)
-  remarks             String?
-  rejectionReason     String?
-  txSignature         String?
-  explorerUrl         String?
-  executionError      String?
-  approvedAt          DateTime?
-  rejectedAt          DateTime?
-  executedAt          DateTime?
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-  sourceWallet        Wallet?            @relation("SourceWalletTokenRequests", fields: [sourceWalletId], references: [id], onDelete: Restrict)
-  destinationWallet   Wallet?            @relation("DestinationWalletTokenRequests", fields: [destinationWalletId], references: [id], onDelete: Restrict)
-  makerUser           User               @relation("MakerTokenRequests", fields: [makerUserId], references: [id], onDelete: Restrict)
-  checkerUser         User?              @relation("CheckerTokenRequests", fields: [checkerUserId], references: [id], onDelete: Restrict)
-  approvals           RequestApproval[]
+  id                           String             @id @default(uuid()) @db.Uuid
+  requestType                  TokenRequestType
+  tokenMintAddress             String
+  amount                       Decimal            @db.Decimal(30, 10)
+  sourceWalletId               String?            @db.Uuid
+  destinationWalletId          String?            @db.Uuid
+  makerUserId                  String             @db.Uuid
+  checkerUserId                String?            @db.Uuid
+  status                       TokenRequestStatus @default(DRAFT)
+  executionMode                ExecutionMode      @default(SERVER_MANAGED)
+  makerWalletAddress           String?
+  sourceTokenAccountAddress    String?
+  destinationTokenAccountAddress String?
+  onChainRequestAddress        String?
+  initiationTxSignature        String?
+  initiationExplorerUrl        String?
+  makerInitiatedAt             DateTime?
+  remarks                      String?
+  rejectionReason              String?
+  txSignature                  String?
+  explorerUrl                  String?
+  executionError               String?
+  approvedAt                   DateTime?
+  rejectedAt                   DateTime?
+  executedAt                   DateTime?
+  createdAt                    DateTime           @default(now())
+  updatedAt                    DateTime           @updatedAt
+  sourceWallet                 Wallet?            @relation("SourceWalletTokenRequests", fields: [sourceWalletId], references: [id], onDelete: Restrict)
+  destinationWallet            Wallet?            @relation("DestinationWalletTokenRequests", fields: [destinationWalletId], references: [id], onDelete: Restrict)
+  makerUser                    User               @relation("MakerTokenRequests", fields: [makerUserId], references: [id], onDelete: Restrict)
+  checkerUser                  User?              @relation("CheckerTokenRequests", fields: [checkerUserId], references: [id], onDelete: Restrict)
+  approvals                    RequestApproval[]
 
   @@index([status])
   @@index([requestType])
+  @@index([executionMode])
   @@index([makerUserId])
   @@index([checkerUserId])
+  @@index([makerWalletAddress])
+  @@index([onChainRequestAddress])
   @@index([createdAt])
   @@map("token_requests")
 }
@@ -161,6 +177,12 @@ model AuditLog {
 
 model ManagedToken {
   id                String   @id @default(uuid()) @db.Uuid
+  name              String?
+  symbol            String?
+  metadataUri       String?
+  metadataAddress   String?
+  metadataUpdateAuthority String?
+  metadataTxSignature String?
   mintAddress       String   @unique
   decimals          Int
   mintAuthority     String?
@@ -169,6 +191,8 @@ model ManagedToken {
   createdTxSignature String?
   explorerUrl       String?
   creatorUserId     String?  @db.Uuid
+  // Phase A: Track which admin wallet created this token
+  adminWalletAddress String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   creatorUser       User?    @relation("ManagedTokenCreator", fields: [creatorUserId], references: [id], onDelete: SetNull)

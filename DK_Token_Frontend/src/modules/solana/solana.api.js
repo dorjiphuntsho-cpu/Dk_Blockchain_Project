@@ -5,10 +5,16 @@ import { ENABLE_MOCK_API } from '../../utils/constants';
 export const solanaAdminApi = {
   getConfigStatus: async () =>
     (ENABLE_MOCK_API ? mockAdapter.solanaAdmin.getConfigStatus() : (await axiosClient.get('/solana/config-status')).data),
-  createTokenMint: async (decimals) =>
+  prepareMintCreation: async () =>
+    (ENABLE_MOCK_API ? mockAdapter.solanaAdmin.prepareMintCreation() : (await axiosClient.get('/solana/prepare/mint-creation')).data),
+  recordCreatedTokenMint: async (payload) =>
     (ENABLE_MOCK_API
-      ? mockAdapter.solanaAdmin.createTokenMint(decimals)
-      : (await axiosClient.post('/solana/token-mints', { decimals })).data),
+      ? mockAdapter.solanaAdmin.recordCreatedTokenMint(payload)
+      : (await axiosClient.post('/solana/token-mints/record', payload)).data),
+  createTokenMint: async (payload) =>
+    (ENABLE_MOCK_API
+      ? mockAdapter.solanaAdmin.createTokenMint(payload)
+      : (await axiosClient.post('/solana/token-mints', payload)).data),
   addChecker: async (checkerAddress) =>
     (ENABLE_MOCK_API
       ? mockAdapter.solanaAdmin.addChecker(checkerAddress)

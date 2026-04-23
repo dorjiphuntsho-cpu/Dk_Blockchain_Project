@@ -21,14 +21,22 @@ async function createManagedTokenRecord(payload, actorUserId, tx = prisma) {
   const managedToken = getManagedTokenDelegate(tx);
   const token = await managedToken.create({
     data: {
+      name: payload.name || null,
+      symbol: payload.symbol || null,
+      metadataUri: payload.metadataUri || null,
+      metadataAddress: payload.metadataAddress || null,
+      metadataUpdateAuthority: payload.metadataUpdateAuthority || null,
+      metadataTxSignature: payload.metadataTxSignature || null,
       mintAddress: payload.mintAddress,
       decimals: payload.decimals,
-      mintAuthority: payload.mintAuthority,
-      freezeAuthority: payload.freezeAuthority,
+      mintAuthority: payload.mintAuthority || payload.tokenAuthority || null,
+      freezeAuthority: payload.freezeAuthority || payload.tokenAuthority || null,
       tokenAuthority: payload.tokenAuthority,
       createdTxSignature: payload.txSignature || null,
       explorerUrl: payload.explorerUrl || null,
       creatorUserId: actorUserId || null,
+      // Phase A: Track admin wallet that created this token
+      adminWalletAddress: payload.adminWalletAddress || null,
     },
     include: managedTokenInclude,
   });
@@ -40,6 +48,10 @@ async function createManagedTokenRecord(payload, actorUserId, tx = prisma) {
       entityId: token.id,
       action: AUDIT_ACTIONS.CREATE,
       metadata: {
+        name: token.name,
+        symbol: token.symbol,
+        metadataUri: token.metadataUri,
+        metadataAddress: token.metadataAddress,
         mintAddress: token.mintAddress,
         decimals: token.decimals,
         tokenAuthority: token.tokenAuthority,
@@ -55,7 +67,7 @@ async function createManagedTokenRecord(payload, actorUserId, tx = prisma) {
 async function listManagedTokens(query) {
   const managedToken = getManagedTokenDelegate();
   const { page, limit, skip } = getPagination(query);
-  const orderBy = getSortOptions(query, ['createdAt', 'updatedAt', 'mintAddress', 'decimals'], { createdAt: 'desc' });
+  const orderBy = getSortOptions(query, ['createdAt', 'updatedAt', 'mintAddress', 'decimals', 'name', 'symbol'], { createdAt: 'desc' });
 
   const where = {
     ...(query.search
@@ -63,6 +75,18 @@ async function listManagedTokens(query) {
           OR: [
             {
               mintAddress: {
+                contains: query.search,
+                mode: 'insensitive',
+              },
+            },
+            {
+              name: {
+                contains: query.search,
+                mode: 'insensitive',
+              },
+            },
+            {
+              symbol: {
                 contains: query.search,
                 mode: 'insensitive',
               },

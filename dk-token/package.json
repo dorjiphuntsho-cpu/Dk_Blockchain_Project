@@ -3,6 +3,7 @@
   "scripts": {
     "sync:keys": "anchor keys sync",
     "build:anchor": "anchor keys sync && anchor build",
+    "deploy:anchor:devnet": "anchor keys sync && anchor deploy --provider.cluster devnet",
     "test:anchor": "anchor keys sync && anchor test",
     "test:anchor:skip-validator": "anchor keys sync && anchor test --skip-local-validator",
     "setup:local-wallet": "node ./scripts/setup-local-wallet.js",

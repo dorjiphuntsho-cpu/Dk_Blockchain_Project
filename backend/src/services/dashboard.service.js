@@ -28,6 +28,7 @@ function getVisibleRequestWhere(user) {
         in: [
           TOKEN_REQUEST_STATUSES.APPROVED,
           TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION,
+          TOKEN_REQUEST_STATUSES.ON_CHAIN_PENDING,
           TOKEN_REQUEST_STATUSES.EXECUTED,
           TOKEN_REQUEST_STATUSES.FAILED,
         ],
@@ -92,13 +93,17 @@ async function getDashboardOverview(user) {
   const countByStatus = Object.fromEntries(
     summaryCounts.map((item) => [item.status, item._count._all]),
   );
+  const onChainPendingRequests =
+    (countByStatus[TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION] || 0) +
+    (countByStatus[TOKEN_REQUEST_STATUSES.ON_CHAIN_PENDING] || 0);
 
   return {
     summary: {
       totalRequests: summaryCounts.reduce((total, item) => total + item._count._all, 0),
       pendingApprovals: countByStatus[TOKEN_REQUEST_STATUSES.PENDING_APPROVAL] || 0,
       approvedRequests: countByStatus[TOKEN_REQUEST_STATUSES.APPROVED] || 0,
-      readyForExecution: countByStatus[TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION] || 0,
+      readyForExecution: onChainPendingRequests,
+      onChainPending: onChainPendingRequests,
       executedRequests: countByStatus[TOKEN_REQUEST_STATUSES.EXECUTED] || 0,
       failedRequests: countByStatus[TOKEN_REQUEST_STATUSES.FAILED] || 0,
     },

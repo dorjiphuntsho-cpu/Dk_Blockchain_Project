@@ -146,3 +146,52 @@ npm run build:anchor
 ```
 
 If validator state becomes corrupted, remove the local ledger you are using and restart the validator.
+
+## Environment Profiles
+
+Keep localnet and devnet configuration separate instead of editing `.env` files by hand.
+
+Backend profiles:
+
+- `backend/.env.localnet`
+- `backend/.env.devnet`
+
+Frontend profiles:
+
+- `DK_Token_Frontend/.env.localnet`
+- `DK_Token_Frontend/.env.devnet`
+
+Before starting a target environment, copy the profile you want into the active `.env` file.
+
+Localnet:
+
+```powershell
+Copy-Item backend/.env.localnet backend/.env -Force
+Copy-Item DK_Token_Frontend/.env.localnet DK_Token_Frontend/.env -Force
+```
+
+Devnet:
+
+```powershell
+Copy-Item backend/.env.devnet backend/.env -Force
+Copy-Item DK_Token_Frontend/.env.devnet DK_Token_Frontend/.env -Force
+```
+
+## Devnet Deployment Path
+
+1. Fund separate devnet wallets for `admin` and `checker`.
+2. Optionally use Phantom as the maker wallet and leave `SOLANA_MAKER_KEYPAIR_PATH` blank in `backend/.env.devnet`.
+3. Copy the devnet env profiles into the active `.env` files.
+4. Build and deploy the Anchor program from `dk-token`:
+
+```bash
+npm run sync:keys
+npm run build:anchor
+npm run deploy:anchor:devnet
+```
+
+5. Start the backend and verify Solana bootstrap against `https://api.devnet.solana.com`.
+6. Start the frontend and confirm Phantom is connected to devnet for maker-side initiation.
+7. Run the mint, transfer, burn, approval, wallet-initiation, and execution flows end to end.
+
+More detailed environment switching notes live in `docs/devnet-runbook.md`.

@@ -107,8 +107,7 @@ function DashboardPage() {
 
         if (dashboardRole === ROLES.ADMIN) {
           calls.push(
-            requestsByStatus(REQUEST_STATUSES.APPROVED),
-            requestsByStatus(REQUEST_STATUSES.READY_FOR_EXECUTION),
+            requestsByStatus(REQUEST_STATUSES.ON_CHAIN_PENDING),
             auditLogsApi.list({ page: 1, limit: 5 }),
           );
         } else if (dashboardRole === ROLES.MAKER) {
@@ -119,10 +118,7 @@ function DashboardPage() {
         } else if (dashboardRole === ROLES.CHECKER) {
           calls.push(tokenRequestsApi.list({ page: 1, limit: 5, checkerUserId: user.id }));
         } else if (dashboardRole === ROLES.EXECUTOR) {
-          calls.push(
-            requestsByStatus(REQUEST_STATUSES.APPROVED),
-            requestsByStatus(REQUEST_STATUSES.READY_FOR_EXECUTION),
-          );
+          calls.push(requestsByStatus(REQUEST_STATUSES.ON_CHAIN_PENDING));
         }
 
         const results = await Promise.all(calls);
@@ -142,9 +138,8 @@ function DashboardPage() {
         };
 
         if (dashboardRole === ROLES.ADMIN) {
-          nextState.approvedQueue = rest[0]?.data?.items || [];
-          nextState.readyQueue = rest[1]?.data?.items || [];
-          nextState.auditTrail = rest[2]?.data?.items || [];
+          nextState.readyQueue = rest[0]?.data?.items || [];
+          nextState.auditTrail = rest[1]?.data?.items || [];
         } else if (dashboardRole === ROLES.MAKER) {
           nextState.drafts = rest[0]?.data?.items || [];
           nextState.draftCount = rest[0]?.data?.pagination?.totalItems || 0;
@@ -154,8 +149,7 @@ function DashboardPage() {
           nextState.reviewed = rest[0]?.data?.items || [];
           nextState.reviewedCount = rest[0]?.data?.pagination?.totalItems || 0;
         } else if (dashboardRole === ROLES.EXECUTOR) {
-          nextState.approvedQueue = rest[0]?.data?.items || [];
-          nextState.readyQueue = rest[1]?.data?.items || [];
+          nextState.readyQueue = rest[0]?.data?.items || [];
         }
 
         setState(nextState);
@@ -177,7 +171,7 @@ function DashboardPage() {
         return {
           eyebrow: 'Admin Overview',
           title: 'Dashboard',
-          subtitle: 'Monitor workflow volume, execution readiness, and recent control activity across the portal.',
+          subtitle: 'Monitor workflow volume, on-chain pending requests, and recent control activity across the portal.',
           recentTitle: 'Latest Token Requests',
           recentSubtitle: 'Newest requests across makers, approvals, and execution stages.',
         };
@@ -201,7 +195,7 @@ function DashboardPage() {
         return {
           eyebrow: 'Execution Desk',
           title: 'Dashboard',
-          subtitle: 'Focus on approved requests, ready queue depth, and execution outcomes.',
+          subtitle: 'Focus on ready requests, queue depth, and execution outcomes.',
           recentTitle: 'Execution Activity',
           recentSubtitle: 'Requests currently moving toward on-chain execution.',
         };
@@ -224,7 +218,7 @@ function DashboardPage() {
         return [
           metric('total', 'Total Requests', summary.totalRequests ?? 0, 'Across all visible workflows', <PlaylistAddCheckOutlinedIcon fontSize="small" />, 'primary.main'),
           metric('pending', 'Pending Approvals', summary.pendingApprovals ?? 0, 'Waiting for checker action', <PendingActionsOutlinedIcon fontSize="small" />, 'warning.main'),
-          metric('ready', 'Ready for Execution', summary.readyForExecution ?? 0, 'Approved and queued for execution', <FactCheckOutlinedIcon fontSize="small" />, 'secondary.main'),
+          metric('ready', 'On-chain Pending', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Approved and queued for browser signing', <FactCheckOutlinedIcon fontSize="small" />, 'secondary.main'),
           metric('failed', 'Failed', summary.failedRequests ?? 0, 'Need operational follow-up', <ReportGmailerrorredOutlinedIcon fontSize="small" />, 'error.main'),
         ];
       case ROLES.MAKER:
@@ -232,19 +226,18 @@ function DashboardPage() {
           metric('drafts', 'Drafts', state.draftCount, 'Still editable by you', <AssignmentOutlinedIcon fontSize="small" />, 'primary.main'),
           metric('pending', 'Pending Review', summary.pendingApprovals ?? 0, 'Submitted and awaiting a checker', <PendingActionsOutlinedIcon fontSize="small" />, 'warning.main'),
           metric('rejected', 'Rejected', state.rejectedCount, 'Need revision before resubmission', <RuleFolderOutlinedIcon fontSize="small" />, 'error.main'),
-          metric('approved', 'Approved', summary.approvedRequests ?? 0, 'Cleared for execution prep', <ApprovalOutlinedIcon fontSize="small" />, 'secondary.main'),
+          metric('ready', 'On-chain Pending', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Approved and awaiting browser signing', <ApprovalOutlinedIcon fontSize="small" />, 'secondary.main'),
         ];
       case ROLES.CHECKER:
         return [
           metric('pending', 'Pending Approvals', summary.pendingApprovals ?? 0, 'Requests waiting in your queue', <PendingActionsOutlinedIcon fontSize="small" />, 'warning.main'),
-          metric('approved', 'Approved by Queue', summary.approvedRequests ?? 0, 'Currently approved in your view', <AssignmentTurnedInOutlinedIcon fontSize="small" />, 'primary.main'),
+          metric('ready', 'On-chain Pending', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Requests you approved into browser signing', <AssignmentTurnedInOutlinedIcon fontSize="small" />, 'primary.main'),
           metric('reviewed', 'Reviewed Recently', state.reviewedCount, 'Latest decisions linked to you', <TaskAltOutlinedIcon fontSize="small" />, 'secondary.main'),
           metric('failed', 'Failed Downstream', summary.failedRequests ?? 0, 'Approved items that later failed execution', <ReportGmailerrorredOutlinedIcon fontSize="small" />, 'error.main'),
         ];
       case ROLES.EXECUTOR:
         return [
-          metric('approved', 'Approved Queue', summary.approvedRequests ?? 0, 'Approved and awaiting handoff', <ApprovalOutlinedIcon fontSize="small" />, 'primary.main'),
-          metric('ready', 'Ready for Execution', summary.readyForExecution ?? 0, 'Immediately actionable requests', <FactCheckOutlinedIcon fontSize="small" />, 'secondary.main'),
+          metric('ready', 'On-chain Pending', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Immediately actionable requests', <FactCheckOutlinedIcon fontSize="small" />, 'secondary.main'),
           metric('executed', 'Executed', summary.executedRequests ?? 0, 'Successfully recorded outcomes', <CheckCircleOutlineOutlinedIcon fontSize="small" />, 'success.main'),
           metric('failed', 'Failed', summary.failedRequests ?? 0, 'Need retry or investigation', <ReportGmailerrorredOutlinedIcon fontSize="small" />, 'error.main'),
         ];
@@ -259,7 +252,7 @@ function DashboardPage() {
     }
 
     if (dashboardRole === ROLES.EXECUTOR) {
-      return state.readyQueue.length ? state.readyQueue : state.approvedQueue;
+      return state.readyQueue;
     }
 
     return overview?.recentRequests || [];
@@ -296,13 +289,13 @@ function DashboardPage() {
             {dashboardRole === ROLES.ADMIN ? (
               <>
                 <RequestListPanel
-                  actionLabel="View execution desk"
+                  actionLabel="View on-chain queue"
                   actionTo="/ready-for-execution"
-                  emptyText="No approved requests are waiting for execution prep."
-                  items={state.approvedQueue}
+                  emptyText="No on-chain pending requests are waiting right now."
+                  items={state.readyQueue}
                   onSelect={(row) => navigate(`/token-requests/${row.id}`)}
-                  subtitle="Approved requests waiting to move into execution handling."
-                  title="Approved Queue"
+                  subtitle="Requests already approved and waiting for browser signing or result recording."
+                  title="On-chain Queue"
                 />
                 <AuditActivityPanel items={state.auditTrail} />
               </>
@@ -355,22 +348,13 @@ function DashboardPage() {
             {dashboardRole === ROLES.EXECUTOR ? (
               <>
                 <RequestListPanel
-                  actionLabel="View execution desk"
+                  actionLabel="View on-chain queue"
                   actionTo="/ready-for-execution"
-                  emptyText="No approved requests are waiting for your handoff."
-                  items={state.approvedQueue}
-                  onSelect={(row) => navigate(`/token-requests/${row.id}`)}
-                  subtitle="Approved requests that still need to be marked ready."
-                  title="Approved Queue"
-                />
-                <RequestListPanel
-                  actionLabel="View execution desk"
-                  actionTo="/ready-for-execution"
-                  emptyText="Nothing is waiting in the ready-for-execution queue."
+                  emptyText="Nothing is waiting in the on-chain pending queue."
                   items={state.readyQueue}
                   onSelect={(row) => navigate(`/token-requests/${row.id}`)}
-                  subtitle="Requests ready for transaction submission and result recording."
-                  title="Ready Queue"
+                  subtitle="Requests ready for browser signing and result recording."
+                  title="On-chain Queue"
                 />
                 <WalletConnectCard />
               </>

@@ -6,6 +6,7 @@ const {
   optionalUuidQuerySchema,
   tokenMintAddressSchema,
   uuidSchema,
+  walletAddressSchema,
   z,
 } = require('../utils/validation');
 
@@ -16,6 +17,7 @@ const listStatusEnum = z.enum([
   'APPROVED',
   'REJECTED',
   'READY_FOR_EXECUTION',
+  'ON_CHAIN_PENDING',
   'EXECUTED',
   'FAILED',
 ]);
@@ -82,6 +84,21 @@ const tokenRequestIdParamSchema = z.object({
   query: z.object({}).optional(),
 });
 
+const recordInitiationSchema = z.object({
+  body: z.object({
+    makerWalletAddress: walletAddressSchema,
+    onChainRequestAddress: walletAddressSchema,
+    initiationTxSignature: z.string().trim().min(1, 'initiationTxSignature is required'),
+    initiationExplorerUrl: z.string().trim().url('initiationExplorerUrl must be a valid URL').optional(),
+    sourceTokenAccountAddress: walletAddressSchema.optional(),
+    destinationTokenAccountAddress: walletAddressSchema.optional(),
+  }),
+  params: z.object({
+    id: uuidSchema,
+  }),
+  query: z.object({}).optional(),
+});
+
 const recordExecutionSchema = z.object({
   body: z.object({
     status: z.enum(['EXECUTED', 'FAILED']),
@@ -100,5 +117,6 @@ module.exports = {
   updateTokenRequestSchema,
   listTokenRequestsQuerySchema,
   tokenRequestIdParamSchema,
+  recordInitiationSchema,
   recordExecutionSchema,
 };

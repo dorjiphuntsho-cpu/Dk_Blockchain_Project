@@ -77,6 +77,26 @@ const envSchema = z.object({
 
     return String(value).toLowerCase() === 'true';
   }, z.boolean()),
+  SOLANA_BOOTSTRAP_MODE: z.preprocess((value) => {
+    if (value === undefined) {
+      return process.env.SOLANA_AUTO_BOOTSTRAP === 'false' ? 'disabled' : 'strict';
+    }
+
+    if (typeof value === 'boolean') {
+      return value ? 'strict' : 'disabled';
+    }
+
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized === 'true') {
+      return 'strict';
+    }
+
+    if (normalized === 'false') {
+      return 'disabled';
+    }
+
+    return normalized;
+  }, z.enum(['strict', 'warn', 'disabled'])),
 });
 
 const parsed = envSchema.safeParse(process.env);

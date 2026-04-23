@@ -13,7 +13,12 @@ const {
 const router = express.Router();
 
 router.use(authMiddleware);
-router.use(authorize(ROLE_NAMES.ADMIN));
+router.use(authorize(
+  ROLE_NAMES.ADMIN,
+  ROLE_NAMES.MAKER,
+  ROLE_NAMES.CHECKER,
+  ROLE_NAMES.EXECUTOR,
+));
 
 router.get('/', validate(listManagedTokensQuerySchema), asyncHandler(managedTokenController.getManagedTokens));
 router.get('/:id', validate(managedTokenIdParamSchema), asyncHandler(managedTokenController.getManagedTokenById));

@@ -10,6 +10,7 @@ const {
   listTokenRequestsQuerySchema,
   tokenRequestIdParamSchema,
   updateTokenRequestSchema,
+  recordInitiationSchema,
   recordExecutionSchema,
 } = require('../validators/tokenRequest.validation');
 
@@ -48,6 +49,48 @@ router.post(
   validate(tokenRequestIdParamSchema),
   asyncHandler(tokenRequestController.markReadyForExecution),
 );
+router.get(
+  '/:id/execution-payload',
+  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.MAKER, ROLE_NAMES.CHECKER, ROLE_NAMES.EXECUTOR),
+  validate(tokenRequestIdParamSchema),
+  asyncHandler(tokenRequestController.prepareExecution),
+);
+router.get(
+  '/:id/prepare/mint-request',
+  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.MAKER),
+  validate(tokenRequestIdParamSchema),
+  asyncHandler(tokenRequestController.prepareMintRequest),
+);
+router.get(
+  '/:id/prepare/transfer-request',
+  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.MAKER),
+  validate(tokenRequestIdParamSchema),
+  asyncHandler(tokenRequestController.prepareTransferRequest),
+);
+router.get(
+  '/:id/prepare/burn-request',
+  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.MAKER),
+  validate(tokenRequestIdParamSchema),
+  asyncHandler(tokenRequestController.prepareBurnRequest),
+);
+router.get(
+  '/:id/prepare/checker-approval',
+  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.CHECKER),
+  validate(tokenRequestIdParamSchema),
+  asyncHandler(tokenRequestController.prepareCheckerApproval),
+);
+router.get(
+  '/:id/prepare/checker-rejection',
+  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.CHECKER),
+  validate(tokenRequestIdParamSchema),
+  asyncHandler(tokenRequestController.prepareCheckerRejection),
+);
+router.post(
+  '/:id/record-initiation',
+  authorize(ROLE_NAMES.MAKER),
+  validate(recordInitiationSchema),
+  asyncHandler(tokenRequestController.recordInitiation),
+);
 router.post(
   '/:id/execute',
   authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.EXECUTOR),
@@ -56,7 +99,7 @@ router.post(
 );
 router.post(
   '/:id/record-execution',
-  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.EXECUTOR),
+  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.CHECKER, ROLE_NAMES.EXECUTOR),
   validate(recordExecutionSchema),
   asyncHandler(tokenRequestController.recordExecution),
 );

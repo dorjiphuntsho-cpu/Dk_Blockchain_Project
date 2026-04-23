@@ -5,7 +5,8 @@ export const statusConfig = {
   [REQUEST_STATUSES.PENDING_APPROVAL]: { label: 'Pending Approval', tone: 'warning' },
   [REQUEST_STATUSES.APPROVED]: { label: 'Approved', tone: 'primary' },
   [REQUEST_STATUSES.REJECTED]: { label: 'Rejected', tone: 'rejected' },
-  [REQUEST_STATUSES.READY_FOR_EXECUTION]: { label: 'Ready for Execution', tone: 'secondary' },
+  [REQUEST_STATUSES.READY_FOR_EXECUTION]: { label: 'On-chain Pending', tone: 'secondary' },
+  [REQUEST_STATUSES.ON_CHAIN_PENDING]: { label: 'On-chain Pending', tone: 'secondary' },
   [REQUEST_STATUSES.EXECUTED]: { label: 'Executed', tone: 'success' },
   [REQUEST_STATUSES.FAILED]: { label: 'Failed', tone: 'error' },
 };

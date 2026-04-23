@@ -72,7 +72,7 @@ backend/
 2. `MAKER` can edit only their own `DRAFT` request.
 3. `MAKER` submits the request to move it to `PENDING_APPROVAL`.
 4. `CHECKER` approves or rejects it. Maker and checker cannot be the same user.
-5. `ADMIN` or `EXECUTOR` marks an approved request as `READY_FOR_EXECUTION`.
+5. `ADMIN` or `EXECUTOR` moves an approved request into the on-chain pending queue.
 6. `ADMIN` or `EXECUTOR` records the final execution result as `EXECUTED` or `FAILED`.
 7. Audit logs are written for each important transition and business action.
 
@@ -354,7 +354,7 @@ Bootstrap behavior:
 Execution behavior:
 
 - `prepareMintExecutionPayload`, `prepareTransferExecutionPayload`, and `prepareBurnExecutionPayload` now return real local-validator execution context.
-- `POST /api/token-requests/:id/execute` executes a `READY_FOR_EXECUTION` request on chain and records the result automatically.
+- `POST /api/token-requests/:id/execute` executes an on-chain pending request and records the result automatically.
 - The backend uses configured server-managed maker and checker wallets for local execution.
 
 Current limitation:

@@ -44,14 +44,14 @@ function assertCheckerSeparation(tokenRequest, checkerUserId) {
 async function approveTokenRequest(requestId, checkerUserId, payload) {
   const tokenRequest = await getPendingRequest(requestId);
   assertCheckerSeparation(tokenRequest, checkerUserId);
-  assertTransition(tokenRequest.status, TOKEN_REQUEST_STATUSES.APPROVED);
+  assertTransition(tokenRequest.status, TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION);
 
   const approvedRequest = await prisma.$transaction(async (tx) => {
     const updatedRequest = await tx.tokenRequest.update({
       where: { id: requestId },
       data: {
         checkerUserId,
-        status: TOKEN_REQUEST_STATUSES.APPROVED,
+        status: TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION,
         approvedAt: new Date(),
         rejectionReason: null,
       },
@@ -75,7 +75,7 @@ async function approveTokenRequest(requestId, checkerUserId, payload) {
         action: AUDIT_ACTIONS.APPROVE,
         metadata: {
           previousStatus: tokenRequest.status,
-          newStatus: TOKEN_REQUEST_STATUSES.APPROVED,
+          newStatus: TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION,
           comment: payload.comment || null,
         },
       },
@@ -90,7 +90,7 @@ async function approveTokenRequest(requestId, checkerUserId, payload) {
         action: AUDIT_ACTIONS.STATUS_CHANGE,
         metadata: {
           previousStatus: tokenRequest.status,
-          newStatus: TOKEN_REQUEST_STATUSES.APPROVED,
+          newStatus: TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION,
         },
       },
       tx,

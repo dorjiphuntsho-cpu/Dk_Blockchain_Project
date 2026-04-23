@@ -23,28 +23,48 @@ import RequestTimeline from '../../components/common/RequestTimeline';
 import StatusChip from '../../components/common/StatusChip';
 import WalletConnectCard from '../../components/wallet/WalletConnectCard';
 import useAuth from '../../hooks/useAuth';
+import useSolanaWallet from '../../hooks/useSolanaWallet';
+import {
+  buildCheckerApprovalTransaction,
+  buildExplorerTransactionUrl,
+  buildMakerInitiationTransaction,
+  signAndSendMakerTransaction,
+  signAndSendWalletTransaction,
+} from '../../modules/solana/walletExecution';
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
 import { rejectionSchema } from '../../modules/tokenRequests/tokenRequests.schemas';
-import { getStatusTimeline } from '../../modules/tokenRequests/tokenRequests.utils';
+import { getNextActorMessage, getStatusTimeline } from '../../modules/tokenRequests/tokenRequests.utils';
 import { formatDateTime } from '../../utils/date';
 import { formatAmount, truncateMiddle } from '../../utils/format';
 import {
+  canApproveWalletExecution,
   canApproveRequest,
   canEditDraftRequest,
+  canInitiateWalletExecution,
   canExecuteRequest,
-  canMarkReady,
   canRejectRequest,
   canSubmitDraftRequest,
 } from '../../utils/permissions';
+import { EXECUTION_MODES, ON_CHAIN_PENDING_STATUSES, REQUEST_STATUSES } from '../../utils/constants';
 
 function TokenRequestDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
   const { user } = useAuth();
+  const {
+    address: connectedWalletAddress,
+    connected: walletConnected,
+    provider: walletProvider,
+  } = useSolanaWallet();
   const [request, setRequest] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [executionPayload, setExecutionPayload] = useState(null);
+  const [executionPayloadError, setExecutionPayloadError] = useState('');
+  const [executionPayloadLoading, setExecutionPayloadLoading] = useState(false);
+  const [walletInitiating, setWalletInitiating] = useState(false);
+  const [walletApproving, setWalletApproving] = useState(false);
   const [dialogType, setDialogType] = useState(null);
   const [formState, setFormState] = useState({
     rejectionReason: '',
@@ -77,7 +97,50 @@ function TokenRequestDetailsPage() {
     }
   };
 
+  useEffect(() => {
+    if (!request || !ON_CHAIN_PENDING_STATUSES.includes(request.status)) {
+      setExecutionPayload(null);
+      setExecutionPayloadError('');
+      setExecutionPayloadLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadExecutionPayload() {
+      try {
+        setExecutionPayloadLoading(true);
+        setExecutionPayloadError('');
+        const response = await tokenRequestsApi.getExecutionPayload(request.id);
+        if (!cancelled) {
+          setExecutionPayload(response.data);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setExecutionPayload(null);
+          setExecutionPayloadError(loadError.message || 'Unable to load execution payload.');
+        }
+      } finally {
+        if (!cancelled) {
+          setExecutionPayloadLoading(false);
+        }
+      }
+    }
+
+    loadExecutionPayload();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [request]);
+
   const timeline = useMemo(() => getStatusTimeline(request || {}), [request]);
+  const expectedMakerWalletAddress = executionPayload?.walletInitiation?.expectedMakerWalletAddress || null;
+  const walletMismatch = Boolean(
+    walletConnected && expectedMakerWalletAddress && connectedWalletAddress && expectedMakerWalletAddress !== connectedWalletAddress,
+  );
+  const canInitiateWithWallet = canInitiateWalletExecution(user, request, executionPayload);
+  const canApproveWithWallet = canApproveWalletExecution(user, request, executionPayload);
   if (loading) {
     return <LoadingScreen message="Loading request details..." />;
   }
@@ -118,16 +181,112 @@ function TokenRequestDetailsPage() {
             Reject
           </Button>
         ) : null}
-        {canMarkReady(user, request) ? (
+        {canInitiateWithWallet ? (
           <Button
+            disabled={walletInitiating || !walletConnected || walletMismatch || executionPayloadLoading}
             onClick={async () => {
-              await tokenRequestsApi.markReady(request.id);
-              enqueueSnackbar('Request marked ready', { variant: 'success' });
-              reload();
+              try {
+                if (!walletConnected || !connectedWalletAddress) {
+                  throw new Error('Connect the maker wallet before initiating this request.');
+                }
+
+                if (!walletProvider) {
+                  throw new Error('Wallet provider is not available.');
+                }
+
+                if (!executionPayload) {
+                  throw new Error('Execution payload is not ready yet. Try again in a moment.');
+                }
+
+                setWalletInitiating(true);
+
+                const builtTransaction = await buildMakerInitiationTransaction({
+                  executionPayload,
+                  makerWalletAddress: connectedWalletAddress,
+                });
+
+                const initiationSignature = await signAndSendMakerTransaction({
+                  connection: builtTransaction.connection,
+                  provider: walletProvider,
+                  requestKeypair: builtTransaction.requestKeypair,
+                  transaction: builtTransaction.transaction,
+                });
+
+                await tokenRequestsApi.recordInitiation(request.id, {
+                  makerWalletAddress: connectedWalletAddress,
+                  onChainRequestAddress: builtTransaction.requestAddress,
+                  initiationTxSignature: initiationSignature,
+                  initiationExplorerUrl: buildExplorerTransactionUrl(initiationSignature, executionPayload.rpcUrl),
+                  sourceTokenAccountAddress: builtTransaction.sourceTokenAccountAddress,
+                  destinationTokenAccountAddress: builtTransaction.destinationTokenAccountAddress,
+                });
+
+                enqueueSnackbar(`Wallet initiation submitted: ${truncateMiddle(initiationSignature, 8, 6)}`, {
+                  variant: 'success',
+                });
+                await reload();
+              } catch (walletError) {
+                enqueueSnackbar(walletError.message || 'Wallet initiation failed', { variant: 'error' });
+              } finally {
+                setWalletInitiating(false);
+              }
             }}
             variant="contained"
           >
-            Mark Ready
+            {walletInitiating ? 'Initiating...' : 'Initiate With Wallet'}
+          </Button>
+        ) : null}
+        {canApproveWithWallet ? (
+          <Button
+            disabled={walletApproving || !walletConnected || executionPayloadLoading}
+            onClick={async () => {
+              try {
+                if (!walletConnected || !connectedWalletAddress) {
+                  throw new Error('Connect a registered checker wallet before approving this request on chain.');
+                }
+
+                if (!walletProvider) {
+                  throw new Error('Wallet provider is not available.');
+                }
+
+                if (!executionPayload) {
+                  throw new Error('Execution payload is not ready yet. Try again in a moment.');
+                }
+
+                setWalletApproving(true);
+
+                const preparedResponse = await tokenRequestsApi.prepareCheckerApproval(request.id);
+                const checkerPayload = preparedResponse.data;
+                const builtTransaction = buildCheckerApprovalTransaction({
+                  executionPayload: checkerPayload,
+                  checkerWalletAddress: connectedWalletAddress,
+                });
+
+                const approvalSignature = await signAndSendWalletTransaction({
+                  connection: builtTransaction.connection,
+                  provider: walletProvider,
+                  transaction: builtTransaction.transaction,
+                });
+
+                await tokenRequestsApi.recordExecution(request.id, {
+                  status: REQUEST_STATUSES.EXECUTED,
+                  txSignature: approvalSignature,
+                  explorerUrl: buildExplorerTransactionUrl(approvalSignature, executionPayload.rpcUrl),
+                });
+
+                enqueueSnackbar(`Checker approval submitted: ${truncateMiddle(approvalSignature, 8, 6)}`, {
+                  variant: 'success',
+                });
+                await reload();
+              } catch (walletError) {
+                enqueueSnackbar(walletError.message || 'Checker wallet approval failed', { variant: 'error' });
+              } finally {
+                setWalletApproving(false);
+              }
+            }}
+            variant="contained"
+          >
+            {walletApproving ? 'Approving...' : 'Approve On Chain With Wallet'}
           </Button>
         ) : null}
         {canExecuteRequest(user, request) ? (
@@ -188,10 +347,58 @@ function TokenRequestDetailsPage() {
                     <Typography>{request.checkerUser?.fullName || '-'}</Typography>
                   </Grid>
                 </Grid>
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12, md: 6 }}>
+                    <Typography color="text.secondary" variant="body2">Execution Mode</Typography>
+                    <Typography>{request.executionMode || EXECUTION_MODES.SERVER_MANAGED}</Typography>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 6 }}>
+                    <Typography color="text.secondary" variant="body2">Maker Wallet Address</Typography>
+                    <Typography sx={{ wordBreak: 'break-all' }}>{request.makerWalletAddress || request.sourceWallet?.walletAddress || '-'}</Typography>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 6 }}>
+                    <Typography color="text.secondary" variant="body2">On-Chain Request</Typography>
+                    <Typography sx={{ wordBreak: 'break-all' }}>{request.onChainRequestAddress || '-'}</Typography>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 6 }}>
+                    <Typography color="text.secondary" variant="body2">Maker Initiated</Typography>
+                    <Typography>{formatDateTime(request.makerInitiatedAt)}</Typography>
+                  </Grid>
+                </Grid>
                 <Typography color="text.secondary" variant="body2">Remarks</Typography>
                 <Typography>{request.remarks || 'No remarks provided'}</Typography>
                 {request.rejectionReason ? <Alert severity="error">Rejection reason: {request.rejectionReason}</Alert> : null}
                 {request.executionError ? <Alert severity="warning">Execution error: {request.executionError}</Alert> : null}
+                {executionPayloadLoading ? (
+                  <Alert severity="info">Refreshing execution payload and wallet requirements...</Alert>
+                ) : null}
+                {executionPayloadError ? (
+                  <Alert severity="warning">{executionPayloadError}</Alert>
+                ) : null}
+                <Alert severity="info">
+                  {getNextActorMessage(request, executionPayload)}
+                </Alert>
+                {executionPayload?.walletInitiation?.supported ? (
+                  <Alert severity={walletMismatch ? 'warning' : executionPayload.walletInitiation.recorded ? 'success' : 'info'}>
+                    {executionPayload.walletInitiation.recorded
+                      ? 'This request already has maker-side wallet initiation recorded.'
+                      : walletMismatch
+                        ? `Connected wallet ${connectedWalletAddress} does not match the expected maker wallet ${expectedMakerWalletAddress}.`
+                        : expectedMakerWalletAddress
+                          ? `This request is ready for maker-side browser signing by ${expectedMakerWalletAddress}.`
+                          : 'This request type supports maker-side browser initiation.'}
+                  </Alert>
+                ) : null}
+                {canApproveWithWallet ? (
+                  <Alert severity="info">
+                    This request has maker initiation recorded. A connected Phantom wallet that is registered on chain as a checker can approve it directly.
+                  </Alert>
+                ) : null}
+                {request.initiationExplorerUrl ? (
+                  <Link href={request.initiationExplorerUrl} rel="noreferrer" target="_blank">
+                    View initiation transaction
+                  </Link>
+                ) : null}
                 {request.explorerUrl ? (
                   <Link href={request.explorerUrl} rel="noreferrer" target="_blank">
                     View explorer transaction
@@ -239,7 +446,7 @@ function TokenRequestDetailsPage() {
               </CardContent>
             </Card>
 
-            <WalletConnectCard />
+            <WalletConnectCard executionPayload={executionPayload} requestStatus={request.status} />
           </Stack>
         </Grid>
       </Grid>

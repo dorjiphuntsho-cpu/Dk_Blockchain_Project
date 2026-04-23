@@ -1,0 +1,147 @@
+Target Flow
+
+ADMIN creates managed token mints.
+MAKER creates mint or transfer requests.
+CHECKER approves or rejects requests.
+After approval, the required on-chain action is signed in the browser by the correct role wallet.
+Backend records status, signatures, explorer links, and audit logs, but does not depend on server-held maker/checker keys for normal user flows.
+What Works Now
+
+Working:
+
+admin can create token mints
+managed tokens are persisted and now selectable from the request form
+maker can create and submit requests
+checker can approve or reject requests
+manual Mark Ready step is removed from the UI flow
+transfer and burn support maker-side Phantom initiation
+checker-side Phantom on-chain approval is now wired for execution-ready requests
+devnet program is deployed and backend/frontend are pointed at devnet
+admin and checker backend wallets are configured and funded
+managed token registry is loading in the request form for non-admin users
+Partially working / still mixed:
+
+mint execution still requires a backend maker signer
+some flows still assume backend-held signers in env files
+old requests created before workflow changes may still sit in legacy statuses
+checker approval is split:
+off-chain approval exists
+on-chain approval exists for wallet-initiated execution
+admin token creation is still backend-driven, not browser-wallet-driven
+Not done yet:
+
+full browser-wallet mint request flow
+clean role-based browser signing for all intended operations
+removal of backend dependency for normal maker/checker signing paths
+final UX cleanup around role-specific actions and wallet matching
+Refactor Plan
+
+Phase A: Define the final signing model
+
+ADMIN wallet signs token mint creation
+MAKER wallet signs mint-request creation and transfer-request creation
+CHECKER wallet signs approve/reject actions that must touch chain
+backend becomes workflow coordinator, validator, and recorder
+Decision boundary:
+
+off-chain approval/rejection can stay in DB if you want business approval before chain action
+on-chain request creation/approval should be browser-signed where the program expects those role signers
+
+
+Phase B: Refactor backend to be transaction-preparation first
+
+stop assuming backend maker/checker signers for normal request execution
+add prepare endpoints for:
+admin mint creation
+maker mint request creation
+maker transfer request creation
+checker on-chain approval
+checker on-chain rejection if you want rejection reflected on chain too
+keep backend endpoints for:
+request CRUD
+role checks
+status transitions
+audit logs
+result recording
+
+
+Phase C: Make mint browser-signed
+
+add browser transaction builder for create_mint_request
+allow maker Phantom wallet to initiate mint requests just like transfer/burn
+record request PDA, source/destination token accounts, signature, explorer URL
+This is the biggest current gap.
+
+
+Phase D: Make admin token creation browser-signed
+
+
+replace backend-only token mint creation with admin-wallet signing from the Solana admin page
+backend should only persist the created mint after the wallet transaction succeeds
+
+
+Phase E: Unify checker flow
+
+checker approves/rejects business workflow in the portal
+if approved and chain action is required, checker Phantom signs the on-chain approval
+backend records final tx result and marks request executed
+remove dependence on SOLANA_CHECKER_KEYPAIR_PATH for standard operator flows
+
+
+Phase F: Simplify statuses
+Recommended final status model:
+
+DRAFT
+PENDING_APPROVAL
+REJECTED
+APPROVED
+ON_CHAIN_PENDING
+EXECUTED
+FAILED
+Or keep current names and map them cleanly:
+
+checker approval immediately makes request executable
+wallet signing updates on-chain metadata
+final chain confirmation moves to EXECUTED
+
+Phase G: UI cleanup
+
+role-specific action buttons only
+wallet mismatch warnings for admin/maker/checker
+hide backend execution buttons when browser signing is the intended path
+show exact next actor:
+“Waiting for checker approval”
+“Waiting for maker wallet signature”
+“Waiting for checker wallet approval”
+“Executed”
+
+
+Files That Will Likely Change
+
+Backend:
+
+backend/src/services/solana.service.js
+backend/src/services/blockchain.service.js
+backend/src/services/tokenRequest.service.js
+backend/src/services/approval.service.js
+backend/src/controllers/tokenRequest.controller.js
+backend/src/routes/tokenRequest.routes.js
+backend/prisma/schema.prisma
+Frontend:
+
+DK_Token_Frontend/src/modules/solana/walletExecution.js
+DK_Token_Frontend/src/pages/tokenRequests/TokenRequestDetailsPage.jsx
+DK_Token_Frontend/src/pages/tokenRequests/TokenRequestCreatePage.jsx
+DK_Token_Frontend/src/components/wallet/WalletConnectCard.jsx
+DK_Token_Frontend/src/utils/permissions.js
+
+
+Solana admin page files for admin wallet mint creation
+Recommended Implementation Order
+
+browser-signed MINT request flow for maker
+browser-signed admin token creation
+remove backend maker dependency entirely from normal flows
+unify checker Phantom approval path
+clean up statuses and UI states
+keep backend file-based wallets only for emergency/admin maintenance, not normal operations

@@ -2,6 +2,16 @@ const fs = require('fs');
 const path = require('path');
 const anchor = require('@coral-xyz/anchor');
 const { Keypair, PublicKey, SystemProgram } = require('@solana/web3.js');
+const { createUmi } = require('@metaplex-foundation/umi-bundle-defaults');
+const { keypairIdentity } = require('@metaplex-foundation/umi');
+const { fromWeb3JsKeypair, fromWeb3JsPublicKey } = require('@metaplex-foundation/umi-web3js-adapters');
+const {
+  createMetadataAccountV3,
+  fetchMetadataFromSeeds,
+  findMetadataPda,
+  mplTokenMetadata,
+  TokenStandard,
+} = require('@metaplex-foundation/mpl-token-metadata');
 const {
   TOKEN_PROGRAM_ID,
   approve: approveDelegate,
@@ -11,12 +21,15 @@ const {
 } = require('@solana/spl-token');
 const env = require('../config/env');
 const ApiError = require('../utils/ApiError');
+const { EXECUTION_MODES, TOKEN_REQUEST_TYPES } = require('../utils/enums');
 
 const projectRoot = path.resolve(__dirname, '../../..');
+const METADATA_PROGRAM_ID = 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s';
 
 let cachedIdl;
 let cachedProgramId;
 let cachedConnection;
+let cachedUmi;
 const signerCache = new Map();
 
 function resolveConfiguredPath(configuredPath) {
@@ -70,6 +83,15 @@ function getConnection() {
   return cachedConnection;
 }
 
+function getUmi() {
+  if (cachedUmi) {
+    return cachedUmi;
+  }
+
+  cachedUmi = createUmi(getConnection()).use(mplTokenMetadata());
+  return cachedUmi;
+}
+
 function loadKeypair(label, configuredPath) {
   if (!configuredPath) {
     throw new ApiError(500, `${label} keypair path is not configured`);
@@ -121,8 +143,24 @@ function getMakerKeypair() {
   return loadKeypair('Maker', env.SOLANA_MAKER_KEYPAIR_PATH);
 }
 
+function getOptionalMakerKeypair() {
+  if (!env.SOLANA_MAKER_KEYPAIR_PATH) {
+    return null;
+  }
+
+  return getMakerKeypair();
+}
+
 function getCheckerKeypair() {
   return loadKeypair('Checker', env.SOLANA_CHECKER_KEYPAIR_PATH);
+}
+
+function getOptionalCheckerKeypair() {
+  if (!env.SOLANA_CHECKER_KEYPAIR_PATH) {
+    return null;
+  }
+
+  return getCheckerKeypair();
 }
 
 function getWallet(keypair) {
@@ -205,9 +243,103 @@ function getTokenAuthority(configAddress) {
   )[0];
 }
 
+function getTokenAuthorityAddress(configAddress) {
+  const parsedConfigAddress = parsePublicKey(configAddress, 'configAddress');
+  return getTokenAuthority(parsedConfigAddress).toBase58();
+}
+
 function buildExplorerUrl(signature) {
   const customUrl = encodeURIComponent(env.SOLANA_RPC_URL);
   return `https://explorer.solana.com/tx/${signature}?cluster=custom&customUrl=${customUrl}`;
+}
+
+function resolvePdaAddress(pdaOrPublicKey) {
+  if (Array.isArray(pdaOrPublicKey)) {
+    return String(pdaOrPublicKey[0]);
+  }
+
+  return String(pdaOrPublicKey);
+}
+
+function buildMetadataAddress(mintAddress) {
+  return resolvePdaAddress(findMetadataPda(getUmi(), {
+    mint: fromWeb3JsPublicKey(mintAddress),
+  }));
+}
+
+async function createMintMetadata({ adminKeypair, mintAddress, name, symbol, uri }) {
+  const umi = createUmi(getConnection())
+    .use(mplTokenMetadata())
+    .use(keypairIdentity(fromWeb3JsKeypair(adminKeypair)));
+  const mintPublicKey = fromWeb3JsPublicKey(mintAddress);
+  const metadataAddress = findMetadataPda(umi, { mint: mintPublicKey });
+
+  const metadataBuilder = createMetadataAccountV3(umi, {
+    metadata: metadataAddress,
+    mint: mintPublicKey,
+    mintAuthority: umi.identity,
+    payer: umi.identity,
+    updateAuthority: umi.identity.publicKey,
+    data: {
+      name,
+      symbol,
+      uri,
+      sellerFeeBasisPoints: 0,
+      creators: null,
+      collection: null,
+      uses: null,
+    },
+    isMutable: true,
+    collectionDetails: null,
+  });
+
+  const result = await metadataBuilder.sendAndConfirm(umi);
+
+  return {
+    metadataAddress: resolvePdaAddress(metadataAddress),
+    metadataTxSignature: String(result.signature),
+    metadataUpdateAuthority: adminKeypair.publicKey.toBase58(),
+    metadataUri: uri,
+    name,
+    symbol,
+    tokenStandard: TokenStandard.Fungible,
+  };
+}
+
+function supportsBrowserWalletExecution(requestType) {
+  // Phase A: All request types now support browser wallet execution
+  return (
+    requestType === TOKEN_REQUEST_TYPES.TRANSFER ||
+    requestType === TOKEN_REQUEST_TYPES.BURN ||
+    requestType === TOKEN_REQUEST_TYPES.MINT
+  );
+}
+
+function getExpectedMakerWalletAddress(tokenRequest) {
+  if (tokenRequest.requestType === TOKEN_REQUEST_TYPES.MINT) {
+    return tokenRequest.makerWalletAddress || null;
+  }
+
+  return tokenRequest.sourceWallet?.walletAddress || tokenRequest.makerWalletAddress || null;
+}
+
+function canServerManagedCreateRequest(tokenRequest) {
+  const makerKeypair = getOptionalMakerKeypair();
+
+  if (tokenRequest.requestType === TOKEN_REQUEST_TYPES.MINT) {
+    return Boolean(makerKeypair);
+  }
+
+  const expectedMakerWalletAddress = getExpectedMakerWalletAddress(tokenRequest);
+  if (!expectedMakerWalletAddress) {
+    return false;
+  }
+
+  if (!makerKeypair) {
+    return false;
+  }
+
+  return expectedMakerWalletAddress === makerKeypair.publicKey.toBase58();
 }
 
 async function ensureDestinationAta(payerKeypair, mintAddress, ownerAddress) {
@@ -242,7 +374,7 @@ async function assertCheckerConfigured(configAddress, checkerKeypair) {
 
 async function bootstrapOnChainConfig() {
   const adminKeypair = getAdminKeypair();
-  const checkerKeypair = getCheckerKeypair();
+  const checkerKeypair = getOptionalCheckerKeypair();
   const configKeypair = getConfigKeypair();
   const adminProgram = getProgram(adminKeypair);
 
@@ -277,11 +409,12 @@ async function bootstrapOnChainConfig() {
 
   const config = await adminProgram.account.config.fetch(configAddress);
   const adminSignerMatchesOnChain = config.admin.equals(adminKeypair.publicKey);
-  const checkerExists = config.checkers.some((existingChecker) =>
-    existingChecker.equals(checkerKeypair.publicKey),
-  );
+  const checkerExists = checkerKeypair
+    ? config.checkers.some((existingChecker) => existingChecker.equals(checkerKeypair.publicKey))
+    : false;
 
   if (
+    checkerKeypair &&
     adminSignerMatchesOnChain &&
     !checkerExists &&
     !checkerKeypair.publicKey.equals(adminKeypair.publicKey)
@@ -302,14 +435,14 @@ async function bootstrapOnChainConfig() {
 async function getConfigStatus() {
   const configAddress = requireConfigAddress();
   const adminKeypair = getAdminKeypair();
-  const makerKeypair = getMakerKeypair();
-  const checkerKeypair = getCheckerKeypair();
+  const makerKeypair = getOptionalMakerKeypair();
+  const checkerKeypair = getOptionalCheckerKeypair();
   const config = await fetchConfigAccount(configAddress, adminKeypair);
 
   const configuredSigners = {
     admin: adminKeypair.publicKey.toBase58(),
-    maker: makerKeypair.publicKey.toBase58(),
-    checker: checkerKeypair.publicKey.toBase58(),
+    maker: makerKeypair?.publicKey.toBase58() || null,
+    checker: checkerKeypair?.publicKey.toBase58() || null,
   };
 
   const status = {
@@ -319,6 +452,7 @@ async function getConfigStatus() {
     configAddress: configAddress.toBase58(),
     idlPath: resolveConfiguredPath(env.SOLANA_PROGRAM_IDL_PATH),
     autoBootstrapEnabled: env.SOLANA_AUTO_BOOTSTRAP,
+    bootstrapMode: env.SOLANA_BOOTSTRAP_MODE,
     configExists: Boolean(config),
     configuredSigners,
     onChain: null,
@@ -341,7 +475,9 @@ async function getConfigStatus() {
     checkers: onChainCheckers,
   };
   status.adminSignerMatchesOnChain = onChainAdmin === configuredSigners.admin;
-  status.checkerSignerConfiguredOnChain = onChainCheckers.includes(configuredSigners.checker);
+  status.checkerSignerConfiguredOnChain = configuredSigners.checker
+    ? onChainCheckers.includes(configuredSigners.checker)
+    : false;
   status.canManageOnChainConfig = status.adminSignerMatchesOnChain;
 
   if (!status.adminSignerMatchesOnChain) {
@@ -350,9 +486,21 @@ async function getConfigStatus() {
     );
   }
 
-  if (!status.checkerSignerConfiguredOnChain) {
+  if (configuredSigners.checker && !status.checkerSignerConfiguredOnChain) {
     status.warnings.push(
       `Configured backend checker signer ${configuredSigners.checker} is not registered on chain.`,
+    );
+  }
+
+  if (!configuredSigners.maker) {
+    status.warnings.push(
+      'No backend maker signer is configured. Maker initiation must come from a browser wallet.',
+    );
+  }
+
+  if (!configuredSigners.checker) {
+    status.warnings.push(
+      'No backend checker signer is configured. Checker approval will use the browser wallet flow for normal operations.',
     );
   }
 
@@ -432,7 +580,7 @@ async function setAdmin(newAdminAddress) {
   return getConfigStatus();
 }
 
-async function createTokenMint(decimals) {
+async function createTokenMint({ decimals, name, symbol, uri }) {
   const { adminKeypair, adminProgram, configAddress } = await requireAdminManagedConfig();
   const mintKeypair = Keypair.generate();
   const tokenAuthority = getTokenAuthority(configAddress);
@@ -452,8 +600,21 @@ async function createTokenMint(decimals) {
     .rpc();
 
   const mintAccount = await getMint(getConnection(), mintKeypair.publicKey, env.SOLANA_COMMITMENT);
+  const metadata = await createMintMetadata({
+    adminKeypair,
+    mintAddress: mintKeypair.publicKey,
+    name,
+    symbol,
+    uri,
+  });
 
   return {
+    name,
+    symbol,
+    metadataUri: metadata.metadataUri,
+    metadataAddress: metadata.metadataAddress,
+    metadataUpdateAuthority: metadata.metadataUpdateAuthority,
+    metadataTxSignature: metadata.metadataTxSignature,
     mintAddress: mintKeypair.publicKey.toBase58(),
     decimals: mintAccount.decimals,
     mintAuthority: mintAccount.mintAuthority?.toBase58() || null,
@@ -483,6 +644,22 @@ async function hydrateManagedToken(token) {
       freezeAuthority: mintAccount.freezeAuthority?.toBase58() || null,
       isInitialized: mintAccount.isInitialized,
     };
+
+    try {
+      const metadata = await fetchMetadataFromSeeds(getUmi(), {
+        mint: fromWeb3JsPublicKey(parsePublicKey(token.mintAddress, 'mintAddress')),
+      });
+
+      onChain.metadata = {
+        address: token.metadataAddress || buildMetadataAddress(parsePublicKey(token.mintAddress, 'mintAddress')),
+        name: metadata.name,
+        symbol: metadata.symbol,
+        uri: metadata.uri,
+        updateAuthority: metadata.updateAuthority,
+      };
+    } catch (metadataError) {
+      warning = metadataError.message;
+    }
   } catch (error) {
     warning = error.message;
   }
@@ -505,229 +682,166 @@ async function approveSourceDelegation({ sourceTokenAccount, tokenAuthority, mak
   );
 }
 
-async function executeOnChainRequest(tokenRequest) {
-  const makerKeypair = getMakerKeypair();
+function resolveSourceTokenAccountAddress(tokenRequest, mintAddress) {
+  if (tokenRequest.sourceTokenAccountAddress) {
+    return parsePublicKey(tokenRequest.sourceTokenAccountAddress, 'sourceTokenAccountAddress');
+  }
+
+  if (!tokenRequest.sourceWallet?.walletAddress) {
+    return null;
+  }
+
+  return getOwnerAta(
+    mintAddress,
+    parsePublicKey(tokenRequest.sourceWallet.walletAddress, 'source wallet address'),
+  );
+}
+
+function resolveDestinationTokenAccountAddress(tokenRequest, mintAddress) {
+  if (tokenRequest.destinationTokenAccountAddress) {
+    return parsePublicKey(tokenRequest.destinationTokenAccountAddress, 'destinationTokenAccountAddress');
+  }
+
+  if (!tokenRequest.destinationWallet?.walletAddress) {
+    return null;
+  }
+
+  return getOwnerAta(
+    mintAddress,
+    parsePublicKey(tokenRequest.destinationWallet.walletAddress, 'destination wallet address'),
+  );
+}
+
+async function approveRecordedOnChainRequest(tokenRequest) {
+  if (!tokenRequest.onChainRequestAddress) {
+    throw new ApiError(400, 'onChainRequestAddress is required for recorded browser-wallet execution');
+  }
+
   const checkerKeypair = getCheckerKeypair();
   const configAddress = requireConfigAddress();
   const tokenAuthority = getTokenAuthority(configAddress);
-  const mintAddress = parsePublicKey(tokenRequest.tokenMintAddress, 'tokenMintAddress');
-  const amountBn = toAnchorAmount(tokenRequest.amount);
-  const amountBigInt = toBigIntAmount(tokenRequest.amount);
-  const makerProgram = getProgram(makerKeypair);
   const checkerProgram = getProgram(checkerKeypair);
-  const requestKeypair = Keypair.generate();
+  const mintAddress = parsePublicKey(tokenRequest.tokenMintAddress, 'tokenMintAddress');
+  const requestAddress = parsePublicKey(tokenRequest.onChainRequestAddress, 'onChainRequestAddress');
 
   await assertCheckerConfigured(configAddress, checkerKeypair);
 
-  let createSignature;
-  let approveSignature;
-  let sourceTokenAccount = null;
-  let destinationTokenAccount = null;
+  const sourceTokenAccount = resolveSourceTokenAccountAddress(tokenRequest, mintAddress);
+  const destinationTokenAccount = resolveDestinationTokenAccountAddress(tokenRequest, mintAddress);
 
-  if (tokenRequest.requestType === 'MINT') {
-    if (!tokenRequest.destinationWallet?.walletAddress) {
-      throw new ApiError(400, 'Mint request is missing destination wallet address');
-    }
-
-    destinationTokenAccount = await ensureDestinationAta(
-      checkerKeypair,
-      mintAddress,
-      parsePublicKey(tokenRequest.destinationWallet.walletAddress, 'destination wallet address'),
-    );
-
-    createSignature = await makerProgram.methods
-      .createMintRequest(amountBn)
-      .accounts({
-        request: requestKeypair.publicKey,
-        config: configAddress,
-        mint: mintAddress,
-        destinationTokenAccount,
-        maker: makerKeypair.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([makerKeypair, requestKeypair])
-      .rpc();
-
-    approveSignature = await checkerProgram.methods
-      .approveRequest()
-      .accounts({
-        request: requestKeypair.publicKey,
-        config: configAddress,
-        mint: mintAddress,
-        sourceTokenAccount: null,
-        destinationTokenAccount,
-        tokenAuthority,
-        checker: checkerKeypair.publicKey,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .signers([checkerKeypair])
-      .rpc();
-  }
-
-  if (tokenRequest.requestType === 'TRANSFER') {
-    if (!tokenRequest.sourceWallet?.walletAddress || !tokenRequest.destinationWallet?.walletAddress) {
-      throw new ApiError(400, 'Transfer request is missing source or destination wallet address');
-    }
-
-    const configuredMakerAddress = makerKeypair.publicKey.toBase58();
-    if (tokenRequest.sourceWallet.walletAddress !== configuredMakerAddress) {
-      throw new ApiError(
-        400,
-        `Transfer source wallet must match the configured backend maker wallet ${configuredMakerAddress}`,
-      );
-    }
-
-    sourceTokenAccount = getOwnerAta(
-      mintAddress,
-      parsePublicKey(tokenRequest.sourceWallet.walletAddress, 'source wallet address'),
-    );
-    destinationTokenAccount = await ensureDestinationAta(
-      checkerKeypair,
-      mintAddress,
-      parsePublicKey(tokenRequest.destinationWallet.walletAddress, 'destination wallet address'),
-    );
-
-    await approveSourceDelegation({
+  const approveSignature = await checkerProgram.methods
+    .approveRequest()
+    .accounts({
+      request: requestAddress,
+      config: configAddress,
+      mint: mintAddress,
       sourceTokenAccount,
+      destinationTokenAccount,
       tokenAuthority,
-      makerKeypair,
-      payerKeypair: checkerKeypair,
-      amount: amountBigInt,
-    });
-
-    createSignature = await makerProgram.methods
-      .createTransferRequest(amountBn)
-      .accounts({
-        request: requestKeypair.publicKey,
-        config: configAddress,
-        mint: mintAddress,
-        sourceTokenAccount,
-        destinationTokenAccount,
-        maker: makerKeypair.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([makerKeypair, requestKeypair])
-      .rpc();
-
-    approveSignature = await checkerProgram.methods
-      .approveRequest()
-      .accounts({
-        request: requestKeypair.publicKey,
-        config: configAddress,
-        mint: mintAddress,
-        sourceTokenAccount,
-        destinationTokenAccount,
-        tokenAuthority,
-        checker: checkerKeypair.publicKey,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .signers([checkerKeypair])
-      .rpc();
-  }
-
-  if (tokenRequest.requestType === 'BURN') {
-    if (!tokenRequest.sourceWallet?.walletAddress) {
-      throw new ApiError(400, 'Burn request is missing source wallet address');
-    }
-
-    const configuredMakerAddress = makerKeypair.publicKey.toBase58();
-    if (tokenRequest.sourceWallet.walletAddress !== configuredMakerAddress) {
-      throw new ApiError(
-        400,
-        `Burn source wallet must match the configured backend maker wallet ${configuredMakerAddress}`,
-      );
-    }
-
-    sourceTokenAccount = getOwnerAta(
-      mintAddress,
-      parsePublicKey(tokenRequest.sourceWallet.walletAddress, 'source wallet address'),
-    );
-
-    await approveSourceDelegation({
-      sourceTokenAccount,
-      tokenAuthority,
-      makerKeypair,
-      payerKeypair: checkerKeypair,
-      amount: amountBigInt,
-    });
-
-    createSignature = await makerProgram.methods
-      .createBurnRequest(amountBn)
-      .accounts({
-        request: requestKeypair.publicKey,
-        config: configAddress,
-        mint: mintAddress,
-        sourceTokenAccount,
-        maker: makerKeypair.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([makerKeypair, requestKeypair])
-      .rpc();
-
-    approveSignature = await checkerProgram.methods
-      .approveRequest()
-      .accounts({
-        request: requestKeypair.publicKey,
-        config: configAddress,
-        mint: mintAddress,
-        sourceTokenAccount,
-        destinationTokenAccount: null,
-        tokenAuthority,
-        checker: checkerKeypair.publicKey,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .signers([checkerKeypair])
-      .rpc();
-  }
-
-  if (!approveSignature) {
-    throw new ApiError(400, `Unsupported token request type: ${tokenRequest.requestType}`);
-  }
+      checker: checkerKeypair.publicKey,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .signers([checkerKeypair])
+    .rpc();
 
   return {
-    createSignature,
+    createSignature: tokenRequest.initiationTxSignature || null,
     approveSignature,
     txSignature: approveSignature,
     explorerUrl: buildExplorerUrl(approveSignature),
-    onChainRequestAddress: requestKeypair.publicKey.toBase58(),
+    onChainRequestAddress: requestAddress.toBase58(),
     tokenAuthority: tokenAuthority.toBase58(),
     sourceTokenAccount: sourceTokenAccount?.toBase58() || null,
     destinationTokenAccount: destinationTokenAccount?.toBase58() || null,
   };
 }
 
+async function executeOnChainRequest(tokenRequest) {
+  // Normal flow: checker signs in browser wallet, backend records via record-execution.
+  if (tokenRequest.executionMode === EXECUTION_MODES.BROWSER_WALLET) {
+    if (!tokenRequest.onChainRequestAddress) {
+      throw new ApiError(
+        400,
+        'Browser wallet initiation is required before this request can be executed on chain. Please initiate the request from the maker wallet.',
+      );
+    }
+
+    throw new ApiError(
+      400,
+      'Checker browser-wallet approval is required. Use the checker preparation payload and record-execution endpoint after the on-chain signature is confirmed.',
+    );
+  }
+
+  // Legacy fallback: allow backend checker signer if explicitly configured.
+  const checkerKeypair = getOptionalCheckerKeypair();
+  if (!checkerKeypair) {
+    throw new ApiError(
+      400,
+      'Backend checker signer is not configured. Checker approval must be signed in browser and then recorded with record-execution.',
+    );
+  }
+
+  if (!tokenRequest.onChainRequestAddress) {
+    throw new ApiError(
+      400,
+      'No on-chain request address found for backend fallback approval.',
+    );
+  }
+
+  return approveRecordedOnChainRequest(tokenRequest);
+}
+
 function getExecutionContext(tokenRequest) {
   const configAddress = requireConfigAddress();
   const tokenAuthority = getTokenAuthority(configAddress);
   const mintAddress = parsePublicKey(tokenRequest.tokenMintAddress, 'tokenMintAddress');
+  const supportsWalletExecution = supportsBrowserWalletExecution(tokenRequest.requestType);
+  const walletExecutionRecorded = Boolean(tokenRequest.onChainRequestAddress && tokenRequest.initiationTxSignature);
+  const checkerKeypair = getOptionalCheckerKeypair();
 
+  // Phase A: Always use browser wallet model - backend no longer signs normal operations
   const payload = {
     integrationReady: true,
-    executionMode: 'server-managed-local-validator',
+    executionBoundaryVersion: 1,
+    executionMode: EXECUTION_MODES.BROWSER_WALLET,
+    runtimeMode: 'browser-wallet',
     rpcUrl: env.SOLANA_RPC_URL,
     programId: getProgramId().toBase58(),
     configAddress: configAddress.toBase58(),
     tokenAuthority: tokenAuthority.toBase58(),
     tokenMintAddress: mintAddress.toBase58(),
     amount: toRawAmount(tokenRequest.amount),
-    makerSignerAddress: getMakerKeypair().publicKey.toBase58(),
-    checkerSignerAddress: getCheckerKeypair().publicKey.toBase58(),
+    // Exposed only for optional legacy fallback and diagnostics.
+    backendMakerSignerAddress: null,
+    backendCheckerSignerAddress: checkerKeypair?.publicKey.toBase58() || null,
+    // Normal flow is browser-first.
+    serverManagedCreateSupported: false,
+    walletInitiation: {
+      supported: supportsWalletExecution,
+      recorded: walletExecutionRecorded,
+      expectedMakerWalletAddress: getExpectedMakerWalletAddress(tokenRequest),
+      makerWalletAddress: tokenRequest.makerWalletAddress || null,
+      onChainRequestAddress: tokenRequest.onChainRequestAddress || null,
+      initiationTxSignature: tokenRequest.initiationTxSignature || null,
+      initiationExplorerUrl: tokenRequest.initiationExplorerUrl || null,
+      makerInitiatedAt: tokenRequest.makerInitiatedAt || null,
+    },
   };
 
   if (tokenRequest.sourceWallet?.walletAddress) {
     payload.sourceWalletAddress = tokenRequest.sourceWallet.walletAddress;
-    payload.sourceTokenAccount = getOwnerAta(
+    payload.sourceTokenAccount = resolveSourceTokenAccountAddress(
+      tokenRequest,
       mintAddress,
-      parsePublicKey(tokenRequest.sourceWallet.walletAddress, 'source wallet address'),
-    ).toBase58();
+    )?.toBase58() || null;
   }
 
   if (tokenRequest.destinationWallet?.walletAddress) {
     payload.destinationWalletAddress = tokenRequest.destinationWallet.walletAddress;
-    payload.destinationTokenAccount = getOwnerAta(
+    payload.destinationTokenAccount = resolveDestinationTokenAccountAddress(
+      tokenRequest,
       mintAddress,
-      parsePublicKey(tokenRequest.destinationWallet.walletAddress, 'destination wallet address'),
-    ).toBase58();
+    )?.toBase58() || null;
   }
 
   return payload;
@@ -766,9 +880,13 @@ module.exports = {
   getConfigStatus,
   getAdminKeypair,
   getExecutionContext,
+  getTokenAuthorityAddress,
+  getMetadataProgramId: () => METADATA_PROGRAM_ID,
   getProgramId,
   hydrateManagedToken,
   getWalletTokenBalances,
+  buildExplorerUrl,
+  supportsBrowserWalletExecution,
   removeChecker,
   setAdmin,
 };

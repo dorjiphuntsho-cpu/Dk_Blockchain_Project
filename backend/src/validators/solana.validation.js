@@ -35,6 +35,32 @@ const setAdminSchema = z.object({
 const createTokenMintSchema = z.object({
   body: z.object({
     decimals: z.coerce.number().int().min(0).max(9).default(0),
+    name: z.string().trim().min(1).max(32),
+    symbol: z.string().trim().min(1).max(10),
+    uri: z.string().trim().url().max(200),
+    // Phase A: Track which admin wallet created this token
+    adminWalletAddress: z.string().trim().min(1).max(44).optional(),
+  }),
+  params: emptyObjectSchema,
+  query: emptyObjectSchema,
+});
+
+const recordCreatedTokenMintSchema = z.object({
+  body: z.object({
+    decimals: z.coerce.number().int().min(0).max(9),
+    name: z.string().trim().min(1).max(32),
+    symbol: z.string().trim().min(1).max(10),
+    metadataUri: z.string().trim().url().max(200).optional().nullable(),
+    mintAddress: walletAddressSchema,
+    tokenAuthority: walletAddressSchema,
+    txSignature: z.string().trim().min(1),
+    explorerUrl: z.string().trim().url(),
+    adminWalletAddress: walletAddressSchema.optional().nullable(),
+    metadataAddress: walletAddressSchema.optional().nullable(),
+    metadataUpdateAuthority: walletAddressSchema.optional().nullable(),
+    metadataTxSignature: z.string().trim().min(1).optional().nullable(),
+    mintAuthority: walletAddressSchema.optional().nullable(),
+    freezeAuthority: walletAddressSchema.optional().nullable(),
   }),
   params: emptyObjectSchema,
   query: emptyObjectSchema,
@@ -43,6 +69,7 @@ const createTokenMintSchema = z.object({
 module.exports = {
   addCheckerSchema,
   createTokenMintSchema,
+  recordCreatedTokenMintSchema,
   removeCheckerSchema,
   setAdminSchema,
   solanaConfigStatusSchema,

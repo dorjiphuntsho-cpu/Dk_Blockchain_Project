@@ -1,4 +1,4 @@
-import { REQUEST_STATUSES, ROLES } from './constants';
+import { EXECUTION_MODES, ON_CHAIN_PENDING_STATUSES, REQUEST_STATUSES, ROLES } from './constants';
 
 export function hasRole(user, allowedRoles = []) {
   return user?.roles?.some((role) => allowedRoles.includes(role));
@@ -31,15 +31,29 @@ export function canRejectRequest(user, request) {
 }
 
 export function canMarkReady(user, request) {
-  return hasRole(user, [ROLES.ADMIN, ROLES.EXECUTOR]) &&
-    request?.status === REQUEST_STATUSES.APPROVED;
+  return false;
 }
 
 export function canRecordExecution(user, request) {
   return hasRole(user, [ROLES.ADMIN, ROLES.EXECUTOR]) &&
-    request?.status === REQUEST_STATUSES.READY_FOR_EXECUTION;
+    ON_CHAIN_PENDING_STATUSES.includes(request?.status);
 }
 
 export function canExecuteRequest(user, request) {
-  return canRecordExecution(user, request);
+  return canRecordExecution(user, request) && request?.executionMode !== EXECUTION_MODES.BROWSER_WALLET;
+}
+
+export function canInitiateWalletExecution(user, request, executionPayload) {
+  return hasRole(user, [ROLES.MAKER]) &&
+    request?.makerUserId === user?.id &&
+    ON_CHAIN_PENDING_STATUSES.includes(request?.status) &&
+    Boolean(executionPayload?.walletInitiation?.supported) &&
+    !executionPayload?.walletInitiation?.recorded;
+}
+
+export function canApproveWalletExecution(user, request, executionPayload) {
+  return hasRole(user, [ROLES.CHECKER]) &&
+    ON_CHAIN_PENDING_STATUSES.includes(request?.status) &&
+    Boolean(executionPayload?.walletInitiation?.recorded) &&
+    Boolean(executionPayload?.walletInitiation?.onChainRequestAddress);
 }

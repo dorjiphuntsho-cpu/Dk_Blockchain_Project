@@ -3,6 +3,7 @@ import dayjs from 'dayjs';
 import {
   AUDIT_ACTIONS,
   ENTITY_TYPES,
+  EXECUTION_MODES,
   REQUEST_STATUSES,
   REQUEST_TYPES,
   ROLES,
@@ -17,6 +18,14 @@ function delay() {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function isOnChainPendingStatus(status) {
+  return [REQUEST_STATUSES.READY_FOR_EXECUTION, REQUEST_STATUSES.ON_CHAIN_PENDING].includes(status);
+}
+
+function normalizeOnChainPendingStatus(status) {
+  return status === REQUEST_STATUSES.ON_CHAIN_PENDING ? REQUEST_STATUSES.READY_FOR_EXECUTION : status;
 }
 
 function generateId(prefix) {
@@ -410,6 +419,44 @@ function createDetailResponse(message, data) {
   };
 }
 
+function buildMockExecutionPayload(db, request) {
+  const sourceWallet = request.sourceWalletId ? db.wallets.find((wallet) => wallet.id === request.sourceWalletId) : null;
+  const destinationWallet = request.destinationWalletId ? db.wallets.find((wallet) => wallet.id === request.destinationWalletId) : null;
+  const walletInitiationSupported = [REQUEST_TYPES.MINT, REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(request.requestType);
+  const expectedMakerWalletAddress = sourceWallet?.walletAddress || request.makerWalletAddress || null;
+
+  return {
+    integrationReady: true,
+    executionBoundaryVersion: 1,
+    executionMode: request.executionMode || EXECUTION_MODES.SERVER_MANAGED,
+    runtimeMode: 'mock-local-validator',
+    currentExecutionMode: request.executionMode || EXECUTION_MODES.SERVER_MANAGED,
+    operation: request.requestType,
+    requestId: request.id,
+    rpcUrl: 'http://127.0.0.1:8899',
+    programId: 'mock-program-id',
+    configAddress: 'mock-config-address',
+    tokenAuthority: 'mock-token-authority',
+    tokenMintAddress: request.tokenMintAddress,
+    amount: String(request.amount),
+    sourceWallet,
+    destinationWallet,
+    initiatedBy: basicUser(db.users.find((user) => user.id === request.makerUserId)),
+    serverManagedCreateSupported: !walletInitiationSupported,
+    walletInitiationRequired: walletInitiationSupported,
+    walletInitiation: {
+      supported: walletInitiationSupported,
+      recorded: Boolean(request.onChainRequestAddress && request.initiationTxSignature),
+      expectedMakerWalletAddress,
+      makerWalletAddress: request.makerWalletAddress || null,
+      onChainRequestAddress: request.onChainRequestAddress || null,
+      initiationTxSignature: request.initiationTxSignature || null,
+      initiationExplorerUrl: request.initiationExplorerUrl || null,
+      makerInitiatedAt: request.makerInitiatedAt || null,
+    },
+  };
+}
+
 function addAuditLog(db, entry) {
   db.auditLogs.unshift({
     id: generateId('audit'),
@@ -465,7 +512,9 @@ function serializeSolanaConfig(db) {
 
   if (!checkerSignerConfiguredOnChain) {
     warnings.push(
-      `Configured backend checker signer ${config.configuredSigners.checker} is not registered on chain.`,
+      config.configuredSigners.checker
+        ? `Configured backend checker signer ${config.configuredSigners.checker} is not registered on chain.`
+        : 'No backend checker signer is configured. Checker approval will use the browser wallet flow for normal operations.',
     );
   }
 
@@ -489,6 +538,13 @@ function serializeManagedToken(db, token) {
       mintAuthority: token.mintAuthority,
       freezeAuthority: token.freezeAuthority,
       isInitialized: true,
+      metadata: {
+        address: token.metadataAddress || null,
+        name: token.name || null,
+        symbol: token.symbol || null,
+        uri: token.metadataUri || null,
+        updateAuthority: token.metadataUpdateAuthority || null,
+      },
     },
     warning: null,
   };
@@ -828,7 +884,7 @@ export const mockAdapter = {
         let requests = db.tokenRequests.map((request) => serializeTokenRequest(db, request));
 
         if (query.status) {
-          requests = requests.filter((request) => request.status === query.status);
+          requests = requests.filter((request) => request.status === normalizeOnChainPendingStatus(query.status));
         }
 
         if (query.requestType) {
@@ -1046,6 +1102,7 @@ export const mockAdapter = {
 
         request.status = REQUEST_STATUSES.READY_FOR_EXECUTION;
         request.updatedAt = new Date().toISOString();
+        request.executionMode = request.executionMode || EXECUTION_MODES.SERVER_MANAGED;
         addAuditLog(db, {
           actorUserId: actor.id,
           entityType: ENTITY_TYPES.TOKEN_REQUEST,
@@ -1057,13 +1114,54 @@ export const mockAdapter = {
 
         return createDetailResponse('Request marked ready successfully', {
           tokenRequest: serializeTokenRequest(db, request),
-          executionPayload: {
-            integrationReady: true,
-            executionMode: 'mock-local-validator',
-            operation: request.requestType,
-            requestId: request.id,
-          },
+          executionPayload: buildMockExecutionPayload(db, request),
         });
+      }),
+    getExecutionPayload: async (id) =>
+      perform(() => {
+        const db = getDb();
+        const request = db.tokenRequests.find((item) => item.id === id);
+
+        if (!request) {
+          throw new Error('Token request not found');
+        }
+
+        if (!isOnChainPendingStatus(request.status)) {
+          throw new Error('Only on-chain pending requests can prepare execution');
+        }
+
+        return createDetailResponse('Execution payload prepared successfully', buildMockExecutionPayload(db, request));
+      }),
+    recordInitiation: async (id, payload, actorUser) =>
+      perform(() => {
+        const db = getDb();
+        const actor = getActor(actorUser);
+        const request = db.tokenRequests.find((item) => item.id === id);
+
+        if (!request || request.makerUserId !== actor.id || !isOnChainPendingStatus(request.status)) {
+          throw new Error('Only the maker can record wallet initiation for on-chain pending requests');
+        }
+
+        request.executionMode = EXECUTION_MODES.BROWSER_WALLET;
+        request.makerWalletAddress = payload.makerWalletAddress;
+        request.onChainRequestAddress = payload.onChainRequestAddress;
+        request.initiationTxSignature = payload.initiationTxSignature;
+        request.initiationExplorerUrl = payload.initiationExplorerUrl || null;
+        request.sourceTokenAccountAddress = payload.sourceTokenAccountAddress || null;
+        request.destinationTokenAccountAddress = payload.destinationTokenAccountAddress || null;
+        request.makerInitiatedAt = new Date().toISOString();
+        request.updatedAt = new Date().toISOString();
+
+        addAuditLog(db, {
+          actorUserId: actor.id,
+          entityType: ENTITY_TYPES.TOKEN_REQUEST,
+          entityId: id,
+          action: 'RECORD_INITIATION',
+          metadata: payload,
+        });
+        setDb(db);
+
+        return createDetailResponse('Wallet initiation recorded successfully', serializeTokenRequest(db, request));
       }),
     execute: async (id, actorUser) =>
       perform(() => {
@@ -1071,8 +1169,8 @@ export const mockAdapter = {
         const actor = getActor(actorUser);
         const request = db.tokenRequests.find((item) => item.id === id);
 
-        if (!request || request.status !== REQUEST_STATUSES.READY_FOR_EXECUTION) {
-          throw new Error('Only ready requests can be executed');
+        if (!request || !isOnChainPendingStatus(request.status)) {
+          throw new Error('Only on-chain pending requests can be executed');
         }
 
         const now = new Date().toISOString();
@@ -1112,8 +1210,8 @@ export const mockAdapter = {
         const actor = getActor(actorUser);
         const request = db.tokenRequests.find((item) => item.id === id);
 
-        if (!request || request.status !== REQUEST_STATUSES.READY_FOR_EXECUTION) {
-          throw new Error('Only ready requests can record execution');
+        if (!request || !isOnChainPendingStatus(request.status)) {
+          throw new Error('Only on-chain pending requests can record execution');
         }
 
         request.status = payload.status;
@@ -1152,7 +1250,7 @@ export const mockAdapter = {
           }
 
           if (actor.roles.includes(ROLES.EXECUTOR)) {
-            return [REQUEST_STATUSES.APPROVED, REQUEST_STATUSES.READY_FOR_EXECUTION, REQUEST_STATUSES.EXECUTED, REQUEST_STATUSES.FAILED].includes(request.status);
+            return [REQUEST_STATUSES.APPROVED, REQUEST_STATUSES.READY_FOR_EXECUTION, REQUEST_STATUSES.ON_CHAIN_PENDING, REQUEST_STATUSES.EXECUTED, REQUEST_STATUSES.FAILED].includes(request.status);
           }
 
           return false;
@@ -1163,7 +1261,8 @@ export const mockAdapter = {
             totalRequests: visibleRequests.length,
             pendingApprovals: visibleRequests.filter((request) => request.status === REQUEST_STATUSES.PENDING_APPROVAL).length,
             approvedRequests: visibleRequests.filter((request) => request.status === REQUEST_STATUSES.APPROVED).length,
-            readyForExecution: visibleRequests.filter((request) => request.status === REQUEST_STATUSES.READY_FOR_EXECUTION).length,
+            readyForExecution: visibleRequests.filter((request) => isOnChainPendingStatus(request.status)).length,
+            onChainPending: visibleRequests.filter((request) => isOnChainPendingStatus(request.status)).length,
             executedRequests: visibleRequests.filter((request) => request.status === REQUEST_STATUSES.EXECUTED).length,
             failedRequests: visibleRequests.filter((request) => request.status === REQUEST_STATUSES.FAILED).length,
           },
@@ -1202,14 +1301,67 @@ export const mockAdapter = {
         const db = getDb();
         return createDetailResponse('Solana config status fetched successfully', serializeSolanaConfig(db));
       }),
-    createTokenMint: async (decimals = 0) =>
+    prepareMintCreation: async () =>
       perform(() => {
         const db = getDb();
+        const config = serializeSolanaConfig(db);
+        return createDetailResponse('Mint creation payload prepared successfully', {
+          operation: 'CREATE_MINT',
+          signerRole: 'ADMIN',
+          requiresBrowserWallet: true,
+          expectedAdminWalletAddress: config.configuredSigners.admin,
+          rpcUrl: config.rpcUrl,
+          commitment: config.commitment,
+          programId: config.programId,
+          configAddress: config.configAddress,
+          tokenAuthority: config.configAddress,
+          metadataProgramId: 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s',
+        });
+      }),
+    recordCreatedTokenMint: async (payload = {}) =>
+      perform(() => {
+        const db = getDb();
+        const decimals = Number(payload.decimals || 0);
+        const token = {
+          id: generateId('managed-token'),
+          name: payload.name || 'Mock Token',
+          symbol: payload.symbol || 'MOCK',
+          metadataUri: payload.metadataUri || null,
+          metadataAddress: payload.metadataAddress || null,
+          metadataUpdateAuthority: payload.metadataUpdateAuthority || null,
+          metadataTxSignature: payload.metadataTxSignature || null,
+          mintAddress: payload.mintAddress,
+          decimals,
+          mintAuthority: payload.mintAuthority || payload.tokenAuthority || null,
+          freezeAuthority: payload.freezeAuthority || payload.tokenAuthority || null,
+          supply: '0',
+          tokenAuthority: payload.tokenAuthority || null,
+          txSignature: payload.txSignature || null,
+          explorerUrl: payload.explorerUrl || 'https://explorer.solana.com/?cluster=custom',
+          createdTxSignature: payload.txSignature || null,
+          creatorUserId: 'user-admin-1',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        db.managedTokens.unshift(token);
+        setDb(db);
+        return createDetailResponse('Managed token mint recorded successfully', serializeManagedToken(db, token));
+      }),
+    createTokenMint: async (payload = {}) =>
+      perform(() => {
+        const db = getDb();
+        const decimals = Number(payload.decimals || 0);
         const mintAddress = `mint-${Math.random().toString(36).slice(2, 14)}`;
         const token = {
           id: generateId('managed-token'),
+          name: payload.name || 'Mock Token',
+          symbol: payload.symbol || 'MOCK',
+          metadataUri: payload.uri || 'https://example.com/mock-token.json',
+          metadataAddress: `metadata-${Math.random().toString(36).slice(2, 14)}`,
+          metadataUpdateAuthority: db.solanaConfig.configuredSigners.admin,
+          metadataTxSignature: `mock-metadata-${Math.random().toString(36).slice(2, 14)}`,
           mintAddress,
-          decimals: Number(decimals),
+          decimals,
           mintAuthority: db.solanaConfig.configuredSigners.admin,
           freezeAuthority: db.solanaConfig.configuredSigners.admin,
           supply: '0',
@@ -1268,7 +1420,11 @@ export const mockAdapter = {
         if (query.search) {
           const search = query.search.toLowerCase();
           items = items.filter((token) =>
-            token.mintAddress.toLowerCase().includes(search)
+            (token.name || '').toLowerCase().includes(search)
+            || (token.symbol || '').toLowerCase().includes(search)
+            || token.metadataUri?.toLowerCase().includes(search)
+            || token.metadataAddress?.toLowerCase().includes(search)
+            || token.mintAddress.toLowerCase().includes(search)
             || token.tokenAuthority.toLowerCase().includes(search),
           );
         }

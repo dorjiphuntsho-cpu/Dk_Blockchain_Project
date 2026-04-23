@@ -50,14 +50,77 @@ async function submitTokenRequest(req, res) {
 
 async function markReadyForExecution(req, res) {
   const tokenRequest = await tokenRequestService.markReadyForExecution(req.params.id, req.user.id);
-  const executionPayload = await tokenRequestService.prepareExecutionPayload(req.params.id);
+  const executionPayload = await tokenRequestService.prepareExecution(req.params.id, req.user);
 
   return successResponse(res, {
-    message: 'Token request marked ready for execution successfully',
+    message: 'Token request moved to the on-chain pending queue successfully',
     data: {
       tokenRequest,
       executionPayload,
     },
+  });
+}
+
+async function prepareExecution(req, res) {
+  const executionPayload = await tokenRequestService.prepareExecution(req.params.id, req.user);
+
+  return successResponse(res, {
+    message: 'Execution payload prepared successfully',
+    data: executionPayload,
+  });
+}
+
+async function prepareMintRequest(req, res) {
+  const executionPayload = await tokenRequestService.prepareMintRequest(req.params.id, req.user);
+
+  return successResponse(res, {
+    message: 'Mint request payload prepared successfully',
+    data: executionPayload,
+  });
+}
+
+async function prepareTransferRequest(req, res) {
+  const executionPayload = await tokenRequestService.prepareTransferRequest(req.params.id, req.user);
+
+  return successResponse(res, {
+    message: 'Transfer request payload prepared successfully',
+    data: executionPayload,
+  });
+}
+
+async function prepareBurnRequest(req, res) {
+  const executionPayload = await tokenRequestService.prepareBurnRequest(req.params.id, req.user);
+
+  return successResponse(res, {
+    message: 'Burn request payload prepared successfully',
+    data: executionPayload,
+  });
+}
+
+async function prepareCheckerApproval(req, res) {
+  const executionPayload = await tokenRequestService.prepareCheckerApproval(req.params.id, req.user);
+
+  return successResponse(res, {
+    message: 'Checker approval payload prepared successfully',
+    data: executionPayload,
+  });
+}
+
+async function prepareCheckerRejection(req, res) {
+  const executionPayload = await tokenRequestService.prepareCheckerRejection(req.params.id, req.user);
+
+  return successResponse(res, {
+    message: 'Checker rejection payload prepared successfully',
+    data: executionPayload,
+  });
+}
+
+async function recordInitiation(req, res) {
+  const tokenRequest = await tokenRequestService.recordInitiation(req.params.id, req.validated.body, req.user.id);
+
+  return successResponse(res, {
+    message: 'Wallet initiation recorded successfully',
+    data: tokenRequest,
   });
 }
 
@@ -86,6 +149,13 @@ module.exports = {
   updateTokenRequest,
   submitTokenRequest,
   markReadyForExecution,
+  prepareExecution,
+  prepareMintRequest,
+  prepareTransferRequest,
+  prepareBurnRequest,
+  prepareCheckerApproval,
+  prepareCheckerRejection,
+  recordInitiation,
   recordExecution,
   executeReadyRequest,
 };

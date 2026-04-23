@@ -205,18 +205,22 @@ To switch to the real backend:
 - strong status visibility through chips and timeline views
 - desktop-first but responsive
 
-## Future Solana Wallet Integration
+## Current Solana Wallet Integration
 
-The frontend intentionally includes placeholders instead of full wallet execution logic.
+The frontend now includes lightweight injected-wallet support plus maker-side wallet initiation for transfer and burn requests.
 
-Current readiness points:
+Current coverage:
 
-- `WalletConnectCard`
-- `WalletStatusBadge`
-- execution sections on request detail and execution pages
-- TODO markers where browser wallet adapter and signing flow will later plug in
+- app-level Solana wallet provider with shared connection state
+- `WalletConnectCard` connect and disconnect flow for Phantom-compatible injected wallets
+- `WalletStatusBadge` with connected address and mismatch warnings
+- wallet-aware execution context on request detail and ready-for-execution screens
+- maker-side transaction building and submission for transfer and burn initiation
 
-This keeps off-chain workflow screens separated from future on-chain execution UX.
+Still deferred to the next phase:
+
+- end-to-end browser-wallet execution flow
+- browser-wallet handling for mint flows
 
 ## Notes for Windows and WSL
 

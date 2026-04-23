@@ -9,7 +9,7 @@ const listManagedTokensQuerySchema = z.object({
     page: z.coerce.number().int().positive().optional(),
     limit: z.coerce.number().int().positive().optional(),
     search: optionalTrimmedQueryString,
-    sortBy: z.enum(['createdAt', 'updatedAt', 'mintAddress', 'decimals']).optional(),
+    sortBy: z.enum(['createdAt', 'updatedAt', 'mintAddress', 'decimals', 'name', 'symbol']).optional(),
     sortOrder: z.enum(['asc', 'desc']).optional(),
   }),
 });

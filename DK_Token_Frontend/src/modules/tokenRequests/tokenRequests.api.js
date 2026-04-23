@@ -24,6 +24,30 @@ export const tokenRequestsApi = {
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.reject(id, payload, actor()) : (await axiosClient.post(`/token-requests/${id}/reject`, payload)).data),
   markReady: async (id) =>
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.markReady(id, actor()) : (await axiosClient.post(`/token-requests/${id}/mark-ready`)).data),
+  getExecutionPayload: async (id) =>
+    (ENABLE_MOCK_API ? mockAdapter.tokenRequests.getExecutionPayload(id, actor()) : (await axiosClient.get(`/token-requests/${id}/execution-payload`)).data),
+  prepareMintRequest: async (id) =>
+    (ENABLE_MOCK_API
+      ? mockAdapter.tokenRequests.getExecutionPayload(id, actor())
+      : (await axiosClient.get(`/token-requests/${id}/prepare/mint-request`)).data),
+  prepareTransferRequest: async (id) =>
+    (ENABLE_MOCK_API
+      ? mockAdapter.tokenRequests.getExecutionPayload(id, actor())
+      : (await axiosClient.get(`/token-requests/${id}/prepare/transfer-request`)).data),
+  prepareBurnRequest: async (id) =>
+    (ENABLE_MOCK_API
+      ? mockAdapter.tokenRequests.getExecutionPayload(id, actor())
+      : (await axiosClient.get(`/token-requests/${id}/prepare/burn-request`)).data),
+  prepareCheckerApproval: async (id) =>
+    (ENABLE_MOCK_API
+      ? mockAdapter.tokenRequests.getExecutionPayload(id, actor())
+      : (await axiosClient.get(`/token-requests/${id}/prepare/checker-approval`)).data),
+  prepareCheckerRejection: async (id) =>
+    (ENABLE_MOCK_API
+      ? mockAdapter.tokenRequests.getExecutionPayload(id, actor())
+      : (await axiosClient.get(`/token-requests/${id}/prepare/checker-rejection`)).data),
+  recordInitiation: async (id, payload) =>
+    (ENABLE_MOCK_API ? mockAdapter.tokenRequests.recordInitiation(id, payload, actor()) : (await axiosClient.post(`/token-requests/${id}/record-initiation`, payload)).data),
   execute: async (id) =>
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.execute(id, actor()) : (await axiosClient.post(`/token-requests/${id}/execute`)).data),
   recordExecution: async (id, payload) =>
