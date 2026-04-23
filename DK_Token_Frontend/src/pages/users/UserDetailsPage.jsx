@@ -20,6 +20,7 @@ import PageHeader from '../../components/common/PageHeader';
 import { usersApi } from '../../modules/users/users.api';
 import { ROLE_OPTIONS } from '../../utils/constants';
 import { formatDateTime } from '../../utils/date';
+import { getErrorMessage } from '../../utils/error';
 
 function UserDetailsPage() {
   const { id } = useParams();
@@ -28,6 +29,8 @@ function UserDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [selectedRoles, setSelectedRoles] = useState([]);
+  const [savingUserStatus, setSavingUserStatus] = useState(false);
+  const [savingRoles, setSavingRoles] = useState(false);
 
   async function loadUser() {
     setLoading(true);
@@ -66,15 +69,23 @@ function UserDetailsPage() {
                 <Stack direction="row" spacing={1}>
                   <Button onClick={() => setRoleDialogOpen(true)} variant="outlined">Assign Roles</Button>
                   <Button
+                    disabled={savingUserStatus}
                     color={user.isActive ? 'error' : 'success'}
                     onClick={async () => {
-                      await usersApi.updateStatus(user.id, !user.isActive);
-                      enqueueSnackbar('User status updated', { variant: 'success' });
-                      loadUser();
+                      try {
+                        setSavingUserStatus(true);
+                        await usersApi.updateStatus(user.id, !user.isActive);
+                        enqueueSnackbar('User status updated', { variant: 'success' });
+                        loadUser();
+                      } catch (statusError) {
+                        enqueueSnackbar(getErrorMessage(statusError, 'Unable to update user status'), { variant: 'error' });
+                      } finally {
+                        setSavingUserStatus(false);
+                      }
                     }}
                     variant="contained"
                   >
-                    {user.isActive ? 'Deactivate' : 'Activate'}
+                    {savingUserStatus ? 'Saving...' : (user.isActive ? 'Deactivate' : 'Activate')}
                   </Button>
                 </Stack>
               </Stack>
@@ -99,18 +110,26 @@ function UserDetailsPage() {
       <AppDialog
         actions={
           <>
-            <Button onClick={() => setRoleDialogOpen(false)}>Cancel</Button>
-            <Button
-              onClick={async () => {
+          <Button onClick={() => setRoleDialogOpen(false)}>Cancel</Button>
+          <Button
+            disabled={savingRoles}
+            onClick={async () => {
+              try {
+                setSavingRoles(true);
                 await usersApi.assignRoles(user.id, selectedRoles.map((role) => role.value));
                 enqueueSnackbar('Roles updated', { variant: 'success' });
                 setRoleDialogOpen(false);
                 loadUser();
-              }}
-              variant="contained"
-            >
-              Save
-            </Button>
+              } catch (rolesError) {
+                enqueueSnackbar(getErrorMessage(rolesError, 'Unable to update roles'), { variant: 'error' });
+              } finally {
+                setSavingRoles(false);
+              }
+            }}
+            variant="contained"
+          >
+            {savingRoles ? 'Saving...' : 'Save'}
+          </Button>
           </>
         }
         onClose={() => setRoleDialogOpen(false)}

@@ -10,30 +10,15 @@ export function getStatusTimeline(request) {
     },
     {
       key: REQUEST_STATUSES.PENDING_APPROVAL,
-      label: 'Submitted for Approval',
+      label: 'Waiting for Checker Wallet Approval',
       completed: request?.status !== REQUEST_STATUSES.DRAFT,
-      timestamp: request?.status !== REQUEST_STATUSES.DRAFT ? request?.updatedAt || request?.createdAt : null,
+      timestamp: request?.status !== REQUEST_STATUSES.DRAFT ? request?.makerInitiatedAt || request?.updatedAt || request?.createdAt : null,
     },
     {
-      key: REQUEST_STATUSES.APPROVED,
-      label: 'Approved',
-      completed: [REQUEST_STATUSES.APPROVED, ...ON_CHAIN_PENDING_STATUSES, REQUEST_STATUSES.EXECUTED, REQUEST_STATUSES.FAILED].includes(request?.status),
-      timestamp: request?.approvedAt || null,
-    },
-    {
-      key: REQUEST_STATUSES.ON_CHAIN_PENDING,
-      label: 'On-chain Pending',
-      completed: [...ON_CHAIN_PENDING_STATUSES, REQUEST_STATUSES.EXECUTED, REQUEST_STATUSES.FAILED].includes(request?.status),
-      timestamp:
-        [...ON_CHAIN_PENDING_STATUSES, REQUEST_STATUSES.EXECUTED, REQUEST_STATUSES.FAILED].includes(request?.status)
-          ? request?.approvedAt || request?.updatedAt || null
-          : null,
-    },
-    {
-      key: REQUEST_STATUSES.EXECUTED,
-      label: 'Execution Recorded',
-      completed: [REQUEST_STATUSES.EXECUTED, REQUEST_STATUSES.FAILED].includes(request?.status),
-      timestamp: request?.executedAt || null,
+      key: 'FINAL_DECISION',
+      label: 'Checker Decision',
+      completed: [REQUEST_STATUSES.APPROVED, REQUEST_STATUSES.REJECTED].includes(request?.status),
+      timestamp: request?.approvedAt || request?.rejectedAt || null,
     },
   ];
 }
@@ -52,11 +37,11 @@ export function getNextActorMessage(request, executionPayload = null) {
   }
 
   if (request.status === REQUEST_STATUSES.PENDING_APPROVAL) {
-    return 'Waiting for checker approval';
+    return 'Waiting for checker wallet approval';
   }
 
   if (request.status === REQUEST_STATUSES.DRAFT) {
-    return 'Waiting for maker submission';
+    return 'Waiting for maker wallet signature';
   }
 
   if (request.status === REQUEST_STATUSES.APPROVED && executionPayload?.walletInitiation?.supported && !executionPayload?.walletInitiation?.recorded) {

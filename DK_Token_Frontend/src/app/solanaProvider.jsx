@@ -1,5 +1,6 @@
 import { createContext, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { registerWalletResetHandler } from './sessionManager';
 import { SOLANA_CLUSTER, SOLANA_RPC_URL } from '../utils/constants';
 
 export const SolanaContext = createContext(null);
@@ -162,6 +163,24 @@ function SolanaProvider({ children }) {
     }
   }, [providerState.provider]);
 
+  const resetSession = useCallback(async () => {
+    const provider = providerState.provider;
+
+    try {
+      if (provider?.disconnect) {
+        await provider.disconnect();
+      }
+    } catch {
+      // Ignore disconnect errors during session reset.
+    } finally {
+      setDisconnecting(false);
+      setConnecting(false);
+      setConnected(false);
+      setAddress(null);
+      setError('');
+    }
+  }, [providerState.provider]);
+
   const disconnect = useCallback(async () => {
     const provider = providerState.provider;
     if (!provider?.disconnect) {
@@ -213,6 +232,11 @@ function SolanaProvider({ children }) {
     providerState.walletName,
     refreshProvider,
   ]);
+
+  useEffect(() => {
+    const unregister = registerWalletResetHandler(resetSession);
+    return unregister;
+  }, [resetSession]);
 
   return (
     <SolanaContext.Provider value={value}>

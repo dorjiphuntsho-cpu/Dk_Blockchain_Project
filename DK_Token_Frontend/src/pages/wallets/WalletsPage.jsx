@@ -12,6 +12,7 @@ import SearchFilters from '../../components/common/SearchFilters';
 import usePagination from '../../hooks/usePagination';
 import { usersApi } from '../../modules/users/users.api';
 import { walletsApi } from '../../modules/wallets/wallets.api';
+import { getErrorMessage } from '../../utils/error';
 import { truncateMiddle } from '../../utils/format';
 
 function WalletsPage() {
@@ -25,6 +26,7 @@ function WalletsPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [selectedWallet, setSelectedWallet] = useState(null);
+  const [statusChanging, setStatusChanging] = useState(false);
 
   async function loadWallets() {
     try {
@@ -176,12 +178,20 @@ function WalletsPage() {
       <ConfirmDialog
         confirmLabel={selectedWallet?.isActive ? 'Deactivate' : 'Activate'}
         description={`This will ${selectedWallet?.isActive ? 'deactivate' : 'activate'} this wallet.`}
+        isLoading={statusChanging}
         onClose={() => setSelectedWallet(null)}
         onConfirm={async () => {
-          await walletsApi.updateStatus(selectedWallet.id, !selectedWallet.isActive);
-          enqueueSnackbar('Wallet status updated', { variant: 'success' });
-          setSelectedWallet(null);
-          loadWallets();
+          try {
+            setStatusChanging(true);
+            await walletsApi.updateStatus(selectedWallet.id, !selectedWallet.isActive);
+            enqueueSnackbar('Wallet status updated', { variant: 'success' });
+            setSelectedWallet(null);
+            loadWallets();
+          } catch (statusError) {
+            enqueueSnackbar(getErrorMessage(statusError, 'Unable to update wallet status'), { variant: 'error' });
+          } finally {
+            setStatusChanging(false);
+          }
         }}
         open={Boolean(selectedWallet)}
         title="Confirm Wallet Status Change"

@@ -130,35 +130,9 @@ function ReadyForExecutionPage() {
         actions={
           <>
             <Button onClick={() => setSelectedRequest(null)}>Cancel</Button>
-            {selectedExecutionPayload?.executionMode !== EXECUTION_MODES.BROWSER_WALLET ? (
-              <Button
-                onClick={async () => {
-                  try {
-                    setSubmitting(true);
-                    const response = await tokenRequestsApi.execute(selectedRequest.id);
-                    const signature = response?.data?.execution?.txSignature;
-                    enqueueSnackbar(
-                      signature ? `Execution submitted: ${truncateMiddle(signature, 8, 6)}` : 'Execution completed',
-                      { variant: 'success' },
-                    );
-                    setSelectedRequest(null);
-                    load();
-                  } catch (submitError) {
-                    enqueueSnackbar(submitError.message || 'Execution failed', { variant: 'error' });
-                  } finally {
-                    setSubmitting(false);
-                  }
-                }}
-                disabled={submitting || selectedExecutionPayloadLoading}
-                variant="contained"
-              >
-                Execute On Chain
-              </Button>
-            ) : (
-              <Button onClick={() => navigate(`/token-requests/${selectedRequest.id}`)} variant="contained">
-                Open Request
-              </Button>
-            )}
+            <Button onClick={() => navigate(`/token-requests/${selectedRequest.id}`)} variant="contained">
+              Open Request
+            </Button>
           </>
         }
         onClose={() => setSelectedRequest(null)}

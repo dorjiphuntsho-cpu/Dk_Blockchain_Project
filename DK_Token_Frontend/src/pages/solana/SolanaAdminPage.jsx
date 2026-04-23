@@ -23,6 +23,7 @@ import {
   buildExplorerTransactionUrl,
   signAndSendWalletTransaction,
 } from '../../modules/solana/walletExecution';
+import { getErrorMessage } from '../../utils/error';
 import { truncateMiddle } from '../../utils/format';
 
 function DetailRow({ label, value }) {
@@ -268,7 +269,7 @@ function SolanaAdminPage() {
                         setMintUri('');
                         enqueueSnackbar('Managed token mint created', { variant: 'success' });
                       } catch (actionError) {
-                        enqueueSnackbar(actionError.message || 'Unable to create token mint', { variant: 'error' });
+                        enqueueSnackbar(getErrorMessage(actionError, 'Unable to create token mint'), { variant: 'error' });
                       } finally {
                         setSubmitting((current) => ({ ...current, createMint: false }));
                       }
@@ -317,7 +318,7 @@ function SolanaAdminPage() {
                         setCheckerAddress('');
                         enqueueSnackbar('Checker added on chain', { variant: 'success' });
                       } catch (actionError) {
-                        enqueueSnackbar(actionError.message || 'Unable to add checker', { variant: 'error' });
+                        enqueueSnackbar(getErrorMessage(actionError, 'Unable to add checker'), { variant: 'error' });
                       } finally {
                         setSubmitting((current) => ({ ...current, addChecker: false }));
                       }
@@ -354,7 +355,7 @@ function SolanaAdminPage() {
                         setNewAdminAddress('');
                         enqueueSnackbar('On-chain admin updated', { variant: 'success' });
                       } catch (actionError) {
-                        enqueueSnackbar(actionError.message || 'Unable to rotate admin', { variant: 'error' });
+                        enqueueSnackbar(getErrorMessage(actionError, 'Unable to rotate admin'), { variant: 'error' });
                       } finally {
                         setSubmitting((current) => ({ ...current, setAdmin: false }));
                       }
@@ -397,17 +398,17 @@ function SolanaAdminPage() {
                       color="error"
                       disabled={row.isAdmin || submitting.removingChecker === row.address}
                       onClick={async () => {
-                        try {
-                          setSubmitting((current) => ({ ...current, removingChecker: row.address }));
-                          const response = await solanaAdminApi.removeChecker(row.address);
-                          setStatus(response.data);
-                          enqueueSnackbar('Checker removed on chain', { variant: 'success' });
-                        } catch (actionError) {
-                          enqueueSnackbar(actionError.message || 'Unable to remove checker', { variant: 'error' });
-                        } finally {
-                          setSubmitting((current) => ({ ...current, removingChecker: '' }));
-                        }
-                      }}
+                      try {
+                        setSubmitting((current) => ({ ...current, removingChecker: row.address }));
+                        const response = await solanaAdminApi.removeChecker(row.address);
+                        setStatus(response.data);
+                        enqueueSnackbar('Checker removed on chain', { variant: 'success' });
+                      } catch (actionError) {
+                        enqueueSnackbar(getErrorMessage(actionError, 'Unable to remove checker'), { variant: 'error' });
+                      } finally {
+                        setSubmitting((current) => ({ ...current, removingChecker: '' }));
+                      }
+                    }}
                       size="small"
                       variant="outlined"
                     >

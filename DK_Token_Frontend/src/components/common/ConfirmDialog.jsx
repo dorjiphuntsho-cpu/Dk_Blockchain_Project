@@ -17,7 +17,7 @@ function ConfirmDialog({
         <>
           <Button disabled={isLoading} onClick={onClose}>Cancel</Button>
           <Button color="error" disabled={isLoading} onClick={onConfirm} variant="contained">
-            {confirmLabel}
+            {isLoading ? 'Processing...' : confirmLabel}
           </Button>
         </>
       }

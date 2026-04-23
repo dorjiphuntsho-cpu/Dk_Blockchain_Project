@@ -319,6 +319,13 @@ function basicUser(user) {
     email: user.email,
     isActive: user.isActive,
     roles: user.roles,
+    wallets: user.wallets?.map((wallet) => ({
+      id: wallet.id,
+      walletAddress: wallet.walletAddress,
+      label: wallet.label,
+      isPrimary: wallet.isPrimary,
+      isActive: wallet.isActive,
+    })) || [],
   };
 }
 
@@ -565,7 +572,7 @@ export const mockAdapter = {
 
         return createDetailResponse('Login successful', {
           token: `mock-token-${user.id}`,
-          user: basicUser(user),
+          user: basicUser({ ...user, wallets: db.wallets.filter((wallet) => wallet.userId === user.id) }),
         });
       }),
     me: async (token) =>
@@ -578,7 +585,7 @@ export const mockAdapter = {
           throw new Error('Unable to resolve current user');
         }
 
-        return createDetailResponse('Current user fetched successfully', basicUser(user));
+        return createDetailResponse('Current user fetched successfully', basicUser({ ...user, wallets: db.wallets.filter((wallet) => wallet.userId === user.id) }));
       }),
   },
   users: {
@@ -1036,6 +1043,8 @@ export const mockAdapter = {
         request.status = REQUEST_STATUSES.APPROVED;
         request.checkerUserId = actor.id;
         request.approvedAt = new Date().toISOString();
+        request.txSignature = payload.txSignature || null;
+        request.explorerUrl = payload.explorerUrl || null;
         request.updatedAt = new Date().toISOString();
         request.approvals.unshift({
           id: generateId('approval'),
@@ -1050,7 +1059,7 @@ export const mockAdapter = {
           entityType: ENTITY_TYPES.TOKEN_REQUEST,
           entityId: id,
           action: AUDIT_ACTIONS.APPROVE,
-          metadata: { comment: payload.comment || null },
+          metadata: { comment: payload.comment || null, txSignature: payload.txSignature || null, explorerUrl: payload.explorerUrl || null },
         });
         setDb(db);
 
@@ -1070,6 +1079,8 @@ export const mockAdapter = {
         request.checkerUserId = actor.id;
         request.rejectedAt = new Date().toISOString();
         request.rejectionReason = payload.rejectionReason;
+        request.txSignature = payload.txSignature || null;
+        request.explorerUrl = payload.explorerUrl || null;
         request.updatedAt = new Date().toISOString();
         request.approvals.unshift({
           id: generateId('approval'),
@@ -1084,7 +1095,7 @@ export const mockAdapter = {
           entityType: ENTITY_TYPES.TOKEN_REQUEST,
           entityId: id,
           action: AUDIT_ACTIONS.REJECT,
-          metadata: payload,
+          metadata: { ...payload, txSignature: payload.txSignature || null, explorerUrl: payload.explorerUrl || null },
         });
         setDb(db);
 
@@ -1117,6 +1128,81 @@ export const mockAdapter = {
           executionPayload: buildMockExecutionPayload(db, request),
         });
       }),
+    prepareMintRequest: async (id) =>
+      perform(() => {
+        const db = getDb();
+        const request = db.tokenRequests.find((item) => item.id === id);
+
+        if (!request) {
+          throw new Error('Token request not found');
+        }
+
+        if (request.status !== REQUEST_STATUSES.DRAFT) {
+          throw new Error('Only draft requests can prepare maker wallet signing');
+        }
+
+        return createDetailResponse('Mint request payload prepared successfully', buildMockExecutionPayload(db, request));
+      }),
+    prepareTransferRequest: async (id) =>
+      perform(() => {
+        const db = getDb();
+        const request = db.tokenRequests.find((item) => item.id === id);
+
+        if (!request) {
+          throw new Error('Token request not found');
+        }
+
+        if (request.status !== REQUEST_STATUSES.DRAFT) {
+          throw new Error('Only draft requests can prepare maker wallet signing');
+        }
+
+        return createDetailResponse('Transfer request payload prepared successfully', buildMockExecutionPayload(db, request));
+      }),
+    prepareBurnRequest: async (id) =>
+      perform(() => {
+        const db = getDb();
+        const request = db.tokenRequests.find((item) => item.id === id);
+
+        if (!request) {
+          throw new Error('Token request not found');
+        }
+
+        if (request.status !== REQUEST_STATUSES.DRAFT) {
+          throw new Error('Only draft requests can prepare maker wallet signing');
+        }
+
+        return createDetailResponse('Burn request payload prepared successfully', buildMockExecutionPayload(db, request));
+      }),
+    prepareCheckerApproval: async (id) =>
+      perform(() => {
+        const db = getDb();
+        const request = db.tokenRequests.find((item) => item.id === id);
+
+        if (!request) {
+          throw new Error('Token request not found');
+        }
+
+        if (request.status !== REQUEST_STATUSES.PENDING_APPROVAL) {
+          throw new Error('Only pending approval requests can prepare checker approval');
+        }
+
+        return createDetailResponse('Checker approval payload prepared successfully', buildMockExecutionPayload(db, request));
+      }),
+    prepareCheckerRejection: async (id) =>
+      perform(() => {
+        const db = getDb();
+        const request = db.tokenRequests.find((item) => item.id === id);
+
+        if (!request) {
+          throw new Error('Token request not found');
+        }
+
+        if (request.status !== REQUEST_STATUSES.PENDING_APPROVAL) {
+          throw new Error('Only pending approval requests can prepare checker rejection');
+        }
+
+        return createDetailResponse('Checker rejection payload prepared successfully', buildMockExecutionPayload(db, request));
+      }),
     getExecutionPayload: async (id) =>
       perform(() => {
         const db = getDb();
@@ -1138,11 +1224,12 @@ export const mockAdapter = {
         const actor = getActor(actorUser);
         const request = db.tokenRequests.find((item) => item.id === id);
 
-        if (!request || request.makerUserId !== actor.id || !isOnChainPendingStatus(request.status)) {
-          throw new Error('Only the maker can record wallet initiation for on-chain pending requests');
+        if (!request || request.makerUserId !== actor.id || request.status !== REQUEST_STATUSES.DRAFT) {
+          throw new Error('Only the maker can record wallet initiation for draft requests');
         }
 
         request.executionMode = EXECUTION_MODES.BROWSER_WALLET;
+        request.status = REQUEST_STATUSES.PENDING_APPROVAL;
         request.makerWalletAddress = payload.makerWalletAddress;
         request.onChainRequestAddress = payload.onChainRequestAddress;
         request.initiationTxSignature = payload.initiationTxSignature;
@@ -1157,7 +1244,7 @@ export const mockAdapter = {
           entityType: ENTITY_TYPES.TOKEN_REQUEST,
           entityId: id,
           action: 'RECORD_INITIATION',
-          metadata: payload,
+          metadata: { ...payload, newStatus: REQUEST_STATUSES.PENDING_APPROVAL },
         });
         setDb(db);
 

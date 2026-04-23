@@ -3,6 +3,7 @@ const ApiError = require('../utils/ApiError');
 const { requestPayloadInclude } = require('../models/tokenRequest.model');
 const solanaService = require('./solana.service');
 const { EXECUTION_MODES, TOKEN_REQUEST_TYPES } = require('../utils/enums');
+const { TOKEN_PROGRAM_ID } = require('@solana/spl-token');
 
 async function getRequestForExecution(requestId) {
   const tokenRequest = await prisma.tokenRequest.findUnique({
@@ -44,6 +45,18 @@ function withExecutionContext(tokenRequest, operation) {
     operation,
     requestId: tokenRequest.id,
     initiatedBy: tokenRequest.makerUser,
+  };
+}
+
+function serializeTransactionInstruction(instruction) {
+  return {
+    programId: instruction.programId.toBase58(),
+    keys: instruction.keys.map((meta) => ({
+      pubkey: meta.pubkey.toBase58(),
+      isSigner: meta.isSigner,
+      isWritable: meta.isWritable,
+    })),
+    data: Buffer.from(instruction.data).toString('base64'),
   };
 }
 
@@ -91,9 +104,31 @@ async function prepareBurnRequestPayload(requestId) {
   };
 }
 
-async function prepareCheckerApprovalPayload(requestId) {
+async function prepareCheckerApprovalPayload(requestId, checkerWalletAddress = null) {
   const tokenRequest = await getRequestForExecution(requestId);
   const executionContext = solanaService.getExecutionContext(tokenRequest);
+  const configStatus = await solanaService.getConfigStatus();
+  const checkerKeypair = solanaService.getCheckerKeypair();
+  const checkerProgram = solanaService.getProgram(checkerKeypair);
+  const checkerSignerAddress = checkerWalletAddress || checkerKeypair.publicKey.toBase58();
+  const sourceTokenAccount =
+    tokenRequest.sourceTokenAccountAddress || executionContext.sourceTokenAccount || null;
+  const destinationTokenAccount =
+    tokenRequest.destinationTokenAccountAddress || executionContext.destinationTokenAccount || null;
+
+  const approvalInstruction = await checkerProgram.methods
+    .approveRequest()
+    .accounts({
+      request: tokenRequest.onChainRequestAddress,
+      config: executionContext.configAddress,
+      mint: tokenRequest.tokenMintAddress,
+      sourceTokenAccount: tokenRequest.requestType === TOKEN_REQUEST_TYPES.BURN ? sourceTokenAccount : tokenRequest.requestType === TOKEN_REQUEST_TYPES.TRANSFER ? sourceTokenAccount : null,
+      destinationTokenAccount: tokenRequest.requestType === TOKEN_REQUEST_TYPES.BURN ? null : destinationTokenAccount,
+      tokenAuthority: executionContext.tokenAuthority,
+      checker: checkerSignerAddress,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .instruction();
 
   return {
     ...executionContext,
@@ -101,13 +136,28 @@ async function prepareCheckerApprovalPayload(requestId) {
     requestId: tokenRequest.id,
     signerRole: 'CHECKER',
     requiresBrowserWallet: true,
+    expectedCheckerWalletAddress: checkerSignerAddress,
     onChainRequestAddress: tokenRequest.onChainRequestAddress || null,
+    onChainCheckers: configStatus.onChain?.checkers || [],
+    approvalInstruction: serializeTransactionInstruction(approvalInstruction),
   };
 }
 
-async function prepareCheckerRejectionPayload(requestId) {
+async function prepareCheckerRejectionPayload(requestId, checkerWalletAddress = null) {
   const tokenRequest = await getRequestForExecution(requestId);
   const executionContext = solanaService.getExecutionContext(tokenRequest);
+  const configStatus = await solanaService.getConfigStatus();
+  const checkerKeypair = solanaService.getCheckerKeypair();
+  const checkerProgram = solanaService.getProgram(checkerKeypair);
+  const checkerSignerAddress = checkerWalletAddress || checkerKeypair.publicKey.toBase58();
+  const rejectionInstruction = await checkerProgram.methods
+    .rejectRequest()
+    .accounts({
+      request: tokenRequest.onChainRequestAddress,
+      config: executionContext.configAddress,
+      checker: checkerSignerAddress,
+    })
+    .instruction();
 
   return {
     ...executionContext,
@@ -116,7 +166,10 @@ async function prepareCheckerRejectionPayload(requestId) {
     signerRole: 'CHECKER',
     requiresBrowserWallet: true,
     supportsOnChainRejection: true,
+    expectedCheckerWalletAddress: checkerSignerAddress,
     onChainRequestAddress: tokenRequest.onChainRequestAddress || null,
+    onChainCheckers: configStatus.onChain?.checkers || [],
+    rejectionInstruction: serializeTransactionInstruction(rejectionInstruction),
   };
 }
 
@@ -134,11 +187,13 @@ async function prepareBurnExecutionPayload(requestId) {
 
 async function prepareExecutionPayload(requestId) {
   const tokenRequest = await getRequestForExecution(requestId);
+  const configStatus = await solanaService.getConfigStatus();
 
   if (tokenRequest.requestType === TOKEN_REQUEST_TYPES.MINT) {
     return {
       ...(await prepareMintExecutionPayload(requestId)),
       currentExecutionMode: tokenRequest.executionMode,
+      onChainCheckers: configStatus.onChain?.checkers || [],
     };
   }
 
@@ -146,12 +201,14 @@ async function prepareExecutionPayload(requestId) {
     return {
       ...(await prepareTransferExecutionPayload(requestId)),
       currentExecutionMode: tokenRequest.executionMode,
+      onChainCheckers: configStatus.onChain?.checkers || [],
     };
   }
 
   return {
     ...(await prepareBurnExecutionPayload(requestId)),
     currentExecutionMode: tokenRequest.executionMode,
+    onChainCheckers: configStatus.onChain?.checkers || [],
   };
 }
 
@@ -159,6 +216,7 @@ async function recordInitiationResult(requestId, payload, tx = prisma) {
   return tx.tokenRequest.update({
     where: { id: requestId },
     data: {
+      status: payload.nextStatus || undefined,
       executionMode: EXECUTION_MODES.BROWSER_WALLET,
       makerWalletAddress: payload.makerWalletAddress,
       onChainRequestAddress: payload.onChainRequestAddress,

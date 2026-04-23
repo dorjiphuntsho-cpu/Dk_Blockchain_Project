@@ -13,6 +13,7 @@ import FormTextField from '../../components/form/FormTextField';
 import { usersApi } from '../../modules/users/users.api';
 import { walletsApi } from '../../modules/wallets/wallets.api';
 import { walletSchema } from '../../modules/wallets/wallets.schemas';
+import { getErrorMessage } from '../../utils/error';
 import { truncateMiddle } from '../../utils/format';
 
 function WalletDetailsPage() {
@@ -22,6 +23,7 @@ function WalletDetailsPage() {
   const [users, setUsers] = useState([]);
   const [balances, setBalances] = useState([]);
   const [balanceError, setBalanceError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const methods = useForm({
     defaultValues: {
       userId: '',
@@ -67,10 +69,10 @@ function WalletDetailsPage() {
 
   useEffect(() => {
     loadWallet().catch((error) => {
-      enqueueSnackbar(error.message || 'Unable to load wallet details.', { variant: 'error' });
+      enqueueSnackbar(getErrorMessage(error, 'Unable to load wallet details.'), { variant: 'error' });
       setLoading(false);
     });
-  }, [id]);
+  }, [enqueueSnackbar, id]);
 
   const balanceColumns = useMemo(() => [
     {
@@ -96,12 +98,23 @@ function WalletDetailsPage() {
   ], []);
 
   const handleSubmit = methods.handleSubmit(async (values) => {
-    await walletsApi.update(id, {
-      ...values,
-      isPrimary: values.isPrimary === true || values.isPrimary === 'true',
-    });
-    enqueueSnackbar('Wallet updated successfully', { variant: 'success' });
-    loadWallet();
+    if (submitting) {
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await walletsApi.update(id, {
+        ...values,
+        isPrimary: values.isPrimary === true || values.isPrimary === 'true',
+      });
+      enqueueSnackbar('Wallet updated successfully', { variant: 'success' });
+      loadWallet();
+    } catch (updateError) {
+      enqueueSnackbar(getErrorMessage(updateError, 'Unable to update wallet'), { variant: 'error' });
+    } finally {
+      setSubmitting(false);
+    }
   });
 
   if (loading) {
@@ -132,17 +145,30 @@ function WalletDetailsPage() {
               <Stack direction="row" spacing={1.5}>
                 <Button
                   color="warning"
+                  disabled={submitting}
                   onClick={async () => {
-                    const wallet = methods.getValues();
-                    await walletsApi.updateStatus(id, false);
-                    enqueueSnackbar('Wallet deactivated', { variant: 'success' });
-                    loadWallet();
+                    try {
+                      if (submitting) {
+                        return;
+                      }
+
+                      setSubmitting(true);
+                      await walletsApi.updateStatus(id, false);
+                      enqueueSnackbar('Wallet deactivated', { variant: 'success' });
+                      loadWallet();
+                    } catch (deactivateError) {
+                      enqueueSnackbar(getErrorMessage(deactivateError, 'Unable to deactivate wallet'), { variant: 'error' });
+                    } finally {
+                      setSubmitting(false);
+                    }
                   }}
                   variant="outlined"
                 >
-                  Deactivate
+                  {submitting ? 'Saving...' : 'Deactivate'}
                 </Button>
-                <Button type="submit" variant="contained">Save Changes</Button>
+                <Button disabled={submitting} type="submit" variant="contained">
+                  {submitting ? 'Saving...' : 'Save Changes'}
+                </Button>
               </Stack>
             </Stack>
           </FormProvider>

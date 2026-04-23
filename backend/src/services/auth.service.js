@@ -12,6 +12,13 @@ function mapUserProfile(user) {
     email: user.email,
     isActive: user.isActive,
     roles: user.roles.map((item) => item.role.name),
+    wallets: user.wallets.map((wallet) => ({
+      id: wallet.id,
+      walletAddress: wallet.walletAddress,
+      label: wallet.label,
+      isPrimary: wallet.isPrimary,
+      isActive: wallet.isActive,
+    })),
   };
 }
 
@@ -24,6 +31,7 @@ async function login({ email, password }) {
           role: true,
         },
       },
+      wallets: true,
     },
   });
 
@@ -62,6 +70,7 @@ async function getCurrentUser(userId) {
           role: true,
         },
       },
+      wallets: true,
     },
   });
 

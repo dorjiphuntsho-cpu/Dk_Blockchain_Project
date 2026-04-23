@@ -40,7 +40,7 @@ function WalletConnectCard({ executionPayload = null, requestStatus = null }) {
         />
       }
       subtitle={usingLiveBackend
-        ? 'Connect an injected Solana wallet to initiate maker-side request signing for mint, transfer, and burn flows while leaving approval and final execution in the existing backend flow.'
+        ? 'Connect an injected Solana wallet to sign maker submissions and checker decisions for mint, transfer, and burn requests.'
         : 'Mock mode keeps the wallet UI testable even when backend execution is simulated.'}
       title="Solana Wallet Readiness"
     >
@@ -68,7 +68,7 @@ function WalletConnectCard({ executionPayload = null, requestStatus = null }) {
           </Alert>
         ) : usingLiveBackend ? (
           <Alert severity="info" sx={{ border: 'none' }}>
-            The backend still supports the current server-managed flow. Connect the maker wallet here before using the wallet-initiation action on a ready mint, transfer, or burn request.
+            Connect the active role wallet here before submitting maker requests or signing checker decisions.
           </Alert>
         ) : null}
         {walletInitSupported ? (

@@ -35,12 +35,11 @@ export function canMarkReady(user, request) {
 }
 
 export function canRecordExecution(user, request) {
-  return hasRole(user, [ROLES.ADMIN, ROLES.EXECUTOR]) &&
-    ON_CHAIN_PENDING_STATUSES.includes(request?.status);
+  return false;
 }
 
 export function canExecuteRequest(user, request) {
-  return canRecordExecution(user, request) && request?.executionMode !== EXECUTION_MODES.BROWSER_WALLET;
+  return false;
 }
 
 export function canInitiateWalletExecution(user, request, executionPayload) {
@@ -51,9 +50,8 @@ export function canInitiateWalletExecution(user, request, executionPayload) {
     !executionPayload?.walletInitiation?.recorded;
 }
 
-export function canApproveWalletExecution(user, request, executionPayload) {
+export function canApproveWalletExecution(user, request) {
   return hasRole(user, [ROLES.CHECKER]) &&
-    ON_CHAIN_PENDING_STATUSES.includes(request?.status) &&
-    Boolean(executionPayload?.walletInitiation?.recorded) &&
-    Boolean(executionPayload?.walletInitiation?.onChainRequestAddress);
+    request?.status === REQUEST_STATUSES.PENDING_APPROVAL &&
+    request?.makerUserId !== user?.id;
 }

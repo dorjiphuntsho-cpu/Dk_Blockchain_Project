@@ -9,6 +9,7 @@ const {
   createTokenRequestSchema,
   listTokenRequestsQuerySchema,
   tokenRequestIdParamSchema,
+  checkerPreparationQuerySchema,
   updateTokenRequestSchema,
   recordInitiationSchema,
   recordExecutionSchema,
@@ -76,13 +77,13 @@ router.get(
 router.get(
   '/:id/prepare/checker-approval',
   authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.CHECKER),
-  validate(tokenRequestIdParamSchema),
+  validate(checkerPreparationQuerySchema),
   asyncHandler(tokenRequestController.prepareCheckerApproval),
 );
 router.get(
   '/:id/prepare/checker-rejection',
   authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.CHECKER),
-  validate(tokenRequestIdParamSchema),
+  validate(checkerPreparationQuerySchema),
   asyncHandler(tokenRequestController.prepareCheckerRejection),
 );
 router.post(

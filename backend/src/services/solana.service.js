@@ -187,6 +187,36 @@ async function fetchConfigAccount(configAddress, keypair = getAdminKeypair()) {
   return getProgram(keypair).account.config.fetchNullable(configAddress);
 }
 
+function mapOnChainRequestStatus(status) {
+  if (!status || typeof status !== 'object') {
+    return null;
+  }
+
+  const [variant] = Object.keys(status);
+  return variant ? variant.toUpperCase() : null;
+}
+
+async function fetchTokenRequestAccount(requestAddress, keypair = getAdminKeypair()) {
+  const publicKey = parsePublicKey(requestAddress, 'onChainRequestAddress');
+  const account = await getProgram(keypair).account.tokenRequest.fetchNullable(publicKey);
+
+  if (!account) {
+    return null;
+  }
+
+  return {
+    address: publicKey.toBase58(),
+    maker: account.maker?.toBase58?.() || null,
+    checker: account.checker?.toBase58?.() || null,
+    mint: account.mint?.toBase58?.() || null,
+    sourceTokenAccount: account.sourceTokenAccount?.toBase58?.() || null,
+    destinationTokenAccount: account.destinationTokenAccount?.toBase58?.() || null,
+    amount: account.amount?.toString?.() || null,
+    requestType: account.requestType ? Object.keys(account.requestType)[0]?.toUpperCase() || null : null,
+    status: mapOnChainRequestStatus(account.status),
+  };
+}
+
 function requireConfigAddress() {
   const configKeypair = getConfigKeypair();
   if (configKeypair) {
@@ -877,9 +907,12 @@ module.exports = {
   bootstrapOnChainConfig,
   createTokenMint,
   executeOnChainRequest,
+  fetchTokenRequestAccount,
   getConfigStatus,
   getAdminKeypair,
+  getCheckerKeypair,
   getExecutionContext,
+  getProgram,
   getTokenAuthorityAddress,
   getMetadataProgramId: () => METADATA_PROGRAM_ID,
   getProgramId,

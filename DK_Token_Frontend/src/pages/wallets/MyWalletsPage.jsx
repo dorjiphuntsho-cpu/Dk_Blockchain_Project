@@ -10,7 +10,7 @@ import { walletsApi } from '../../modules/wallets/wallets.api';
 import { truncateMiddle } from '../../utils/format';
 
 function MyWalletsPage() {
-  const { user } = useAuth();
+  const { user, hydrateUser } = useAuth();
   const [wallets, setWallets] = useState([]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -71,6 +71,7 @@ function MyWalletsPage() {
         });
 
         setRows(nextRows);
+        await hydrateUser().catch(() => null);
       } catch (loadError) {
         setError(loadError.message || 'Unable to load your wallet balances.');
       } finally {

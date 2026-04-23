@@ -84,14 +84,24 @@ const tokenRequestIdParamSchema = z.object({
   query: z.object({}).optional(),
 });
 
+const checkerPreparationQuerySchema = z.object({
+  body: z.object({}).optional(),
+  params: z.object({
+    id: uuidSchema,
+  }),
+  query: z.object({
+    checkerWalletAddress: walletAddressSchema.optional(),
+  }),
+});
+
 const recordInitiationSchema = z.object({
   body: z.object({
     makerWalletAddress: walletAddressSchema,
     onChainRequestAddress: walletAddressSchema,
     initiationTxSignature: z.string().trim().min(1, 'initiationTxSignature is required'),
     initiationExplorerUrl: z.string().trim().url('initiationExplorerUrl must be a valid URL').optional(),
-    sourceTokenAccountAddress: walletAddressSchema.optional(),
-    destinationTokenAccountAddress: walletAddressSchema.optional(),
+    sourceTokenAccountAddress: walletAddressSchema.nullable().optional(),
+    destinationTokenAccountAddress: walletAddressSchema.nullable().optional(),
   }),
   params: z.object({
     id: uuidSchema,
@@ -117,6 +127,7 @@ module.exports = {
   updateTokenRequestSchema,
   listTokenRequestsQuerySchema,
   tokenRequestIdParamSchema,
+  checkerPreparationQuerySchema,
   recordInitiationSchema,
   recordExecutionSchema,
 };

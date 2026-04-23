@@ -98,7 +98,11 @@ async function prepareBurnRequest(req, res) {
 }
 
 async function prepareCheckerApproval(req, res) {
-  const executionPayload = await tokenRequestService.prepareCheckerApproval(req.params.id, req.user);
+  const executionPayload = await tokenRequestService.prepareCheckerApproval(
+    req.params.id,
+    req.user,
+    req.validated.query?.checkerWalletAddress,
+  );
 
   return successResponse(res, {
     message: 'Checker approval payload prepared successfully',
@@ -107,7 +111,11 @@ async function prepareCheckerApproval(req, res) {
 }
 
 async function prepareCheckerRejection(req, res) {
-  const executionPayload = await tokenRequestService.prepareCheckerRejection(req.params.id, req.user);
+  const executionPayload = await tokenRequestService.prepareCheckerRejection(
+    req.params.id,
+    req.user,
+    req.validated.query?.checkerWalletAddress,
+  );
 
   return successResponse(res, {
     message: 'Checker rejection payload prepared successfully',

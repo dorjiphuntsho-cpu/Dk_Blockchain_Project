@@ -2,13 +2,14 @@ import { Connection, Keypair, PublicKey, SYSVAR_RENT_PUBKEY, SystemProgram, Tran
 import {
   TOKEN_PROGRAM_ID,
   createApproveInstruction,
-  createAssociatedTokenAccountInstruction,
+  createAssociatedTokenAccountIdempotentInstruction,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
+import { getSolanaErrorMessage, logSolanaError } from '../../utils/solanaError';
 
 const TRANSFER_DISCRIMINATOR = Uint8Array.from([123, 124, 122, 222, 156, 180, 255, 72]);
 const BURN_DISCRIMINATOR = Uint8Array.from([159, 137, 71, 117, 6, 143, 39, 225]);
-const MINT_DISCRIMINATOR = Uint8Array.from([77, 73, 78, 84, 65, 67, 75, 69]); // MINTACKE
+const MINT_DISCRIMINATOR = Uint8Array.from([139, 221, 52, 253, 235, 174, 238, 135]);
 const CREATE_TOKEN_MINT_DISCRIMINATOR = Uint8Array.from([35, 109, 237, 196, 54, 218, 33, 119]);
 const APPROVE_REQUEST_DISCRIMINATOR = Uint8Array.from([89, 68, 167, 104, 93, 25, 178, 205]);
 const REJECT_REQUEST_DISCRIMINATOR = Uint8Array.from([11, 232, 75, 149, 197, 137, 152, 208]);
@@ -77,6 +78,64 @@ function requirePayloadField(payload, fieldName) {
   return payload[fieldName];
 }
 
+function buildSimulationErrorMessage(simulation, fallbackMessage) {
+  const messages = [];
+
+  if (simulation?.value?.err) {
+    messages.push(`Simulation failed: ${JSON.stringify(simulation.value.err)}`);
+  }
+
+  if (Array.isArray(simulation?.value?.logs) && simulation.value.logs.length) {
+    messages.push(`Logs: ${simulation.value.logs.join(' | ')}`);
+  }
+
+  return messages.length ? messages.join(' ') : fallbackMessage;
+}
+
+function decodeBase64ToUint8Array(value) {
+  if (typeof Buffer !== 'undefined') {
+    return Uint8Array.from(Buffer.from(value, 'base64'));
+  }
+
+  const binary = globalThis.atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function deserializeTransactionInstruction(serializedInstruction) {
+  if (!serializedInstruction?.programId || !Array.isArray(serializedInstruction.keys) || !serializedInstruction.data) {
+    throw new Error('Serialized transaction instruction is missing required fields.');
+  }
+
+  return new TransactionInstruction({
+    programId: new PublicKey(serializedInstruction.programId),
+    keys: serializedInstruction.keys.map((key) => ({
+      pubkey: new PublicKey(key.pubkey),
+      isSigner: Boolean(key.isSigner),
+      isWritable: Boolean(key.isWritable),
+    })),
+    data: decodeBase64ToUint8Array(serializedInstruction.data),
+  });
+}
+
+function wrapWalletTransactionError(error, fallbackMessage) {
+  const wrappedError = new Error(fallbackMessage);
+  wrappedError.cause = error;
+
+  if (Array.isArray(error?.logs)) {
+    wrappedError.logs = error.logs;
+  }
+
+  if (Array.isArray(error?.transactionLogs)) {
+    wrappedError.transactionLogs = error.transactionLogs;
+  }
+
+  if (typeof error?.getLogs === 'function') {
+    wrappedError.getLogs = (...args) => error.getLogs(...args);
+  }
+
+  return wrappedError;
+}
+
 export async function buildMakerInitiationTransaction({ executionPayload, makerWalletAddress }) {
   const operation = executionPayload?.operation;
   // Phase A: Now supports MINT, TRANSFER, and BURN
@@ -112,11 +171,11 @@ export async function buildMakerInitiationTransaction({ executionPayload, makerW
       || getAssociatedTokenAddressSync(mintPublicKey, destinationWalletPublicKey).toBase58();
     destinationTokenAccountPublicKey = new PublicKey(destinationTokenAccountAddress);
 
-    const destinationAccountInfo = await connection.getAccountInfo(destinationTokenAccountPublicKey, 'confirmed');
-    if (!destinationAccountInfo) {
-      transaction.add(
-        createAssociatedTokenAccountInstruction(
-          makerPublicKey,
+      const destinationAccountInfo = await connection.getAccountInfo(destinationTokenAccountPublicKey, 'confirmed');
+      if (!destinationAccountInfo) {
+        transaction.add(
+          createAssociatedTokenAccountIdempotentInstruction(
+            makerPublicKey,
           destinationTokenAccountPublicKey,
           destinationWalletPublicKey,
           mintPublicKey,
@@ -152,17 +211,14 @@ export async function buildMakerInitiationTransaction({ executionPayload, makerW
         || getAssociatedTokenAddressSync(mintPublicKey, destinationWalletPublicKey).toBase58();
       destinationTokenAccountPublicKey = new PublicKey(destinationTokenAccountAddress);
 
-      const destinationAccountInfo = await connection.getAccountInfo(destinationTokenAccountPublicKey, 'confirmed');
-      if (!destinationAccountInfo) {
-        transaction.add(
-          createAssociatedTokenAccountInstruction(
-            makerPublicKey,
-            destinationTokenAccountPublicKey,
-            destinationWalletPublicKey,
-            mintPublicKey,
-          ),
-        );
-      }
+      transaction.add(
+        createAssociatedTokenAccountIdempotentInstruction(
+          makerPublicKey,
+          destinationTokenAccountPublicKey,
+          destinationWalletPublicKey,
+          mintPublicKey,
+        ),
+      );
     }
   }
 
@@ -240,41 +296,53 @@ export async function signAndSendMakerTransaction({ connection, provider, reques
     throw new Error('Wallet provider is not available.');
   }
 
-  const latestBlockhash = await connection.getLatestBlockhash('confirmed');
-  transaction.feePayer = provider.publicKey;
-  transaction.recentBlockhash = latestBlockhash.blockhash;
-  transaction.partialSign(requestKeypair);
+  try {
+    const latestBlockhash = await connection.getLatestBlockhash('confirmed');
+    transaction.feePayer = provider.publicKey;
+    transaction.recentBlockhash = latestBlockhash.blockhash;
+    transaction.partialSign(requestKeypair);
 
-  let signature;
+    let signature;
+    if (typeof provider.signTransaction === 'function') {
+      const signedTransaction = await provider.signTransaction(transaction);
+      signature = await connection.sendRawTransaction(signedTransaction.serialize());
+    } else if (typeof provider.signAndSendTransaction === 'function') {
+      const response = await provider.signAndSendTransaction(transaction);
+      signature = response?.signature;
+    } else {
+      throw new Error('Connected wallet does not support transaction signing.');
+    }
 
-  if (typeof provider.signAndSendTransaction === 'function') {
-    const response = await provider.signAndSendTransaction(transaction);
-    signature = response?.signature;
-  } else if (typeof provider.signTransaction === 'function') {
-    const signedTransaction = await provider.signTransaction(transaction);
-    signature = await connection.sendRawTransaction(signedTransaction.serialize());
-  } else {
-    throw new Error('Connected wallet does not support transaction signing.');
+    if (!signature) {
+      throw new Error('Wallet did not return a transaction signature.');
+    }
+
+    const confirmation = await connection.confirmTransaction({
+      blockhash: latestBlockhash.blockhash,
+      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+      signature,
+    }, 'confirmed');
+
+    if (confirmation.value.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+    }
+
+    return signature;
+  } catch (error) {
+    const message = await getSolanaErrorMessage(error, 'Maker wallet transaction failed');
+    logSolanaError(error, 'Maker wallet transaction failed');
+    throw wrapWalletTransactionError(error, message);
   }
-
-  if (!signature) {
-    throw new Error('Wallet did not return a transaction signature.');
-  }
-
-  const confirmation = await connection.confirmTransaction({
-    blockhash: latestBlockhash.blockhash,
-    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-    signature,
-  }, 'confirmed');
-
-  if (confirmation.value.err) {
-    throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-  }
-
-  return signature;
 }
 
-export function buildCheckerApprovalTransaction({ executionPayload, checkerWalletAddress }) {
+export async function buildCheckerApprovalTransaction({
+  executionPayload,
+  checkerWalletAddress,
+  sourceWalletAddress: sourceWalletAddressOverride = null,
+  destinationWalletAddress: destinationWalletAddressOverride = null,
+  sourceTokenAccountAddress: sourceTokenAccountAddressOverride = null,
+  destinationTokenAccountAddress: destinationTokenAccountAddressOverride = null,
+}) {
   const onChainRequestAddress = executionPayload?.walletInitiation?.onChainRequestAddress || executionPayload?.onChainRequestAddress;
   if (!onChainRequestAddress) {
     throw new Error('An on-chain request address is required before checker wallet approval can run.');
@@ -282,35 +350,46 @@ export function buildCheckerApprovalTransaction({ executionPayload, checkerWalle
 
   const connection = new Connection(requirePayloadField(executionPayload, 'rpcUrl'), 'confirmed');
   const transaction = new Transaction();
-  const programPublicKey = new PublicKey(requirePayloadField(executionPayload, 'programId'));
   const checkerPublicKey = new PublicKey(checkerWalletAddress);
-  const sourceTokenAccountPublicKey = executionPayload.sourceTokenAccount
-    ? new PublicKey(executionPayload.sourceTokenAccount)
-    : programPublicKey;
-  const destinationTokenAccountPublicKey = executionPayload.destinationTokenAccount
-    ? new PublicKey(executionPayload.destinationTokenAccount)
-    : programPublicKey;
+  const mintPublicKey = new PublicKey(requirePayloadField(executionPayload, 'tokenMintAddress'));
+  const sourceWalletAddress = sourceWalletAddressOverride
+    || executionPayload.sourceWalletAddress
+    || executionPayload.walletInitiation?.sourceWalletAddress
+    || null;
+  const destinationWalletAddress = destinationWalletAddressOverride
+    || executionPayload.destinationWalletAddress
+    || executionPayload.walletInitiation?.destinationWalletAddress
+    || null;
+  const sourceTokenAccountAddress = sourceTokenAccountAddressOverride
+    || executionPayload.sourceTokenAccountAddress
+    || executionPayload.sourceTokenAccount
+    || (sourceWalletAddress ? getAssociatedTokenAddressSync(mintPublicKey, new PublicKey(sourceWalletAddress)).toBase58() : null);
+  const destinationTokenAccountAddress = destinationTokenAccountAddressOverride
+    || executionPayload.destinationTokenAccountAddress
+    || executionPayload.destinationTokenAccount
+    || (destinationWalletAddress ? getAssociatedTokenAddressSync(mintPublicKey, new PublicKey(destinationWalletAddress)).toBase58() : null);
+  const sourceTokenAccountPublicKey = sourceTokenAccountAddress
+    ? new PublicKey(sourceTokenAccountAddress)
+    : null;
+  const destinationTokenAccountPublicKey = destinationTokenAccountAddress
+    ? new PublicKey(destinationTokenAccountAddress)
+    : null;
 
-  transaction.add(
-    new TransactionInstruction({
-      programId: programPublicKey,
-      keys: [
-        { pubkey: new PublicKey(onChainRequestAddress), isSigner: false, isWritable: true },
-        { pubkey: new PublicKey(requirePayloadField(executionPayload, 'configAddress')), isSigner: false, isWritable: false },
-        { pubkey: new PublicKey(requirePayloadField(executionPayload, 'tokenMintAddress')), isSigner: false, isWritable: true },
-        { pubkey: sourceTokenAccountPublicKey, isSigner: false, isWritable: sourceTokenAccountPublicKey.equals(programPublicKey) ? false : true },
-        { pubkey: destinationTokenAccountPublicKey, isSigner: false, isWritable: destinationTokenAccountPublicKey.equals(programPublicKey) ? false : true },
-        { pubkey: new PublicKey(requirePayloadField(executionPayload, 'tokenAuthority')), isSigner: false, isWritable: false },
-        { pubkey: checkerPublicKey, isSigner: true, isWritable: false },
-        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-      ],
-      data: APPROVE_REQUEST_DISCRIMINATOR,
-    }),
-  );
+  const derivedDestinationAta = destinationWalletAddress
+    ? getAssociatedTokenAddressSync(mintPublicKey, new PublicKey(destinationWalletAddress))
+    : null;
+
+  if (executionPayload.approvalInstruction) {
+    transaction.add(deserializeTransactionInstruction(executionPayload.approvalInstruction));
+  } else {
+    throw new Error('Checker approval instruction is missing from the backend payload.');
+  }
 
   return {
     connection,
     transaction,
+    destinationTokenAccountAddress,
+    sourceTokenAccountAddress,
   };
 }
 
@@ -348,39 +427,44 @@ export async function signAndSendWalletTransaction({ connection, provider, trans
     throw new Error('Wallet provider is not available.');
   }
 
-  const latestBlockhash = await connection.getLatestBlockhash('confirmed');
-  transaction.feePayer = provider.publicKey;
-  transaction.recentBlockhash = latestBlockhash.blockhash;
+  try {
+    const latestBlockhash = await connection.getLatestBlockhash('confirmed');
+    transaction.feePayer = provider.publicKey;
+    transaction.recentBlockhash = latestBlockhash.blockhash;
 
-  if (partialSigners.length) {
-    transaction.partialSign(...partialSigners);
+    if (partialSigners.length) {
+      transaction.partialSign(...partialSigners);
+    }
+
+    let signature;
+    if (typeof provider.signTransaction === 'function') {
+      const signedTransaction = await provider.signTransaction(transaction);
+      signature = await connection.sendRawTransaction(signedTransaction.serialize());
+    } else if (typeof provider.signAndSendTransaction === 'function') {
+      const response = await provider.signAndSendTransaction(transaction);
+      signature = response?.signature;
+    } else {
+      throw new Error('Connected wallet does not support transaction signing.');
+    }
+
+    if (!signature) {
+      throw new Error('Wallet did not return a transaction signature.');
+    }
+
+    const confirmation = await connection.confirmTransaction({
+      blockhash: latestBlockhash.blockhash,
+      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+      signature,
+    }, 'confirmed');
+
+    if (confirmation.value.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+    }
+
+    return signature;
+  } catch (error) {
+    const message = await getSolanaErrorMessage(error, 'Wallet transaction failed');
+    logSolanaError(error, 'Wallet transaction failed');
+    throw wrapWalletTransactionError(error, message);
   }
-
-  let signature;
-
-  if (typeof provider.signAndSendTransaction === 'function') {
-    const response = await provider.signAndSendTransaction(transaction);
-    signature = response?.signature;
-  } else if (typeof provider.signTransaction === 'function') {
-    const signedTransaction = await provider.signTransaction(transaction);
-    signature = await connection.sendRawTransaction(signedTransaction.serialize());
-  } else {
-    throw new Error('Connected wallet does not support transaction signing.');
-  }
-
-  if (!signature) {
-    throw new Error('Wallet did not return a transaction signature.');
-  }
-
-  const confirmation = await connection.confirmTransaction({
-    blockhash: latestBlockhash.blockhash,
-    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-    signature,
-  }, 'confirmed');
-
-  if (confirmation.value.err) {
-    throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-  }
-
-  return signature;
 }

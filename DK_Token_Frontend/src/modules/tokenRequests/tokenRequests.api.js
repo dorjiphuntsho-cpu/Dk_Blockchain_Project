@@ -28,24 +28,28 @@ export const tokenRequestsApi = {
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.getExecutionPayload(id, actor()) : (await axiosClient.get(`/token-requests/${id}/execution-payload`)).data),
   prepareMintRequest: async (id) =>
     (ENABLE_MOCK_API
-      ? mockAdapter.tokenRequests.getExecutionPayload(id, actor())
+      ? mockAdapter.tokenRequests.prepareMintRequest(id, actor())
       : (await axiosClient.get(`/token-requests/${id}/prepare/mint-request`)).data),
   prepareTransferRequest: async (id) =>
     (ENABLE_MOCK_API
-      ? mockAdapter.tokenRequests.getExecutionPayload(id, actor())
+      ? mockAdapter.tokenRequests.prepareTransferRequest(id, actor())
       : (await axiosClient.get(`/token-requests/${id}/prepare/transfer-request`)).data),
   prepareBurnRequest: async (id) =>
     (ENABLE_MOCK_API
-      ? mockAdapter.tokenRequests.getExecutionPayload(id, actor())
+      ? mockAdapter.tokenRequests.prepareBurnRequest(id, actor())
       : (await axiosClient.get(`/token-requests/${id}/prepare/burn-request`)).data),
-  prepareCheckerApproval: async (id) =>
+  prepareCheckerApproval: async (id, checkerWalletAddress) =>
     (ENABLE_MOCK_API
-      ? mockAdapter.tokenRequests.getExecutionPayload(id, actor())
-      : (await axiosClient.get(`/token-requests/${id}/prepare/checker-approval`)).data),
-  prepareCheckerRejection: async (id) =>
+      ? mockAdapter.tokenRequests.prepareCheckerApproval(id, actor())
+      : (await axiosClient.get(`/token-requests/${id}/prepare/checker-approval`, {
+        params: checkerWalletAddress ? { checkerWalletAddress } : undefined,
+      })).data),
+  prepareCheckerRejection: async (id, checkerWalletAddress) =>
     (ENABLE_MOCK_API
-      ? mockAdapter.tokenRequests.getExecutionPayload(id, actor())
-      : (await axiosClient.get(`/token-requests/${id}/prepare/checker-rejection`)).data),
+      ? mockAdapter.tokenRequests.prepareCheckerRejection(id, actor())
+      : (await axiosClient.get(`/token-requests/${id}/prepare/checker-rejection`, {
+        params: checkerWalletAddress ? { checkerWalletAddress } : undefined,
+      })).data),
   recordInitiation: async (id, payload) =>
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.recordInitiation(id, payload, actor()) : (await axiosClient.post(`/token-requests/${id}/record-initiation`, payload)).data),
   execute: async (id) =>

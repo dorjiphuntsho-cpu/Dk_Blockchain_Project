@@ -9,6 +9,7 @@ const {
 } = require('../utils/enums');
 const { approvalInclude } = require('../models/tokenRequest.model');
 const auditLogService = require('./auditLog.service');
+const logger = require('../utils/logger');
 
 function assertTransition(currentStatus, nextStatus) {
   const allowedStatuses = VALID_STATUS_TRANSITIONS[currentStatus] || [];
@@ -42,126 +43,191 @@ function assertCheckerSeparation(tokenRequest, checkerUserId) {
 }
 
 async function approveTokenRequest(requestId, checkerUserId, payload) {
-  const tokenRequest = await getPendingRequest(requestId);
-  assertCheckerSeparation(tokenRequest, checkerUserId);
-  assertTransition(tokenRequest.status, TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION);
-
-  const approvedRequest = await prisma.$transaction(async (tx) => {
-    const updatedRequest = await tx.tokenRequest.update({
-      where: { id: requestId },
-      data: {
-        checkerUserId,
-        status: TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION,
-        approvedAt: new Date(),
-        rejectionReason: null,
-      },
-      include: approvalInclude,
-    });
-
-    await tx.requestApproval.create({
-      data: {
-        tokenRequestId: requestId,
-        checkerUserId,
-        action: APPROVAL_ACTIONS.APPROVED,
-        comment: payload.comment || null,
-      },
-    });
-
-    await auditLogService.createAuditLog(
-      {
-        actorUserId: checkerUserId,
-        entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
-        entityId: requestId,
-        action: AUDIT_ACTIONS.APPROVE,
-        metadata: {
-          previousStatus: tokenRequest.status,
-          newStatus: TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION,
-          comment: payload.comment || null,
-        },
-      },
-      tx,
-    );
-
-    await auditLogService.createAuditLog(
-      {
-        actorUserId: checkerUserId,
-        entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
-        entityId: requestId,
-        action: AUDIT_ACTIONS.STATUS_CHANGE,
-        metadata: {
-          previousStatus: tokenRequest.status,
-          newStatus: TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION,
-        },
-      },
-      tx,
-    );
-
-    return updatedRequest;
+  logger.info('Checker approval requested', {
+    requestId,
+    checkerUserId,
+    txSignature: payload.txSignature || null,
+    explorerUrl: payload.explorerUrl || null,
   });
 
-  return approvedRequest;
+  try {
+    const tokenRequest = await getPendingRequest(requestId);
+    assertCheckerSeparation(tokenRequest, checkerUserId);
+    assertTransition(tokenRequest.status, TOKEN_REQUEST_STATUSES.APPROVED);
+
+    const approvedRequest = await prisma.$transaction(async (tx) => {
+      const updatedRequest = await tx.tokenRequest.update({
+        where: { id: requestId },
+        data: {
+          checkerUserId,
+          status: TOKEN_REQUEST_STATUSES.APPROVED,
+          approvedAt: new Date(),
+          rejectionReason: null,
+          txSignature: payload.txSignature || null,
+          explorerUrl: payload.explorerUrl || null,
+        },
+        include: approvalInclude,
+      });
+
+      await tx.requestApproval.create({
+        data: {
+          tokenRequestId: requestId,
+          checkerUserId,
+          action: APPROVAL_ACTIONS.APPROVED,
+          comment: payload.comment || null,
+        },
+      });
+
+      await auditLogService.createAuditLog(
+        {
+          actorUserId: checkerUserId,
+          entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+          entityId: requestId,
+          action: AUDIT_ACTIONS.APPROVE,
+          metadata: {
+            previousStatus: tokenRequest.status,
+            newStatus: TOKEN_REQUEST_STATUSES.APPROVED,
+            comment: payload.comment || null,
+            txSignature: payload.txSignature || null,
+            explorerUrl: payload.explorerUrl || null,
+          },
+        },
+        tx,
+      );
+
+      await auditLogService.createAuditLog(
+        {
+          actorUserId: checkerUserId,
+          entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+          entityId: requestId,
+          action: AUDIT_ACTIONS.STATUS_CHANGE,
+          metadata: {
+            previousStatus: tokenRequest.status,
+            newStatus: TOKEN_REQUEST_STATUSES.APPROVED,
+          },
+        },
+        tx,
+      );
+
+      return updatedRequest;
+    });
+
+    logger.info('Checker approval completed', {
+      requestId,
+      checkerUserId,
+      status: approvedRequest.status,
+    });
+
+    return approvedRequest;
+  } catch (error) {
+    logger.error('Checker approval failed', {
+      requestId,
+      checkerUserId,
+      message: error.message,
+      stack: error.stack,
+      payload: {
+        comment: payload.comment || null,
+        txSignature: payload.txSignature || null,
+        explorerUrl: payload.explorerUrl || null,
+      },
+    });
+    throw error;
+  }
 }
 
 async function rejectTokenRequest(requestId, checkerUserId, payload) {
-  const tokenRequest = await getPendingRequest(requestId);
-  assertCheckerSeparation(tokenRequest, checkerUserId);
-  assertTransition(tokenRequest.status, TOKEN_REQUEST_STATUSES.REJECTED);
-
-  const rejectedRequest = await prisma.$transaction(async (tx) => {
-    const updatedRequest = await tx.tokenRequest.update({
-      where: { id: requestId },
-      data: {
-        checkerUserId,
-        status: TOKEN_REQUEST_STATUSES.REJECTED,
-        rejectedAt: new Date(),
-        rejectionReason: payload.rejectionReason,
-      },
-      include: approvalInclude,
-    });
-
-    await tx.requestApproval.create({
-      data: {
-        tokenRequestId: requestId,
-        checkerUserId,
-        action: APPROVAL_ACTIONS.REJECTED,
-        comment: payload.comment || payload.rejectionReason,
-      },
-    });
-
-    await auditLogService.createAuditLog(
-      {
-        actorUserId: checkerUserId,
-        entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
-        entityId: requestId,
-        action: AUDIT_ACTIONS.REJECT,
-        metadata: {
-          previousStatus: tokenRequest.status,
-          newStatus: TOKEN_REQUEST_STATUSES.REJECTED,
-          rejectionReason: payload.rejectionReason,
-          comment: payload.comment || null,
-        },
-      },
-      tx,
-    );
-
-    await auditLogService.createAuditLog(
-      {
-        actorUserId: checkerUserId,
-        entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
-        entityId: requestId,
-        action: AUDIT_ACTIONS.STATUS_CHANGE,
-        metadata: {
-          previousStatus: tokenRequest.status,
-          newStatus: TOKEN_REQUEST_STATUSES.REJECTED,
-        },
-      },
-      tx,
-    );
-
-    return updatedRequest;
+  logger.info('Checker rejection requested', {
+    requestId,
+    checkerUserId,
+    txSignature: payload.txSignature || null,
+    explorerUrl: payload.explorerUrl || null,
   });
 
-  return rejectedRequest;
+  try {
+    const tokenRequest = await getPendingRequest(requestId);
+    assertCheckerSeparation(tokenRequest, checkerUserId);
+    assertTransition(tokenRequest.status, TOKEN_REQUEST_STATUSES.REJECTED);
+
+    const rejectedRequest = await prisma.$transaction(async (tx) => {
+      const updatedRequest = await tx.tokenRequest.update({
+        where: { id: requestId },
+        data: {
+          checkerUserId,
+          status: TOKEN_REQUEST_STATUSES.REJECTED,
+          rejectedAt: new Date(),
+          rejectionReason: payload.rejectionReason,
+          txSignature: payload.txSignature || null,
+          explorerUrl: payload.explorerUrl || null,
+        },
+        include: approvalInclude,
+      });
+
+      await tx.requestApproval.create({
+        data: {
+          tokenRequestId: requestId,
+          checkerUserId,
+          action: APPROVAL_ACTIONS.REJECTED,
+          comment: payload.comment || payload.rejectionReason,
+        },
+      });
+
+      await auditLogService.createAuditLog(
+        {
+          actorUserId: checkerUserId,
+          entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+          entityId: requestId,
+          action: AUDIT_ACTIONS.REJECT,
+          metadata: {
+            previousStatus: tokenRequest.status,
+            newStatus: TOKEN_REQUEST_STATUSES.REJECTED,
+            rejectionReason: payload.rejectionReason,
+            comment: payload.comment || null,
+            txSignature: payload.txSignature || null,
+            explorerUrl: payload.explorerUrl || null,
+          },
+        },
+        tx,
+      );
+
+      await auditLogService.createAuditLog(
+        {
+          actorUserId: checkerUserId,
+          entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+          entityId: requestId,
+          action: AUDIT_ACTIONS.STATUS_CHANGE,
+          metadata: {
+            previousStatus: tokenRequest.status,
+            newStatus: TOKEN_REQUEST_STATUSES.REJECTED,
+          },
+        },
+        tx,
+      );
+
+      return updatedRequest;
+    });
+
+    logger.info('Checker rejection completed', {
+      requestId,
+      checkerUserId,
+      status: rejectedRequest.status,
+    });
+
+    return rejectedRequest;
+  } catch (error) {
+    logger.error('Checker rejection failed', {
+      requestId,
+      checkerUserId,
+      message: error.message,
+      stack: error.stack,
+      payload: {
+        rejectionReason: payload.rejectionReason || null,
+        comment: payload.comment || null,
+        txSignature: payload.txSignature || null,
+        explorerUrl: payload.explorerUrl || null,
+      },
+    });
+    throw error;
+  }
 }
 
 module.exports = {

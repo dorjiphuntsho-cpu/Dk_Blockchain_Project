@@ -12,6 +12,7 @@ const {
 const { tokenRequestInclude } = require('../models/tokenRequest.model');
 const auditLogService = require('./auditLog.service');
 const blockchainService = require('./blockchain.service');
+const solanaService = require('./solana.service');
 
 function assertTransition(currentStatus, nextStatus) {
   const allowedStatuses = VALID_STATUS_TRANSITIONS[currentStatus] || [];
@@ -79,18 +80,20 @@ function assertCheckerPreparationAccess(actorUser, tokenRequest) {
     throw new ApiError(403, 'Only checker or admin users can prepare checker wallet payloads');
   }
 
-  if (!tokenRequest.checkerUserId) {
-    throw new ApiError(400, 'Checker preparation is only available after off-chain approval is recorded');
-  }
-
-  if (tokenRequest.checkerUserId !== actorUser.id) {
-    throw new ApiError(403, 'Only the checker who approved this request can prepare checker wallet payloads');
+  if (tokenRequest.checkerUserId && tokenRequest.checkerUserId !== actorUser.id) {
+    throw new ApiError(403, 'Only the assigned checker can prepare checker wallet payloads');
   }
 }
 
 function assertReadyForExecution(tokenRequest) {
   if (!isOnChainPendingStatus(tokenRequest.status)) {
     throw new ApiError(400, 'Only on-chain pending requests can be prepared for browser signing');
+  }
+}
+
+function assertDraftForInitiation(tokenRequest) {
+  if (tokenRequest.status !== TOKEN_REQUEST_STATUSES.DRAFT) {
+    throw new ApiError(400, 'Only DRAFT requests can be prepared for maker wallet signing');
   }
 }
 
@@ -187,6 +190,79 @@ async function getTokenRequestOrThrow(id) {
   return tokenRequest;
 }
 
+async function reconcileTokenRequestIfNeeded(tokenRequest) {
+  if (!tokenRequest) {
+    return tokenRequest;
+  }
+
+  return reconcileProcessedOnChainRequest(tokenRequest);
+}
+
+async function reconcileTokenRequestCollection(items) {
+  return Promise.all(items.map((item) => reconcileTokenRequestIfNeeded(item)));
+}
+
+async function reconcileProcessedOnChainRequest(tokenRequest) {
+  if (
+    !tokenRequest.onChainRequestAddress
+    || tokenRequest.status !== TOKEN_REQUEST_STATUSES.PENDING_APPROVAL
+  ) {
+    return tokenRequest;
+  }
+
+  const onChainRequest = await solanaService.fetchTokenRequestAccount(tokenRequest.onChainRequestAddress);
+  if (!onChainRequest || onChainRequest.status === 'PENDING') {
+    return tokenRequest;
+  }
+
+  const nextStatus = onChainRequest.status === 'APPROVED'
+    ? TOKEN_REQUEST_STATUSES.APPROVED
+    : TOKEN_REQUEST_STATUSES.REJECTED;
+
+  let checkerUserId = null;
+  if (onChainRequest.checker) {
+    const checkerWallet = await prisma.wallet.findUnique({
+      where: { walletAddress: onChainRequest.checker },
+      select: { userId: true },
+    });
+    checkerUserId = checkerWallet?.userId || null;
+  }
+
+  const updatedRequest = await prisma.tokenRequest.update({
+    where: { id: tokenRequest.id },
+    data: {
+      status: nextStatus,
+      checkerUserId: checkerUserId || tokenRequest.checkerUserId || null,
+      approvedAt: nextStatus === TOKEN_REQUEST_STATUSES.APPROVED
+        ? tokenRequest.approvedAt || new Date()
+        : tokenRequest.approvedAt,
+      rejectedAt: nextStatus === TOKEN_REQUEST_STATUSES.REJECTED
+        ? tokenRequest.rejectedAt || new Date()
+        : tokenRequest.rejectedAt,
+      rejectionReason: nextStatus === TOKEN_REQUEST_STATUSES.REJECTED
+        ? tokenRequest.rejectionReason || 'Request was already processed on chain.'
+        : null,
+    },
+    include: tokenRequestInclude,
+  });
+
+  await auditLogService.createAuditLog({
+    actorUserId: checkerUserId || null,
+    entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+    entityId: tokenRequest.id,
+    action: AUDIT_ACTIONS.STATUS_CHANGE,
+    metadata: {
+      previousStatus: tokenRequest.status,
+      newStatus: nextStatus,
+      reconciledFromOnChain: true,
+      onChainRequestAddress: tokenRequest.onChainRequestAddress,
+      onChainChecker: onChainRequest.checker,
+    },
+  });
+
+  return updatedRequest;
+}
+
 async function createTokenRequest(payload, actorUserId) {
   const tokenRequest = await prisma.$transaction(async (tx) => {
     await validateTokenRequestPayload(payload, tx);
@@ -272,14 +348,17 @@ async function listTokenRequests(query) {
     prisma.tokenRequest.count({ where }),
   ]);
 
+  const reconciledItems = await reconcileTokenRequestCollection(items);
+
   return {
-    items,
+    items: reconciledItems,
     pagination: buildPagination({ page, limit, totalItems }),
   };
 }
 
 async function getTokenRequestById(id) {
-  return getTokenRequestOrThrow(id);
+  const tokenRequest = await getTokenRequestOrThrow(id);
+  return reconcileTokenRequestIfNeeded(tokenRequest);
 }
 
 async function updateTokenRequest(id, payload, actorUserId) {
@@ -483,7 +562,7 @@ async function prepareExecution(id, actorUser) {
 
 async function prepareMintRequest(id, actorUser) {
   const existingRequest = await getTokenRequestOrThrow(id);
-  assertReadyForExecution(existingRequest);
+  assertDraftForInitiation(existingRequest);
   assertMakerPreparationAccess(actorUser, existingRequest);
 
   if (existingRequest.requestType !== TOKEN_REQUEST_TYPES.MINT) {
@@ -503,7 +582,7 @@ async function prepareMintRequest(id, actorUser) {
 
 async function prepareTransferRequest(id, actorUser) {
   const existingRequest = await getTokenRequestOrThrow(id);
-  assertReadyForExecution(existingRequest);
+  assertDraftForInitiation(existingRequest);
   assertMakerPreparationAccess(actorUser, existingRequest);
 
   if (existingRequest.requestType !== TOKEN_REQUEST_TYPES.TRANSFER) {
@@ -523,7 +602,7 @@ async function prepareTransferRequest(id, actorUser) {
 
 async function prepareBurnRequest(id, actorUser) {
   const existingRequest = await getTokenRequestOrThrow(id);
-  assertReadyForExecution(existingRequest);
+  assertDraftForInitiation(existingRequest);
   assertMakerPreparationAccess(actorUser, existingRequest);
 
   if (existingRequest.requestType !== TOKEN_REQUEST_TYPES.BURN) {
@@ -541,9 +620,12 @@ async function prepareBurnRequest(id, actorUser) {
   return payload;
 }
 
-async function prepareCheckerApproval(id, actorUser) {
-  const existingRequest = await getTokenRequestOrThrow(id);
-  assertReadyForExecution(existingRequest);
+async function prepareCheckerApproval(id, actorUser, checkerWalletAddress) {
+  let existingRequest = await getTokenRequestOrThrow(id);
+  existingRequest = await reconcileProcessedOnChainRequest(existingRequest);
+  if (existingRequest.status !== TOKEN_REQUEST_STATUSES.PENDING_APPROVAL) {
+    throw new ApiError(400, 'Request is already processed on chain. Reload the page to sync the latest status.');
+  }
   assertCheckerPreparationAccess(actorUser, existingRequest);
 
   if (!existingRequest.onChainRequestAddress) {
@@ -553,7 +635,7 @@ async function prepareCheckerApproval(id, actorUser) {
     );
   }
 
-  const payload = await blockchainService.prepareCheckerApprovalPayload(id);
+  const payload = await blockchainService.prepareCheckerApprovalPayload(id, checkerWalletAddress);
   await createPreparationAuditLog({
     actorUserId: actorUser.id,
     tokenRequest: existingRequest,
@@ -564,9 +646,12 @@ async function prepareCheckerApproval(id, actorUser) {
   return payload;
 }
 
-async function prepareCheckerRejection(id, actorUser) {
-  const existingRequest = await getTokenRequestOrThrow(id);
-  assertReadyForExecution(existingRequest);
+async function prepareCheckerRejection(id, actorUser, checkerWalletAddress) {
+  let existingRequest = await getTokenRequestOrThrow(id);
+  existingRequest = await reconcileProcessedOnChainRequest(existingRequest);
+  if (existingRequest.status !== TOKEN_REQUEST_STATUSES.PENDING_APPROVAL) {
+    throw new ApiError(400, 'Request is already processed on chain. Reload the page to sync the latest status.');
+  }
   assertCheckerPreparationAccess(actorUser, existingRequest);
 
   if (!existingRequest.onChainRequestAddress) {
@@ -576,7 +661,7 @@ async function prepareCheckerRejection(id, actorUser) {
     );
   }
 
-  const payload = await blockchainService.prepareCheckerRejectionPayload(id);
+  const payload = await blockchainService.prepareCheckerRejectionPayload(id, checkerWalletAddress);
   await createPreparationAuditLog({
     actorUserId: actorUser.id,
     tokenRequest: existingRequest,
@@ -594,8 +679,8 @@ async function recordInitiation(id, payload, actorUserId) {
     throw new ApiError(403, 'You can only record initiation for your own token requests');
   }
 
-  if (!isOnChainPendingStatus(existingRequest.status)) {
-    throw new ApiError(400, 'Only on-chain pending requests can record wallet initiation');
+  if (existingRequest.status !== TOKEN_REQUEST_STATUSES.DRAFT) {
+    throw new ApiError(400, 'Only DRAFT requests can record wallet initiation');
   }
 
   // Phase A: All request types now support browser wallet initiation including MINT
@@ -608,7 +693,10 @@ async function recordInitiation(id, payload, actorUserId) {
   }
 
   const tokenRequest = await prisma.$transaction(async (tx) => {
-    const updatedRequest = await blockchainService.recordInitiationResult(id, payload, tx);
+    const updatedRequest = await blockchainService.recordInitiationResult(id, {
+      ...payload,
+      nextStatus: TOKEN_REQUEST_STATUSES.PENDING_APPROVAL,
+    }, tx);
 
     await auditLogService.createAuditLog(
       {
@@ -623,6 +711,7 @@ async function recordInitiation(id, payload, actorUserId) {
           onChainRequestAddress: updatedRequest.onChainRequestAddress,
           initiationTxSignature: updatedRequest.initiationTxSignature,
           initiationExplorerUrl: updatedRequest.initiationExplorerUrl,
+          newStatus: TOKEN_REQUEST_STATUSES.PENDING_APPROVAL,
         },
       },
       tx,

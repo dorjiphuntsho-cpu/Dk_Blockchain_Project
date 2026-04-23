@@ -2,6 +2,7 @@ import {
   AppBar,
   Avatar,
   Box,
+  Button,
   Chip,
   Divider,
   Drawer,
@@ -24,14 +25,16 @@ import PlayCircleOutlineOutlinedIcon from '@mui/icons-material/PlayCircleOutline
 import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
 import AssignmentOutlinedIcon from '@mui/icons-material/AssignmentOutlined';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import useAppStore from '../app/store';
 import SidebarItem from '../components/common/SidebarItem';
+import UserWalletMatchChip from '../components/wallet/UserWalletMatchChip';
 import useAuth from '../hooks/useAuth';
+import useSolanaWallet from '../hooks/useSolanaWallet';
 import { NAV_ITEMS, ROUTE_TITLES } from '../utils/constants';
-import { getInitials } from '../utils/format';
+import { getInitials, truncateMiddle } from '../utils/format';
 import { hasRole } from '../utils/permissions';
 
 const DRAWER_WIDTH = 270;
@@ -77,10 +80,17 @@ function DashboardLayout() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const isDesktop = useMediaQuery((theme) => theme.breakpoints.up('lg'));
-  const { user, logout } = useAuth();
+  const { user, logout, hydrateUser } = useAuth();
+  const { address, available, connect, connected, connecting, walletName } = useSolanaWallet();
   const { sidebarCollapsed, mobileSidebarOpen, setMobileSidebarOpen, toggleSidebar } = useAppStore();
   const [anchorEl, setAnchorEl] = useState(null);
   const currentDrawerWidth = isDesktop ? (sidebarCollapsed ? COLLAPSED_DRAWER_WIDTH : DRAWER_WIDTH) : DRAWER_WIDTH;
+
+  useEffect(() => {
+    if (user?.id) {
+      hydrateUser().catch(() => null);
+    }
+  }, [hydrateUser, user?.id]);
 
   const navigationItems = useMemo(
     () => NAV_ITEMS.filter((item) => hasRole(user, item.roles)),
@@ -249,6 +259,18 @@ function DashboardLayout() {
                 size="small"
                 sx={{ backgroundColor: 'primary.light', color: 'primary.dark' }}
               />
+              <UserWalletMatchChip />
+              {!connected ? (
+                <Button disabled={!available || connecting} onClick={connect} size="small" variant="outlined">
+                  {connecting ? 'Connecting...' : 'Connect Wallet'}
+                </Button>
+              ) : (
+                <Chip
+                  label={`${walletName || 'Wallet'}: ${truncateMiddle(address, 8, 6)}`}
+                  size="small"
+                  sx={{ backgroundColor: 'success.light', color: 'success.dark' }}
+                />
+              )}
               <IconButton onClick={(event) => setAnchorEl(event.currentTarget)}>
                 <Avatar sx={{ bgcolor: 'primary.main' }}>{getInitials(user?.fullName)}</Avatar>
               </IconButton>
@@ -262,8 +284,8 @@ function DashboardLayout() {
           open={Boolean(anchorEl)}
         >
           <MenuItem
-            onClick={() => {
-              logout();
+            onClick={async () => {
+              await logout();
               navigate('/login');
             }}
           >

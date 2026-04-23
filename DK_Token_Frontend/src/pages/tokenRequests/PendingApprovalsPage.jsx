@@ -2,6 +2,7 @@ import { Button, Link, Stack, TextField } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
+import useSolanaWallet from '../../hooks/useSolanaWallet';
 
 import AppDialog from '../../components/common/AppDialog';
 import AppTable from '../../components/common/AppTable';
@@ -12,16 +13,28 @@ import StatusChip from '../../components/common/StatusChip';
 import TypeChip from '../../components/common/TypeChip';
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
 import { rejectionSchema } from '../../modules/tokenRequests/tokenRequests.schemas';
+import {
+  buildCheckerRejectionTransaction,
+  buildExplorerTransactionUrl,
+  signAndSendWalletTransaction,
+} from '../../modules/solana/walletExecution';
 import { formatAmount, truncateMiddle } from '../../utils/format';
+import { getErrorMessage } from '../../utils/error';
 
 function PendingApprovalsPage() {
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
+  const {
+    address: connectedWalletAddress,
+    connected: walletConnected,
+    provider: walletProvider,
+  } = useSolanaWallet();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [rejectingRequest, setRejectingRequest] = useState(false);
 
   async function load() {
     try {
@@ -61,24 +74,13 @@ function PendingApprovalsPage() {
       render: (row) => (
         <Stack direction="row" justifyContent="flex-end" spacing={1}>
           <Button onClick={() => navigate(`/token-requests/${row.id}`)} size="small" variant="text">Details</Button>
-          <Button
-            onClick={async () => {
-              await tokenRequestsApi.approve(row.id, { comment: 'Approved from queue' });
-              enqueueSnackbar('Request approved', { variant: 'success' });
-              load();
-            }}
-            size="small"
-            variant="contained"
-          >
-            Approve
-          </Button>
           <Button color="error" onClick={() => setSelectedRequest(row)} size="small" variant="outlined">
             Reject
           </Button>
         </Stack>
       ),
     },
-  ], [enqueueSnackbar, navigate]);
+  ], [navigate]);
 
   if (loading) {
     return <LoadingScreen message="Loading pending approvals..." />;
@@ -90,34 +92,66 @@ function PendingApprovalsPage() {
 
   return (
     <Stack spacing={3}>
-      <PageHeader subtitle="Approve or reject pending maker requests." title="Pending Approvals" />
+      <PageHeader subtitle="Review pending maker requests." title="Pending Approvals" />
       <AppTable columns={columns} onRowClick={(row) => navigate(`/token-requests/${row.id}`)} pagination={null} rows={requests} />
-      
 
       <AppDialog
         actions={
           <>
-            <Button onClick={() => setSelectedRequest(null)}>Cancel</Button>
+            <Button disabled={rejectingRequest} onClick={() => setSelectedRequest(null)}>Cancel</Button>
             <Button
               color="error"
+              disabled={rejectingRequest}
               onClick={async () => {
-                const parsed = rejectionSchema.safeParse({
-                  rejectionReason,
-                  comment: rejectionReason,
-                });
-                if (!parsed.success) {
-                  enqueueSnackbar(parsed.error.issues[0]?.message || 'Rejection reason is required', { variant: 'error' });
-                  return;
+                try {
+                  setRejectingRequest(true);
+                  if (!walletConnected || !connectedWalletAddress) {
+                    throw new Error('Connect a checker wallet before rejecting this request.');
+                  }
+
+                  if (!walletProvider) {
+                    throw new Error('Wallet provider is not available.');
+                  }
+
+                  const parsed = rejectionSchema.safeParse({
+                    rejectionReason,
+                    comment: rejectionReason,
+                  });
+                  if (!parsed.success) {
+                    throw new Error(parsed.error.issues[0]?.message || 'Rejection reason is required');
+                  }
+
+                  const preparedResponse = await tokenRequestsApi.prepareCheckerRejection(selectedRequest.id);
+                  const checkerPayload = preparedResponse.data;
+                  const builtTransaction = buildCheckerRejectionTransaction({
+                    executionPayload: checkerPayload,
+                    checkerWalletAddress: connectedWalletAddress,
+                  });
+
+                  const txSignature = await signAndSendWalletTransaction({
+                    connection: builtTransaction.connection,
+                    provider: walletProvider,
+                    transaction: builtTransaction.transaction,
+                  });
+
+                  await tokenRequestsApi.reject(selectedRequest.id, {
+                    ...parsed.data,
+                    txSignature,
+                    explorerUrl: buildExplorerTransactionUrl(txSignature, checkerPayload.rpcUrl),
+                  });
+                  enqueueSnackbar('Request rejected with wallet signature', { variant: 'success' });
+                  setSelectedRequest(null);
+                  setRejectionReason('');
+                  load();
+                } catch (rejectError) {
+                  enqueueSnackbar(getErrorMessage(rejectError, 'Unable to reject request'), { variant: 'error' });
+                } finally {
+                  setRejectingRequest(false);
                 }
-                await tokenRequestsApi.reject(selectedRequest.id, parsed.data);
-                enqueueSnackbar('Request rejected', { variant: 'success' });
-                setSelectedRequest(null);
-                setRejectionReason('');
-                load();
               }}
               variant="contained"
             >
-              Confirm Reject
+              {rejectingRequest ? 'Processing...' : 'Confirm Reject'}
             </Button>
           </>
         }

@@ -13,6 +13,12 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
+import {
+  createAssociatedTokenAccountInstruction,
+  getAccount,
+  getAssociatedTokenAddress,
+} from '@solana/spl-token';
+import { PublicKey } from '@solana/web3.js';
 
 import AppDialog from '../../components/common/AppDialog';
 import AppTable from '../../components/common/AppTable';
@@ -26,6 +32,7 @@ import useAuth from '../../hooks/useAuth';
 import useSolanaWallet from '../../hooks/useSolanaWallet';
 import {
   buildCheckerApprovalTransaction,
+  buildCheckerRejectionTransaction,
   buildExplorerTransactionUrl,
   buildMakerInitiationTransaction,
   signAndSendMakerTransaction,
@@ -35,17 +42,17 @@ import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api'
 import { rejectionSchema } from '../../modules/tokenRequests/tokenRequests.schemas';
 import { getNextActorMessage, getStatusTimeline } from '../../modules/tokenRequests/tokenRequests.utils';
 import { formatDateTime } from '../../utils/date';
+import { getErrorMessage } from '../../utils/error';
 import { formatAmount, truncateMiddle } from '../../utils/format';
 import {
   canApproveWalletExecution,
-  canApproveRequest,
   canEditDraftRequest,
   canInitiateWalletExecution,
   canExecuteRequest,
   canRejectRequest,
   canSubmitDraftRequest,
 } from '../../utils/permissions';
-import { EXECUTION_MODES, ON_CHAIN_PENDING_STATUSES, REQUEST_STATUSES } from '../../utils/constants';
+import { EXECUTION_MODES, ON_CHAIN_PENDING_STATUSES } from '../../utils/constants';
 
 function TokenRequestDetailsPage() {
   const { id } = useParams();
@@ -64,8 +71,9 @@ function TokenRequestDetailsPage() {
   const [executionPayloadError, setExecutionPayloadError] = useState('');
   const [executionPayloadLoading, setExecutionPayloadLoading] = useState(false);
   const [walletInitiating, setWalletInitiating] = useState(false);
-  const [walletApproving, setWalletApproving] = useState(false);
-  const [dialogType, setDialogType] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [rejectSubmitting, setRejectSubmitting] = useState(false);
   const [formState, setFormState] = useState({
     rejectionReason: '',
   });
@@ -136,11 +144,87 @@ function TokenRequestDetailsPage() {
 
   const timeline = useMemo(() => getStatusTimeline(request || {}), [request]);
   const expectedMakerWalletAddress = executionPayload?.walletInitiation?.expectedMakerWalletAddress || null;
+  const onChainCheckers = executionPayload?.onChainCheckers || [];
+  const connectedWalletRegisteredOnChain = !onChainCheckers.length || (
+    walletConnected && connectedWalletAddress && onChainCheckers.includes(connectedWalletAddress)
+  );
   const walletMismatch = Boolean(
     walletConnected && expectedMakerWalletAddress && connectedWalletAddress && expectedMakerWalletAddress !== connectedWalletAddress,
   );
   const canInitiateWithWallet = canInitiateWalletExecution(user, request, executionPayload);
-  const canApproveWithWallet = canApproveWalletExecution(user, request, executionPayload);
+  const canApproveWithWallet = canApproveWalletExecution(user, request);
+
+  const isAlreadyProcessedMessage = (value) => {
+    const normalized = String(value || '').toLowerCase();
+    return normalized.includes('alreadyprocessed')
+      || normalized.includes('request already processed')
+      || normalized.includes('already been processed')
+      || normalized.includes('error code: 6000')
+      || normalized.includes('custom program error: 0x1770');
+  };
+
+  const collectApprovalErrorDetails = async (error) => {
+    const details = [
+      error?.message,
+      error?.cause?.message,
+      ...(Array.isArray(error?.logs) ? error.logs : []),
+      ...(Array.isArray(error?.transactionLogs) ? error.transactionLogs : []),
+    ].filter(Boolean);
+
+    if (typeof error?.getLogs === 'function') {
+      try {
+        const rpcLogs = await error.getLogs();
+        if (Array.isArray(rpcLogs) && rpcLogs.length) {
+          details.push(...rpcLogs);
+        }
+      } catch {
+        // Ignore secondary log lookup failures and keep the original error chain.
+      }
+    }
+
+    return details;
+  };
+
+  const ensureDestinationTokenAccount = async (transaction, checkerPayload, connection) => {
+    const destinationWalletAddress = request.destinationWallet?.walletAddress
+      || checkerPayload.destinationWalletAddress
+      || checkerPayload.walletInitiation?.destinationWalletAddress
+      || null;
+
+    if (!destinationWalletAddress) {
+      return;
+    }
+
+    const mintAddress = checkerPayload.tokenMintAddress || request.tokenMintAddress;
+    if (!mintAddress) {
+      return;
+    }
+
+    const mintPublicKey = new PublicKey(mintAddress);
+    const destinationWalletPublicKey = new PublicKey(destinationWalletAddress);
+    const expectedDestinationAta = await getAssociatedTokenAddress(mintPublicKey, destinationWalletPublicKey);
+    const configuredDestinationAddress = request.destinationTokenAccountAddress
+      || checkerPayload.destinationTokenAccountAddress
+      || checkerPayload.destinationTokenAccount
+      || null;
+
+    if (configuredDestinationAddress && configuredDestinationAddress !== expectedDestinationAta.toBase58()) {
+      return;
+    }
+
+    try {
+      await getAccount(connection, expectedDestinationAta, 'confirmed');
+    } catch {
+      transaction.instructions.unshift(
+        createAssociatedTokenAccountInstruction(
+          checkerPayload.expectedCheckerWalletAddress || checkerPayload.checkerWalletAddress || connectedWalletAddress,
+          expectedDestinationAta,
+          destinationWalletPublicKey,
+          mintPublicKey,
+        ),
+      );
+    }
+  };
   if (loading) {
     return <LoadingScreen message="Loading request details..." />;
   }
@@ -162,22 +246,21 @@ function TokenRequestDetailsPage() {
         {canSubmitDraftRequest(user, request) ? (
           <Button
             onClick={async () => {
-              await tokenRequestsApi.submit(request.id);
-              enqueueSnackbar('Request submitted', { variant: 'success' });
-              reload();
+              try {
+                await tokenRequestsApi.submit(request.id);
+                enqueueSnackbar('Request submitted', { variant: 'success' });
+                reload();
+              } catch (submitError) {
+                enqueueSnackbar(getErrorMessage(submitError, 'Unable to submit request'), { variant: 'error' });
+              }
             }}
             variant="contained"
           >
             Submit
           </Button>
         ) : null}
-        {canApproveRequest(user, request) ? (
-          <Button onClick={() => setDialogType('approve')} variant="contained">
-            Approve
-          </Button>
-        ) : null}
         {canRejectRequest(user, request) ? (
-          <Button color="error" onClick={() => setDialogType('reject')} variant="outlined">
+          <Button color="error" onClick={() => setRejectDialogOpen(true)} variant="outlined">
             Reject
           </Button>
         ) : null}
@@ -212,21 +295,29 @@ function TokenRequestDetailsPage() {
                   transaction: builtTransaction.transaction,
                 });
 
-                await tokenRequestsApi.recordInitiation(request.id, {
+                const initiationPayload = {
                   makerWalletAddress: connectedWalletAddress,
                   onChainRequestAddress: builtTransaction.requestAddress,
                   initiationTxSignature: initiationSignature,
                   initiationExplorerUrl: buildExplorerTransactionUrl(initiationSignature, executionPayload.rpcUrl),
-                  sourceTokenAccountAddress: builtTransaction.sourceTokenAccountAddress,
-                  destinationTokenAccountAddress: builtTransaction.destinationTokenAccountAddress,
-                });
+                };
+
+                if (builtTransaction.sourceTokenAccountAddress) {
+                  initiationPayload.sourceTokenAccountAddress = builtTransaction.sourceTokenAccountAddress;
+                }
+
+                if (builtTransaction.destinationTokenAccountAddress) {
+                  initiationPayload.destinationTokenAccountAddress = builtTransaction.destinationTokenAccountAddress;
+                }
+
+                await tokenRequestsApi.recordInitiation(request.id, initiationPayload);
 
                 enqueueSnackbar(`Wallet initiation submitted: ${truncateMiddle(initiationSignature, 8, 6)}`, {
                   variant: 'success',
                 });
                 await reload();
               } catch (walletError) {
-                enqueueSnackbar(walletError.message || 'Wallet initiation failed', { variant: 'error' });
+                enqueueSnackbar(getErrorMessage(walletError, 'Wallet initiation failed'), { variant: 'error' });
               } finally {
                 setWalletInitiating(false);
               }
@@ -237,58 +328,97 @@ function TokenRequestDetailsPage() {
           </Button>
         ) : null}
         {canApproveWithWallet ? (
-          <Button
-            disabled={walletApproving || !walletConnected || executionPayloadLoading}
-            onClick={async () => {
-              try {
-                if (!walletConnected || !connectedWalletAddress) {
-                  throw new Error('Connect a registered checker wallet before approving this request on chain.');
+            <Button
+              disabled={isSubmitting || !walletConnected || executionPayloadLoading}
+              onClick={async () => {
+                if (isSubmitting) {
+                  return;
                 }
 
-                if (!walletProvider) {
-                  throw new Error('Wallet provider is not available.');
-                }
+                let checkerPayload = null;
+                let approvalConnection = null;
 
-                if (!executionPayload) {
-                  throw new Error('Execution payload is not ready yet. Try again in a moment.');
-                }
+                try {
+                  if (!walletConnected || !connectedWalletAddress) {
+                    throw new Error('Connect a registered checker wallet before approving this request on chain.');
+                  }
 
-                setWalletApproving(true);
+                  if (!walletProvider) {
+                    throw new Error('Wallet provider is not available.');
+                  }
 
-                const preparedResponse = await tokenRequestsApi.prepareCheckerApproval(request.id);
-                const checkerPayload = preparedResponse.data;
-                const builtTransaction = buildCheckerApprovalTransaction({
-                  executionPayload: checkerPayload,
-                  checkerWalletAddress: connectedWalletAddress,
-                });
+                  setIsSubmitting(true);
 
-                const approvalSignature = await signAndSendWalletTransaction({
-                  connection: builtTransaction.connection,
-                  provider: walletProvider,
-                  transaction: builtTransaction.transaction,
-                });
+                  const preparedResponse = await tokenRequestsApi.prepareCheckerApproval(
+                    request.id,
+                    connectedWalletAddress,
+                  );
+                  checkerPayload = preparedResponse.data;
+                  const checkerOnChainCheckers = Array.isArray(checkerPayload.onChainCheckers) ? checkerPayload.onChainCheckers : [];
 
-                await tokenRequestsApi.recordExecution(request.id, {
-                  status: REQUEST_STATUSES.EXECUTED,
-                  txSignature: approvalSignature,
-                  explorerUrl: buildExplorerTransactionUrl(approvalSignature, executionPayload.rpcUrl),
-                });
+                  if (checkerOnChainCheckers.length && !checkerOnChainCheckers.includes(connectedWalletAddress)) {
+                    throw new Error(
+                      `Connected wallet ${connectedWalletAddress} is not registered on chain as a checker. ` +
+                      `Registered checkers: ${checkerOnChainCheckers.join(', ')}`,
+                    );
+                  }
 
-                enqueueSnackbar(`Checker approval submitted: ${truncateMiddle(approvalSignature, 8, 6)}`, {
-                  variant: 'success',
-                });
-                await reload();
-              } catch (walletError) {
-                enqueueSnackbar(walletError.message || 'Checker wallet approval failed', { variant: 'error' });
+                  if (!checkerPayload.approvalInstruction) {
+                    throw new Error('Checker approval instruction was not returned by the backend. Restart the backend and try again.');
+                  }
+
+                  const builtTransaction = await buildCheckerApprovalTransaction({
+                    executionPayload: checkerPayload,
+                    checkerWalletAddress: connectedWalletAddress,
+                    sourceWalletAddress: request.sourceWallet?.walletAddress || null,
+                    destinationWalletAddress: request.destinationWallet?.walletAddress || null,
+                    sourceTokenAccountAddress: request.sourceTokenAccountAddress || null,
+                    destinationTokenAccountAddress: request.destinationTokenAccountAddress || null,
+                  });
+                  approvalConnection = builtTransaction.connection;
+
+                  await ensureDestinationTokenAccount(
+                    builtTransaction.transaction,
+                    checkerPayload,
+                    builtTransaction.connection,
+                  );
+
+                  const approvalSignature = await signAndSendWalletTransaction({
+                    connection: builtTransaction.connection,
+                    provider: walletProvider,
+                    transaction: builtTransaction.transaction,
+                  });
+
+                  await tokenRequestsApi.approve(request.id, {
+                    comment: 'Approved on chain with wallet',
+                    txSignature: approvalSignature,
+                    explorerUrl: buildExplorerTransactionUrl(approvalSignature, checkerPayload.rpcUrl),
+                  });
+
+                  enqueueSnackbar(`Checker approval submitted: ${truncateMiddle(approvalSignature, 8, 6)}`, {
+                    variant: 'success',
+                  });
+                } catch (walletError) {
+                  const approvalErrorDetails = await collectApprovalErrorDetails(walletError);
+                  const alreadyProcessed = approvalErrorDetails.some(isAlreadyProcessedMessage);
+
+                  if (alreadyProcessed) {
+                    enqueueSnackbar('This request has already been processed.', { variant: 'warning' });
+                  } else {
+                    enqueueSnackbar(getErrorMessage(walletError, 'Checker wallet approval failed'), { variant: 'error' });
+                  }
               } finally {
-                setWalletApproving(false);
+                  setIsSubmitting(false);
+                  if (approvalConnection || checkerPayload) {
+                    await reload();
+                  }
               }
-            }}
-            variant="contained"
-          >
-            {walletApproving ? 'Approving...' : 'Approve On Chain With Wallet'}
-          </Button>
-        ) : null}
+              }}
+              variant="contained"
+            >
+              {isSubmitting ? 'Approving...' : 'Approve On Chain With Wallet'}
+            </Button>
+          ) : null}
         {canExecuteRequest(user, request) ? (
           <Button
             onClick={async () => {
@@ -301,7 +431,7 @@ function TokenRequestDetailsPage() {
                 );
                 reload();
               } catch (executionError) {
-                enqueueSnackbar(executionError.message || 'Execution failed', { variant: 'error' });
+                enqueueSnackbar(getErrorMessage(executionError, 'Execution failed'), { variant: 'error' });
               }
             }}
             variant="contained"
@@ -394,6 +524,16 @@ function TokenRequestDetailsPage() {
                     This request has maker initiation recorded. A connected Phantom wallet that is registered on chain as a checker can approve it directly.
                   </Alert>
                 ) : null}
+                {walletConnected && onChainCheckers.length && !connectedWalletRegisteredOnChain ? (
+                  <Alert severity="warning">
+                    The connected Phantom wallet is not registered on chain as a checker for this configuration. Switch to a registered checker wallet or update the Solana config.
+                  </Alert>
+                ) : null}
+                {onChainCheckers.length ? (
+                  <Alert severity={connectedWalletRegisteredOnChain ? 'success' : 'warning'}>
+                    On-chain checkers: {onChainCheckers.join(', ')}
+                  </Alert>
+                ) : null}
                 {request.initiationExplorerUrl ? (
                   <Link href={request.initiationExplorerUrl} rel="noreferrer" target="_blank">
                     View initiation transaction
@@ -454,58 +594,76 @@ function TokenRequestDetailsPage() {
       <AppDialog
         actions={
           <>
-            <Button onClick={() => setDialogType(null)}>Cancel</Button>
             <Button
-              onClick={async () => {
-                await tokenRequestsApi.approve(request.id, { comment: 'Approved from details page' });
-                enqueueSnackbar('Request approved', { variant: 'success' });
-                setDialogType(null);
-                reload();
+              disabled={rejectSubmitting}
+              onClick={() => {
+                setRejectDialogOpen(false);
+                setFormState((current) => ({ ...current, rejectionReason: '' }));
               }}
-              variant="contained"
             >
-              Confirm Approve
+              Cancel
             </Button>
-          </>
-        }
-        onClose={() => setDialogType(null)}
-        open={dialogType === 'approve'}
-        title="Approve Request"
-      >
-        <Typography color="text.secondary">
-          This will approve the request and assign you as checker.
-        </Typography>
-      </AppDialog>
-
-      <AppDialog
-        actions={
-          <>
-            <Button onClick={() => setDialogType(null)}>Cancel</Button>
             <Button
               color="error"
+              disabled={rejectSubmitting}
               onClick={async () => {
-                const parsed = rejectionSchema.safeParse({
-                  rejectionReason: formState.rejectionReason,
-                  comment: formState.rejectionReason,
-                });
-                if (!parsed.success) {
-                  enqueueSnackbar(parsed.error.issues[0]?.message || 'Rejection reason is required', { variant: 'error' });
-                  return;
+                try {
+                  setRejectSubmitting(true);
+                  if (!walletConnected || !connectedWalletAddress) {
+                    throw new Error('Connect a checker wallet before rejecting this request.');
+                  }
+
+                  if (!walletProvider) {
+                    throw new Error('Wallet provider is not available.');
+                  }
+
+                  const parsed = rejectionSchema.safeParse({
+                    rejectionReason: formState.rejectionReason,
+                    comment: formState.rejectionReason,
+                  });
+                  if (!parsed.success) {
+                    throw new Error(parsed.error.issues[0]?.message || 'Rejection reason is required');
+                  }
+
+                  const preparedResponse = await tokenRequestsApi.prepareCheckerRejection(request.id);
+                  const checkerPayload = preparedResponse.data;
+                  const builtTransaction = buildCheckerRejectionTransaction({
+                    executionPayload: checkerPayload,
+                    checkerWalletAddress: connectedWalletAddress,
+                  });
+
+                  const txSignature = await signAndSendWalletTransaction({
+                    connection: builtTransaction.connection,
+                    provider: walletProvider,
+                    transaction: builtTransaction.transaction,
+                  });
+
+                  await tokenRequestsApi.reject(request.id, {
+                    ...parsed.data,
+                    txSignature,
+                    explorerUrl: buildExplorerTransactionUrl(txSignature, checkerPayload.rpcUrl),
+                  });
+                  enqueueSnackbar('Request rejected with wallet signature', { variant: 'success' });
+                  setFormState((current) => ({ ...current, rejectionReason: '' }));
+                  setRejectDialogOpen(false);
+                  reload();
+                } catch (rejectionError) {
+                  enqueueSnackbar(getErrorMessage(rejectionError, 'Unable to reject request'), { variant: 'error' });
+                } finally {
+                  setRejectSubmitting(false);
                 }
-                await tokenRequestsApi.reject(request.id, parsed.data);
-                enqueueSnackbar('Request rejected', { variant: 'success' });
-                setDialogType(null);
-                setFormState((current) => ({ ...current, rejectionReason: '' }));
-                reload();
               }}
               variant="contained"
             >
-              Confirm Reject
+              {rejectSubmitting ? 'Processing...' : 'Confirm Reject'}
             </Button>
           </>
         }
-        onClose={() => setDialogType(null)}
-        open={dialogType === 'reject'}
+        onClose={() => {
+          setRejectDialogOpen(false);
+          setFormState((current) => ({ ...current, rejectionReason: '' }));
+        }}
+        open={rejectDialogOpen}
         title="Reject Request"
       >
         <TextField

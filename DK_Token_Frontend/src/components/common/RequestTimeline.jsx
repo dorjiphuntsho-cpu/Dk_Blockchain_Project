@@ -1,5 +1,6 @@
 import { Box, Stack, Typography } from '@mui/material';
 
+import { REQUEST_STATUSES } from '../../utils/constants';
 import { formatDateTime } from '../../utils/date';
 import StatusChip from './StatusChip';
 
@@ -32,7 +33,9 @@ function RequestTimeline({ items = [], request }) {
             <Typography color="text.secondary" variant="body2">
               {item.timestamp ? formatDateTime(item.timestamp) : item.completed ? 'Completed' : 'Pending'}
             </Typography>
-            {request?.status === item.key ? <StatusChip value={request.status} /> : null}
+            {request?.status === item.key || (item.key === 'FINAL_DECISION' && [REQUEST_STATUSES.APPROVED, REQUEST_STATUSES.REJECTED].includes(request?.status)) ? (
+              <StatusChip value={request.status} />
+            ) : null}
           </Stack>
         </Stack>
       ))}

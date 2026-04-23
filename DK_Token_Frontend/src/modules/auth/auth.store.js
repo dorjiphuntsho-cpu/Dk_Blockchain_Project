@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
+import { resetAuthSession, resetWalletSession } from '../../app/sessionManager';
 import { authApi } from './auth.api';
 
 const useAuthStore = create(
@@ -13,6 +14,7 @@ const useAuthStore = create(
         set({ isLoading: true });
 
         try {
+          await resetWalletSession();
           const response = await authApi.login(credentials);
           set({
             token: response.data.token,
@@ -38,11 +40,15 @@ const useAuthStore = create(
           set({ user: response.data });
           return response.data;
         } catch (error) {
-          set({ token: null, user: null });
+          await resetAuthSession();
+          set({ token: null, user: null, isLoading: false });
           throw error;
         }
       },
-      logout: () => set({ token: null, user: null, isLoading: false }),
+      logout: async () => {
+        await resetAuthSession();
+        set({ token: null, user: null, isLoading: false });
+      },
     }),
     {
       name: 'token-admin-auth',
