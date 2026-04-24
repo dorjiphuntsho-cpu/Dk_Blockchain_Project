@@ -7,10 +7,10 @@ skip-lint = false
 
 
 [programs.localnet]
-dk_token = "CYVB8pDzTLmyUgxSnjtbzxHyd2habRMa3KMgNfpM5KSW"
+dk_token = "49fwAJRLMtbCLLqZDZTBKZtwDaBTgm1oA1FWnidYDQJp"
 
 [programs.devnet]
-dk_token = "CYVB8pDzTLmyUgxSnjtbzxHyd2habRMa3KMgNfpM5KSW"
+dk_token = "49fwAJRLMtbCLLqZDZTBKZtwDaBTgm1oA1FWnidYDQJp"
 
 [registry]
 url = "https://api.apr.dev"

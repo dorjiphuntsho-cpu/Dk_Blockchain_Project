@@ -614,15 +614,18 @@ async function createTokenMint({ decimals, name, symbol, uri }) {
   const { adminKeypair, adminProgram, configAddress } = await requireAdminManagedConfig();
   const mintKeypair = Keypair.generate();
   const tokenAuthority = getTokenAuthority(configAddress);
+  const metadataAddress = buildMetadataAddress(mintKeypair.publicKey);
 
   const txSignature = await adminProgram.methods
-    .createTokenMint(decimals)
+    .createTokenMint(decimals, name, symbol, uri)
     .accounts({
       config: configAddress,
       mint: mintKeypair.publicKey,
       tokenAuthority,
+      metadata: metadataAddress,
       admin: adminKeypair.publicKey,
       tokenProgram: TOKEN_PROGRAM_ID,
+      metadataProgram: new PublicKey(METADATA_PROGRAM_ID),
       systemProgram: SystemProgram.programId,
       rent: anchor.web3.SYSVAR_RENT_PUBKEY,
     })
@@ -630,21 +633,14 @@ async function createTokenMint({ decimals, name, symbol, uri }) {
     .rpc();
 
   const mintAccount = await getMint(getConnection(), mintKeypair.publicKey, env.SOLANA_COMMITMENT);
-  const metadata = await createMintMetadata({
-    adminKeypair,
-    mintAddress: mintKeypair.publicKey,
-    name,
-    symbol,
-    uri,
-  });
 
   return {
     name,
     symbol,
-    metadataUri: metadata.metadataUri,
-    metadataAddress: metadata.metadataAddress,
-    metadataUpdateAuthority: metadata.metadataUpdateAuthority,
-    metadataTxSignature: metadata.metadataTxSignature,
+    metadataUri: uri,
+    metadataAddress,
+    metadataUpdateAuthority: adminKeypair.publicKey.toBase58(),
+    metadataTxSignature: txSignature,
     mintAddress: mintKeypair.publicKey.toBase58(),
     decimals: mintAccount.decimals,
     mintAuthority: mintAccount.mintAuthority?.toBase58() || null,
@@ -654,6 +650,46 @@ async function createTokenMint({ decimals, name, symbol, uri }) {
     txSignature,
     explorerUrl: buildExplorerUrl(txSignature),
   };
+}
+
+async function ensureManagedTokenMetadata({
+  mintAddress,
+  name,
+  symbol,
+  uri,
+  adminWalletAddress = null,
+}) {
+  const adminKeypair = getAdminKeypair();
+  const configuredAdminWalletAddress = adminKeypair.publicKey.toBase58();
+
+  if (adminWalletAddress && adminWalletAddress !== configuredAdminWalletAddress) {
+    throw new ApiError(
+      409,
+      `Configured backend admin signer ${configuredAdminWalletAddress} does not match the provided admin wallet ${adminWalletAddress}`,
+    );
+  }
+
+  const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+
+  try {
+    const metadata = await fetchMetadataFromSeeds(getUmi(), {
+      mint: fromWeb3JsPublicKey(mintPublicKey),
+    });
+
+    return {
+      metadataAddress: buildMetadataAddress(mintPublicKey),
+      metadataTxSignature: null,
+      metadataUpdateAuthority: String(metadata.updateAuthority),
+      metadataUri: metadata.uri || uri || null,
+      name: metadata.name || name,
+      symbol: metadata.symbol || symbol,
+    };
+  } catch (metadataError) {
+    throw new ApiError(
+      409,
+      `Metadata account for mint ${mintAddress} is missing after mint creation. ${metadataError.message}`,
+    );
+  }
 }
 
 async function hydrateManagedToken(token) {
@@ -919,6 +955,7 @@ module.exports = {
   hydrateManagedToken,
   getWalletTokenBalances,
   buildExplorerUrl,
+  ensureManagedTokenMetadata,
   supportsBrowserWalletExecution,
   removeChecker,
   setAdmin,

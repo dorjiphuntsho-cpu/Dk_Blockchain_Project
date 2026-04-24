@@ -718,6 +718,9 @@ function SolanaAdminPage() {
                           executionPayload,
                           adminWalletAddress: connectedWalletAddress,
                           decimals: Number(mintDecimals || 0),
+                          name: mintName.trim(),
+                          symbol: mintSymbol.trim(),
+                          metadataUri: mintUri.trim(),
                         });
 
                         const txSignature = await signAndSendWalletTransaction({
@@ -732,6 +735,7 @@ function SolanaAdminPage() {
                           name: mintName.trim(),
                           symbol: mintSymbol.trim(),
                           metadataUri: mintUri.trim(),
+                          metadataAddress: builtTransaction.metadataAddress,
                           mintAddress: builtTransaction.mintAddress,
                           tokenAuthority: executionPayload.tokenAuthority,
                           txSignature,

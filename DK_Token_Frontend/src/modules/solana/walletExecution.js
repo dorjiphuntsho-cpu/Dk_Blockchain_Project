@@ -66,6 +66,42 @@ function buildCreateTokenMintInstructionData(decimals) {
   return concatBytes(CREATE_TOKEN_MINT_DISCRIMINATOR, Uint8Array.from([decimals]));
 }
 
+function encodeUtf8String(value) {
+  const encoded = new TextEncoder().encode(value);
+  const length = new Uint8Array(4);
+  let remaining = encoded.length;
+
+  for (let index = 0; index < 4; index += 1) {
+    length[index] = remaining & 255;
+    remaining >>= 8;
+  }
+
+  return concatBytes(length, encoded);
+}
+
+function buildCreateTokenMintInstructionPayload(decimals, name, symbol, uri) {
+  return concatBytes(
+    CREATE_TOKEN_MINT_DISCRIMINATOR,
+    Uint8Array.from([decimals]),
+    encodeUtf8String(name),
+    encodeUtf8String(symbol),
+    encodeUtf8String(uri),
+  );
+}
+
+function findMetadataAddress(metadataProgramPublicKey, mintPublicKey) {
+  const [metadataPublicKey] = PublicKey.findProgramAddressSync(
+    [
+      new TextEncoder().encode('metadata'),
+      metadataProgramPublicKey.toBuffer(),
+      mintPublicKey.toBuffer(),
+    ],
+    metadataProgramPublicKey,
+  );
+
+  return metadataPublicKey;
+}
+
 export function buildExplorerTransactionUrl(signature, rpcUrl) {
   const customUrl = encodeURIComponent(rpcUrl);
   return `https://explorer.solana.com/tx/${signature}?cluster=custom&customUrl=${customUrl}`;
@@ -290,7 +326,14 @@ export async function buildMakerInitiationTransaction({ executionPayload, makerW
   };
 }
 
-export async function buildAdminMintCreationTransaction({ executionPayload, adminWalletAddress, decimals }) {
+export async function buildAdminMintCreationTransaction({
+  executionPayload,
+  adminWalletAddress,
+  decimals,
+  name,
+  symbol,
+  metadataUri,
+}) {
   const expectedAdminWalletAddress = executionPayload?.expectedAdminWalletAddress || null;
   if (expectedAdminWalletAddress && expectedAdminWalletAddress !== adminWalletAddress) {
     throw new Error(`Connected wallet must match the expected admin wallet ${expectedAdminWalletAddress}.`);
@@ -302,6 +345,8 @@ export async function buildAdminMintCreationTransaction({ executionPayload, admi
   const mintKeypair = Keypair.generate();
   const mintPublicKey = mintKeypair.publicKey;
   const tokenAuthorityPublicKey = new PublicKey(requirePayloadField(executionPayload, 'tokenAuthority'));
+  const metadataProgramPublicKey = new PublicKey(requirePayloadField(executionPayload, 'metadataProgramId'));
+  const metadataPublicKey = findMetadataAddress(metadataProgramPublicKey, mintPublicKey);
   const transaction = new Transaction();
 
   transaction.add(
@@ -311,17 +356,25 @@ export async function buildAdminMintCreationTransaction({ executionPayload, admi
         { pubkey: configPublicKey, isSigner: false, isWritable: false },
         { pubkey: mintPublicKey, isSigner: true, isWritable: true },
         { pubkey: tokenAuthorityPublicKey, isSigner: false, isWritable: false },
+        { pubkey: metadataPublicKey, isSigner: false, isWritable: true },
         { pubkey: adminPublicKey, isSigner: true, isWritable: true },
         { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: metadataProgramPublicKey, isSigner: false, isWritable: false },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
       ],
-      data: buildCreateTokenMintInstructionData(decimals),
+      data: buildCreateTokenMintInstructionPayload(
+        decimals,
+        name,
+        symbol,
+        metadataUri,
+      ),
     }),
   );
 
   return {
     connection,
+    metadataAddress: metadataPublicKey.toBase58(),
     mintKeypair,
     mintAddress: mintPublicKey.toBase58(),
     transaction,

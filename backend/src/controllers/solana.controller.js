@@ -49,7 +49,20 @@ async function prepareMintCreation(_req, res) {
 }
 
 async function recordCreatedTokenMint(req, res) {
-  const persistedMint = await managedTokenService.createManagedTokenRecord(req.validated.body, req.user.id);
+  const metadata = await solanaService.ensureManagedTokenMetadata({
+    mintAddress: req.validated.body.mintAddress,
+    name: req.validated.body.name,
+    symbol: req.validated.body.symbol,
+    uri: req.validated.body.metadataUri,
+    adminWalletAddress: req.validated.body.adminWalletAddress || null,
+  });
+  const persistedMint = await managedTokenService.createManagedTokenRecord(
+    {
+      ...req.validated.body,
+      ...metadata,
+    },
+    req.user.id,
+  );
   const hydratedMint = await solanaService.hydrateManagedToken(persistedMint);
 
   return successResponse(res, {
