@@ -18,7 +18,6 @@ import TokenRequestCreatePage from '../pages/tokenRequests/TokenRequestCreatePag
 import TokenRequestDetailsPage from '../pages/tokenRequests/TokenRequestDetailsPage';
 import MyTokenRequestsPage from '../pages/tokenRequests/MyTokenRequestsPage';
 import PendingApprovalsPage from '../pages/tokenRequests/PendingApprovalsPage';
-import ReadyForExecutionPage from '../pages/tokenRequests/ReadyForExecutionPage';
 import AuditLogsPage from '../pages/auditLogs/AuditLogsPage';
 import SolanaAdminPage from '../pages/solana/SolanaAdminPage';
 import ManagedTokensPage from '../pages/solana/ManagedTokensPage';
@@ -66,10 +65,6 @@ const router = createBrowserRouter([
           {
             element: <RoleGuard roles={[ROLES.CHECKER]} />,
             children: [{ path: 'pending-approvals', element: <PendingApprovalsPage /> }],
-          },
-          {
-            element: <RoleGuard roles={[ROLES.ADMIN, ROLES.EXECUTOR]} />,
-            children: [{ path: 'ready-for-execution', element: <ReadyForExecutionPage /> }],
           },
           {
             path: 'token-requests/:id',

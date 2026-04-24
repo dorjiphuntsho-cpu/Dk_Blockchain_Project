@@ -171,7 +171,7 @@ function DashboardPage() {
         return {
           eyebrow: 'Admin Overview',
           title: 'Dashboard',
-          subtitle: 'Monitor workflow volume, on-chain pending requests, and recent control activity across the portal.',
+          subtitle: 'Monitor workflow volume, request progress, and recent control activity across the portal.',
           recentTitle: 'Latest Token Requests',
           recentSubtitle: 'Newest requests across makers, approvals, and execution stages.',
         };
@@ -195,7 +195,7 @@ function DashboardPage() {
         return {
           eyebrow: 'Execution Desk',
           title: 'Dashboard',
-          subtitle: 'Focus on ready requests, queue depth, and execution outcomes.',
+          subtitle: 'Focus on requests in progress, queue depth, and execution outcomes.',
           recentTitle: 'Execution Activity',
           recentSubtitle: 'Requests currently moving toward on-chain execution.',
         };
@@ -218,7 +218,7 @@ function DashboardPage() {
         return [
           metric('total', 'Total Requests', summary.totalRequests ?? 0, 'Across all visible workflows', <PlaylistAddCheckOutlinedIcon fontSize="small" />, 'primary.main'),
           metric('pending', 'Pending Approvals', summary.pendingApprovals ?? 0, 'Waiting for checker action', <PendingActionsOutlinedIcon fontSize="small" />, 'warning.main'),
-          metric('ready', 'On-chain Pending', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Approved and queued for browser signing', <FactCheckOutlinedIcon fontSize="small" />, 'secondary.main'),
+          metric('ready', 'In Progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Recoverable requests still syncing wallet and chain state', <FactCheckOutlinedIcon fontSize="small" />, 'secondary.main'),
           metric('failed', 'Failed', summary.failedRequests ?? 0, 'Need operational follow-up', <ReportGmailerrorredOutlinedIcon fontSize="small" />, 'error.main'),
         ];
       case ROLES.MAKER:
@@ -226,18 +226,18 @@ function DashboardPage() {
           metric('drafts', 'Drafts', state.draftCount, 'Still editable by you', <AssignmentOutlinedIcon fontSize="small" />, 'primary.main'),
           metric('pending', 'Pending Review', summary.pendingApprovals ?? 0, 'Submitted and awaiting a checker', <PendingActionsOutlinedIcon fontSize="small" />, 'warning.main'),
           metric('rejected', 'Rejected', state.rejectedCount, 'Need revision before resubmission', <RuleFolderOutlinedIcon fontSize="small" />, 'error.main'),
-          metric('ready', 'On-chain Pending', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Approved and awaiting browser signing', <ApprovalOutlinedIcon fontSize="small" />, 'secondary.main'),
+          metric('ready', 'In Progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Requests still syncing wallet submission or on-chain confirmation', <ApprovalOutlinedIcon fontSize="small" />, 'secondary.main'),
         ];
       case ROLES.CHECKER:
         return [
           metric('pending', 'Pending Approvals', summary.pendingApprovals ?? 0, 'Requests waiting in your queue', <PendingActionsOutlinedIcon fontSize="small" />, 'warning.main'),
-          metric('ready', 'On-chain Pending', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Requests you approved into browser signing', <AssignmentTurnedInOutlinedIcon fontSize="small" />, 'primary.main'),
+          metric('ready', 'In Progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Requests still settling after wallet approval', <AssignmentTurnedInOutlinedIcon fontSize="small" />, 'primary.main'),
           metric('reviewed', 'Reviewed Recently', state.reviewedCount, 'Latest decisions linked to you', <TaskAltOutlinedIcon fontSize="small" />, 'secondary.main'),
           metric('failed', 'Failed Downstream', summary.failedRequests ?? 0, 'Approved items that later failed execution', <ReportGmailerrorredOutlinedIcon fontSize="small" />, 'error.main'),
         ];
       case ROLES.EXECUTOR:
         return [
-          metric('ready', 'On-chain Pending', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Immediately actionable requests', <FactCheckOutlinedIcon fontSize="small" />, 'secondary.main'),
+          metric('ready', 'In Progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Requests still settling between wallet and backend capture', <FactCheckOutlinedIcon fontSize="small" />, 'secondary.main'),
           metric('executed', 'Executed', summary.executedRequests ?? 0, 'Successfully recorded outcomes', <CheckCircleOutlineOutlinedIcon fontSize="small" />, 'success.main'),
           metric('failed', 'Failed', summary.failedRequests ?? 0, 'Need retry or investigation', <ReportGmailerrorredOutlinedIcon fontSize="small" />, 'error.main'),
         ];
@@ -289,13 +289,11 @@ function DashboardPage() {
             {dashboardRole === ROLES.ADMIN ? (
               <>
                 <RequestListPanel
-                  actionLabel="View on-chain queue"
-                  actionTo="/ready-for-execution"
-                  emptyText="No on-chain pending requests are waiting right now."
+                  emptyText="No in-progress requests need attention right now."
                   items={state.readyQueue}
                   onSelect={(row) => navigate(`/token-requests/${row.id}`)}
-                  subtitle="Requests already approved and waiting for browser signing or result recording."
-                  title="On-chain Queue"
+                  subtitle="Requests still settling wallet submission, approval capture, or backend reconciliation."
+                  title="In Progress"
                 />
                 <AuditActivityPanel items={state.auditTrail} />
               </>
@@ -348,13 +346,11 @@ function DashboardPage() {
             {dashboardRole === ROLES.EXECUTOR ? (
               <>
                 <RequestListPanel
-                  actionLabel="View on-chain queue"
-                  actionTo="/ready-for-execution"
-                  emptyText="Nothing is waiting in the on-chain pending queue."
+                  emptyText="Nothing is still settling right now."
                   items={state.readyQueue}
                   onSelect={(row) => navigate(`/token-requests/${row.id}`)}
-                  subtitle="Requests ready for browser signing and result recording."
-                  title="On-chain Queue"
+                  subtitle="Requests still waiting on wallet capture or backend reconciliation."
+                  title="In Progress"
                 />
                 <WalletConnectCard />
               </>

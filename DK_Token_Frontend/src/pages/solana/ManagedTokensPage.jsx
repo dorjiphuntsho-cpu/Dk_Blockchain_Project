@@ -18,6 +18,10 @@ function ManagedTokensPage() {
   const [pagination, setPagination] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const tokensWithWarnings = useMemo(
+    () => tokens.filter((token) => token.warning),
+    [tokens],
+  );
 
   useEffect(() => {
     async function load() {
@@ -59,11 +63,18 @@ function ManagedTokensPage() {
       key: 'mintAddress',
       label: 'Mint Address',
       render: (row) => (
-        <Stack spacing={0.5}>
+        <Stack spacing={0.75}>
           <Typography sx={{ fontWeight: 700 }} variant="body2">
             {truncateMiddle(row.mintAddress, 12, 10)}
           </Typography>
-          {row.warning ? <Chip color="warning" label="On-chain warning" size="small" /> : null}
+          {row.warning ? (
+            <Stack spacing={0.5}>
+              <Chip color="warning" label="On-chain warning" size="small" sx={{ width: 'fit-content' }} />
+              <Typography color="warning.main" sx={{ maxWidth: 320, wordBreak: 'break-word' }} variant="caption">
+                {row.warning}
+              </Typography>
+            </Stack>
+          ) : null}
         </Stack>
       ),
     },
@@ -144,10 +155,26 @@ function ManagedTokensPage() {
         />
       </SearchFilters>
 
-      {tokens.some((token) => token.warning) ? (
+      {tokensWithWarnings.length ? (
         <Alert severity="warning">
-          Some tokens could not be refreshed fully from chain. Stored metadata is still shown.
+          Some tokens could not be refreshed fully from chain. Showing the live warning from the backend for each affected token.
         </Alert>
+      ) : null}
+
+      {tokensWithWarnings.length ? (
+        <Card>
+          <CardContent>
+            <Stack spacing={1.25}>
+              <Typography variant="h6">On-Chain Refresh Warnings</Typography>
+              {tokensWithWarnings.map((token) => (
+                <Alert key={token.id} severity="warning">
+                  <strong>{token.name || token.symbol || truncateMiddle(token.mintAddress, 12, 10)}</strong>
+                  {`: ${token.warning}`}
+                </Alert>
+              ))}
+            </Stack>
+          </CardContent>
+        </Card>
       ) : null}
 
       <Card>

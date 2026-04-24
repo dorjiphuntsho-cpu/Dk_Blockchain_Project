@@ -14,6 +14,7 @@ import FormTextField from '../../components/form/FormTextField';
 import { managedTokensApi } from '../../modules/solana/managedTokens.api';
 import { buildExplorerTransactionUrl, buildMakerInitiationTransaction, signAndSendMakerTransaction } from '../../modules/solana/walletExecution';
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
+import { clearPendingInitiationRecovery, savePendingInitiationRecovery } from '../../modules/tokenRequests/tokenRequestRecovery';
 import { tokenRequestSchema } from '../../modules/tokenRequests/tokenRequests.schemas';
 import { walletsApi } from '../../modules/wallets/wallets.api';
 import { REQUEST_TYPES, ROLES } from '../../utils/constants';
@@ -284,7 +285,9 @@ function TokenRequestCreatePage() {
           initiationPayload.destinationTokenAccountAddress = builtTransaction.destinationTokenAccountAddress;
         }
 
+        savePendingInitiationRecovery(requestId, initiationPayload);
         await tokenRequestsApi.recordInitiation(requestId, initiationPayload);
+        clearPendingInitiationRecovery(requestId);
 
         enqueueSnackbar('Token request created and signed with wallet', { variant: 'success' });
       } else {
@@ -297,7 +300,7 @@ function TokenRequestCreatePage() {
 
       if (submitForApproval && savedRequestId) {
         enqueueSnackbar(
-          `Request was saved, but wallet submission did not complete: ${errorMessage}`,
+          `Request was saved. If wallet submission already reached the chain, the request page will finalize it automatically: ${errorMessage}`,
           { variant: 'warning' },
         );
         navigate(`/token-requests/${savedRequestId}`);

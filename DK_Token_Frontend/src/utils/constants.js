@@ -52,7 +52,6 @@ export const REQUEST_STATUS_OPTIONS = [
   REQUEST_STATUSES.PENDING_APPROVAL,
   REQUEST_STATUSES.APPROVED,
   REQUEST_STATUSES.REJECTED,
-  REQUEST_STATUSES.ON_CHAIN_PENDING,
   REQUEST_STATUSES.EXECUTED,
   REQUEST_STATUSES.FAILED,
 ].map((status) => ({
@@ -66,7 +65,6 @@ export const NAV_ITEMS = [
   { label: 'My Wallets', path: '/my-wallets', roles: Object.values(ROLES), section: 'Overview', icon: 'wallets' },
   { label: 'My Requests', path: '/my-requests', roles: [ROLES.MAKER], section: 'Operations', icon: 'myRequests' },
   { label: 'Pending Approvals', path: '/pending-approvals', roles: [ROLES.CHECKER], section: 'Operations', icon: 'approvals' },
-  { label: 'On-chain Pending', path: '/ready-for-execution', roles: [ROLES.ADMIN, ROLES.EXECUTOR], section: 'Operations', icon: 'execution' },
   { label: 'Solana Admin', path: '/solana-admin', roles: [ROLES.ADMIN], section: 'Admin', icon: 'solana' },
   { label: 'Managed Tokens', path: '/managed-tokens', roles: [ROLES.ADMIN], section: 'Admin', icon: 'request' },
   { label: 'Users', path: '/users', roles: [ROLES.ADMIN], section: 'Admin', icon: 'users' },
@@ -87,7 +85,6 @@ export const ROUTE_TITLES = {
   '/token-requests/new': 'Create Token Request',
   '/my-requests': 'My Token Requests',
   '/pending-approvals': 'Pending Approvals',
-  '/ready-for-execution': 'On-chain Pending',
   '/solana-admin': 'Solana Admin',
   '/managed-tokens': 'Managed Tokens',
   '/audit-logs': 'Audit Logs',

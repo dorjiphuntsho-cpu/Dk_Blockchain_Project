@@ -39,6 +39,11 @@ import {
   signAndSendWalletTransaction,
 } from '../../modules/solana/walletExecution';
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
+import {
+  clearPendingInitiationRecovery,
+  getPendingInitiationRecovery,
+  savePendingInitiationRecovery,
+} from '../../modules/tokenRequests/tokenRequestRecovery';
 import { rejectionSchema } from '../../modules/tokenRequests/tokenRequests.schemas';
 import { getNextActorMessage, getStatusTimeline } from '../../modules/tokenRequests/tokenRequests.utils';
 import { formatDateTime } from '../../utils/date';
@@ -53,6 +58,7 @@ import {
   canSubmitDraftRequest,
 } from '../../utils/permissions';
 import { EXECUTION_MODES, ON_CHAIN_PENDING_STATUSES } from '../../utils/constants';
+import { REQUEST_STATUSES } from '../../utils/constants';
 
 function TokenRequestDetailsPage() {
   const { id } = useParams();
@@ -71,6 +77,7 @@ function TokenRequestDetailsPage() {
   const [executionPayloadError, setExecutionPayloadError] = useState('');
   const [executionPayloadLoading, setExecutionPayloadLoading] = useState(false);
   const [walletInitiating, setWalletInitiating] = useState(false);
+  const [recoveringInitiation, setRecoveringInitiation] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectSubmitting, setRejectSubmitting] = useState(false);
@@ -141,6 +148,41 @@ function TokenRequestDetailsPage() {
       cancelled = true;
     };
   }, [request]);
+
+  useEffect(() => {
+    async function recoverInitiation() {
+      if (!request?.id || request.status !== REQUEST_STATUSES.DRAFT || recoveringInitiation) {
+        return;
+      }
+
+      const recovery = getPendingInitiationRecovery(request.id);
+      if (!recovery?.payload) {
+        return;
+      }
+
+      try {
+        setRecoveringInitiation(true);
+        await tokenRequestsApi.recordInitiation(request.id, recovery.payload);
+        clearPendingInitiationRecovery(request.id);
+        enqueueSnackbar('Recovered the previous wallet submission and finalized the request record.', {
+          variant: 'success',
+        });
+        await reload();
+      } catch (recoveryError) {
+        const message = getErrorMessage(recoveryError, 'Unable to recover the previous wallet submission');
+        const shouldClearRecovery = /only draft requests|already processed on chain|not found/i.test(message);
+
+        if (shouldClearRecovery) {
+          clearPendingInitiationRecovery(request.id);
+          await reload();
+        }
+      } finally {
+        setRecoveringInitiation(false);
+      }
+    }
+
+    recoverInitiation();
+  }, [enqueueSnackbar, recoveringInitiation, request]);
 
   const timeline = useMemo(() => getStatusTimeline(request || {}), [request]);
   const expectedMakerWalletAddress = executionPayload?.walletInitiation?.expectedMakerWalletAddress || null;
@@ -310,14 +352,19 @@ function TokenRequestDetailsPage() {
                   initiationPayload.destinationTokenAccountAddress = builtTransaction.destinationTokenAccountAddress;
                 }
 
+                savePendingInitiationRecovery(request.id, initiationPayload);
                 await tokenRequestsApi.recordInitiation(request.id, initiationPayload);
+                clearPendingInitiationRecovery(request.id);
 
                 enqueueSnackbar(`Wallet initiation submitted: ${truncateMiddle(initiationSignature, 8, 6)}`, {
                   variant: 'success',
                 });
                 await reload();
               } catch (walletError) {
-                enqueueSnackbar(getErrorMessage(walletError, 'Wallet initiation failed'), { variant: 'error' });
+                enqueueSnackbar(
+                  getErrorMessage(walletError, 'Wallet initiation failed. If the wallet already signed, the page will retry recording it automatically.'),
+                  { variant: 'error' },
+                );
               } finally {
                 setWalletInitiating(false);
               }
@@ -501,6 +548,9 @@ function TokenRequestDetailsPage() {
                 {request.executionError ? <Alert severity="warning">Execution error: {request.executionError}</Alert> : null}
                 {executionPayloadLoading ? (
                   <Alert severity="info">Refreshing execution payload and wallet requirements...</Alert>
+                ) : null}
+                {recoveringInitiation ? (
+                  <Alert severity="info">Finalizing a previously signed maker wallet submission...</Alert>
                 ) : null}
                 {executionPayloadError ? (
                   <Alert severity="warning">{executionPayloadError}</Alert>
