@@ -1,27 +1,29 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Button, Card, CardContent, MenuItem, Stack, Typography } from '@mui/material';
 import { FormProvider, useForm } from 'react-hook-form';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 
-import AppTable from '../../components/common/AppTable';
 import ErrorState from '../../components/common/ErrorState';
 import LoadingScreen from '../../components/common/LoadingScreen';
 import PageHeader from '../../components/common/PageHeader';
 import FormTextField from '../../components/form/FormTextField';
+import { managedTokensApi } from '../../modules/solana/managedTokens.api';
+import WalletBalanceShowcase from '../../components/wallet/WalletBalanceShowcase';
 import { usersApi } from '../../modules/users/users.api';
 import { walletsApi } from '../../modules/wallets/wallets.api';
 import { walletSchema } from '../../modules/wallets/wallets.schemas';
 import { getErrorMessage } from '../../utils/error';
-import { truncateMiddle } from '../../utils/format';
 
 function WalletDetailsPage() {
   const { id } = useParams();
   const { enqueueSnackbar } = useSnackbar();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
+  const [walletRecord, setWalletRecord] = useState(null);
   const [balances, setBalances] = useState([]);
+  const [tokenMetadataMap, setTokenMetadataMap] = useState({});
   const [balanceError, setBalanceError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const methods = useForm({
@@ -43,8 +45,21 @@ function WalletDetailsPage() {
         walletsApi.getById(id),
         usersApi.list({ page: 1, limit: 100 }),
       ]);
+      const managedTokenResponse = await managedTokensApi.list({ page: 1, limit: 200 });
 
       const wallet = walletResponse.data;
+      setWalletRecord(wallet);
+      setTokenMetadataMap(
+        Object.fromEntries(
+          (managedTokenResponse.data.items || []).map((token) => [
+            token.mintAddress,
+            {
+              name: token.name || token.onChain?.metadata?.name || null,
+              symbol: token.symbol || token.onChain?.metadata?.symbol || null,
+            },
+          ]),
+        ),
+      );
       methods.reset({
         userId: wallet.userId,
         walletAddress: wallet.walletAddress,
@@ -73,29 +88,6 @@ function WalletDetailsPage() {
       setLoading(false);
     });
   }, [enqueueSnackbar, id]);
-
-  const balanceColumns = useMemo(() => [
-    {
-      key: 'mintAddress',
-      label: 'Mint',
-      render: (row) => truncateMiddle(row.mintAddress, 12, 10),
-    },
-    {
-      key: 'amount',
-      label: 'Balance',
-      align: 'right',
-    },
-    {
-      key: 'decimals',
-      label: 'Decimals',
-      align: 'right',
-    },
-    {
-      key: 'tokenAccountAddress',
-      label: 'Token Account',
-      render: (row) => truncateMiddle(row.tokenAccountAddress, 12, 10),
-    },
-  ], []);
 
   const handleSubmit = methods.handleSubmit(async (values) => {
     if (submitting) {
@@ -138,10 +130,10 @@ function WalletDetailsPage() {
               </FormTextField>
               <FormTextField label="Wallet Address" name="walletAddress" />
               <FormTextField label="Label" name="label" />
-          <FormTextField label="Is Primary" name="isPrimary" select>
-            <MenuItem value={false}>No</MenuItem>
-            <MenuItem value={true}>Yes</MenuItem>
-          </FormTextField>
+              <FormTextField label="Is Primary" name="isPrimary" select>
+                <MenuItem value={false}>No</MenuItem>
+                <MenuItem value={true}>Yes</MenuItem>
+              </FormTextField>
               <Stack direction="row" spacing={1.5}>
                 <Button
                   color="warning"
@@ -189,12 +181,14 @@ function WalletDetailsPage() {
                 title="Unable to load token balances"
               />
             ) : (
-              <AppTable
-                columns={balanceColumns}
+              <WalletBalanceShowcase
+                balances={balances}
                 emptyDescription="No SPL token balances were found for this wallet on the current Solana RPC."
                 emptyTitle="No token balances"
-                pagination={null}
-                rows={balances}
+                showWalletAddress
+                tokenMetadataMap={tokenMetadataMap}
+                walletAddress={walletRecord?.walletAddress || ''}
+                walletLabel={walletRecord?.label || 'Wallet Holdings'}
               />
             )}
           </Stack>

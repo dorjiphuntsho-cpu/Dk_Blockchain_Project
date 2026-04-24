@@ -1,10 +1,11 @@
 const walletInclude = {
   user: {
-    select: {
-      id: true,
-      fullName: true,
-      email: true,
-      isActive: true,
+    include: {
+      roles: {
+        include: {
+          role: true,
+        },
+      },
     },
   },
 };

@@ -5,6 +5,7 @@ import {
   createAssociatedTokenAccountIdempotentInstruction,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
+import bs58 from 'bs58';
 import { getSolanaErrorMessage, logSolanaError } from '../../utils/solanaError';
 
 const TRANSFER_DISCRIMINATOR = Uint8Array.from([123, 124, 122, 222, 156, 180, 255, 72]);
@@ -134,6 +135,42 @@ function wrapWalletTransactionError(error, fallbackMessage) {
   }
 
   return wrappedError;
+}
+
+function isAlreadyProcessedError(error) {
+  const messages = [
+    error?.message,
+    error?.cause?.message,
+    error?.reason,
+    ...(Array.isArray(error?.logs) ? error.logs : []),
+    ...(Array.isArray(error?.transactionLogs) ? error.transactionLogs : []),
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase());
+
+  return messages.some((value) => value.includes('already been processed'));
+}
+
+function getSignedTransactionSignature(transaction) {
+  const signatureBytes = transaction?.signature;
+  return signatureBytes?.length ? bs58.encode(signatureBytes) : null;
+}
+
+async function sendSignedTransaction(connection, signedTransaction) {
+  try {
+    return await connection.sendRawTransaction(signedTransaction.serialize());
+  } catch (error) {
+    if (!isAlreadyProcessedError(error)) {
+      throw error;
+    }
+
+    const duplicateSignature = getSignedTransactionSignature(signedTransaction);
+    if (!duplicateSignature) {
+      throw error;
+    }
+
+    return duplicateSignature;
+  }
 }
 
 export async function buildMakerInitiationTransaction({ executionPayload, makerWalletAddress }) {
@@ -303,12 +340,12 @@ export async function signAndSendMakerTransaction({ connection, provider, reques
     transaction.partialSign(requestKeypair);
 
     let signature;
-    if (typeof provider.signTransaction === 'function') {
-      const signedTransaction = await provider.signTransaction(transaction);
-      signature = await connection.sendRawTransaction(signedTransaction.serialize());
-    } else if (typeof provider.signAndSendTransaction === 'function') {
+    if (typeof provider.signAndSendTransaction === 'function') {
       const response = await provider.signAndSendTransaction(transaction);
       signature = response?.signature;
+    } else if (typeof provider.signTransaction === 'function') {
+      const signedTransaction = await provider.signTransaction(transaction);
+      signature = await sendSignedTransaction(connection, signedTransaction);
     } else {
       throw new Error('Connected wallet does not support transaction signing.');
     }
@@ -437,12 +474,12 @@ export async function signAndSendWalletTransaction({ connection, provider, trans
     }
 
     let signature;
-    if (typeof provider.signTransaction === 'function') {
-      const signedTransaction = await provider.signTransaction(transaction);
-      signature = await connection.sendRawTransaction(signedTransaction.serialize());
-    } else if (typeof provider.signAndSendTransaction === 'function') {
+    if (typeof provider.signAndSendTransaction === 'function') {
       const response = await provider.signAndSendTransaction(transaction);
       signature = response?.signature;
+    } else if (typeof provider.signTransaction === 'function') {
+      const signedTransaction = await provider.signTransaction(transaction);
+      signature = await sendSignedTransaction(connection, signedTransaction);
     } else {
       throw new Error('Connected wallet does not support transaction signing.');
     }

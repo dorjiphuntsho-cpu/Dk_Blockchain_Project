@@ -6,6 +6,22 @@ const { walletInclude } = require('../models/wallet.model');
 const auditLogService = require('./auditLog.service');
 const solanaService = require('./solana.service');
 
+function serializeWallet(wallet) {
+  if (!wallet) {
+    return wallet;
+  }
+
+  return {
+    ...wallet,
+    user: wallet.user
+      ? {
+          ...wallet.user,
+          roles: (wallet.user.roles || []).map((item) => item.role.name),
+        }
+      : null,
+  };
+}
+
 async function ensureUserExists(userId, tx = prisma) {
   const user = await tx.user.findUnique({
     where: { id: userId },
@@ -66,11 +82,30 @@ async function createWallet(payload, actorUserId) {
 async function listWallets(query) {
   const { page, limit, skip } = getPagination(query);
   const orderBy = getSortOptions(query, ['createdAt', 'updatedAt', 'walletAddress'], { createdAt: 'desc' });
+  const requestedRoles = Array.from(new Set([
+    ...(query.role ? [query.role] : []),
+    ...(Array.isArray(query.roles) ? query.roles : []),
+  ]));
 
   const where = {
     ...(query.userId ? { userId: query.userId } : {}),
     ...(typeof query.isActive === 'boolean' ? { isActive: query.isActive } : {}),
     ...(typeof query.isPrimary === 'boolean' ? { isPrimary: query.isPrimary } : {}),
+    ...(requestedRoles.length
+      ? {
+          user: {
+            roles: {
+              some: {
+                role: {
+                  name: {
+                    in: requestedRoles,
+                  },
+                },
+              },
+            },
+          },
+        }
+      : {}),
     ...(query.walletAddress
       ? {
           walletAddress: {
@@ -93,7 +128,7 @@ async function listWallets(query) {
   ]);
 
   return {
-    items,
+    items: items.map(serializeWallet),
     pagination: buildPagination({ page, limit, totalItems }),
   };
 }
@@ -108,7 +143,7 @@ async function getWalletById(id) {
     throw new ApiError(404, 'Wallet not found');
   }
 
-  return wallet;
+  return serializeWallet(wallet);
 }
 
 async function getWalletTokenBalances(id) {
@@ -124,7 +159,7 @@ async function getWalletTokenBalances(id) {
   const balances = await solanaService.getWalletTokenBalances(wallet.walletAddress);
 
   return {
-    wallet,
+    wallet: serializeWallet(wallet),
     balances,
   };
 }
@@ -195,7 +230,7 @@ async function updateWallet(id, payload, actorUserId) {
     return updatedWallet;
   });
 
-  return wallet;
+  return serializeWallet(wallet);
 }
 
 async function updateWalletStatus(id, isActive, actorUserId) {
@@ -231,7 +266,7 @@ async function updateWalletStatus(id, isActive, actorUserId) {
     return updatedWallet;
   });
 
-  return wallet;
+  return serializeWallet(wallet);
 }
 
 module.exports = {

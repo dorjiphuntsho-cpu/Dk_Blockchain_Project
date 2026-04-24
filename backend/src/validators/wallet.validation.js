@@ -1,6 +1,7 @@
 const {
   optionalBooleanFromUnknown,
   optionalEnumQuerySchema,
+  optionalEnumArraySchema,
   optionalTrimmedQueryString,
   optionalUuidQuerySchema,
   optionalTrimmedString,
@@ -8,6 +9,7 @@ const {
   walletAddressSchema,
   z,
 } = require('../utils/validation');
+const { ROLE_NAMES } = require('../utils/enums');
 
 const createWalletSchema = z.object({
   body: z.object({
@@ -29,6 +31,8 @@ const listWalletsQuerySchema = z.object({
     userId: optionalUuidQuerySchema,
     isActive: optionalBooleanFromUnknown,
     isPrimary: optionalBooleanFromUnknown,
+    role: optionalEnumQuerySchema(z.enum(Object.values(ROLE_NAMES))),
+    roles: optionalEnumArraySchema(z.enum(Object.values(ROLE_NAMES))),
     walletAddress: optionalTrimmedQueryString,
     sortBy: optionalEnumQuerySchema(z.enum(['createdAt', 'updatedAt', 'walletAddress'])),
     sortOrder: optionalEnumQuerySchema(z.enum(['asc', 'desc'])),

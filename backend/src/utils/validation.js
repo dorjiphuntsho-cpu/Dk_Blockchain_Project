@@ -16,6 +16,17 @@ const optionalTrimmedString = trimmedString.min(1).optional();
 const optionalUuidQuerySchema = z.preprocess(emptyStringToUndefined, uuidSchema.optional());
 const optionalTrimmedQueryString = z.preprocess(emptyStringToUndefined, trimmedString.optional());
 const optionalEnumQuerySchema = (enumSchema) => z.preprocess(emptyStringToUndefined, enumSchema.optional());
+const optionalEnumArraySchema = (enumSchema) => z.preprocess((value) => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  return [value];
+}, z.array(enumSchema).optional());
 
 const booleanFromUnknown = z.preprocess((value) => {
   if (typeof value === 'boolean') {
@@ -71,6 +82,7 @@ module.exports = {
   optionalUuidQuerySchema,
   optionalTrimmedQueryString,
   optionalEnumQuerySchema,
+  optionalEnumArraySchema,
   booleanFromUnknown,
   optionalBooleanFromUnknown,
   numericStringSchema,

@@ -1,20 +1,27 @@
-import { Alert, Card, CardContent, Stack, Typography } from '@mui/material';
+import { Alert, Card, CardContent, Chip, Stack } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 
-import AppTable from '../../components/common/AppTable';
 import ErrorState from '../../components/common/ErrorState';
 import LoadingScreen from '../../components/common/LoadingScreen';
 import PageHeader from '../../components/common/PageHeader';
+import WalletBalanceShowcase from '../../components/wallet/WalletBalanceShowcase';
 import useAuth from '../../hooks/useAuth';
+import { managedTokensApi } from '../../modules/solana/managedTokens.api';
 import { walletsApi } from '../../modules/wallets/wallets.api';
-import { truncateMiddle } from '../../utils/format';
 
 function MyWalletsPage() {
   const { user, hydrateUser } = useAuth();
   const [wallets, setWallets] = useState([]);
-  const [rows, setRows] = useState([]);
+  const [walletBalanceGroups, setWalletBalanceGroups] = useState([]);
+  const [tokenMetadataMap, setTokenMetadataMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const summary = useMemo(() => ({
+    activeWallets: wallets.length,
+    walletsWithBalances: walletBalanceGroups.filter(({ balances }) => balances.length).length,
+    holdings: walletBalanceGroups.reduce((count, { balances }) => count + balances.length, 0),
+  }), [walletBalanceGroups, wallets.length]);
 
   useEffect(() => {
     async function load() {
@@ -32,9 +39,21 @@ function MyWalletsPage() {
           userId: user.id,
           isActive: true,
         });
+        const managedTokenResponse = await managedTokensApi.list({ page: 1, limit: 200 });
 
         const ownedWallets = walletResponse.data.items || [];
         setWallets(ownedWallets);
+        setTokenMetadataMap(
+          Object.fromEntries(
+            (managedTokenResponse.data.items || []).map((token) => [
+              token.mintAddress,
+              {
+                name: token.name || token.onChain?.metadata?.name || null,
+                symbol: token.symbol || token.onChain?.metadata?.symbol || null,
+              },
+            ]),
+          ),
+        );
 
         const balanceResponses = await Promise.all(
           ownedWallets.map(async (wallet) => {
@@ -46,31 +65,7 @@ function MyWalletsPage() {
           }),
         );
 
-        const nextRows = balanceResponses.flatMap(({ wallet, balances }) => {
-          if (!balances.length) {
-            return [{
-              id: `${wallet.id}-empty`,
-              walletLabel: wallet.label || 'Unlabelled wallet',
-              walletAddress: wallet.walletAddress,
-              mintAddress: '-',
-              amount: '0',
-              decimals: '-',
-              tokenAccountAddress: '-',
-            }];
-          }
-
-          return balances.map((balance) => ({
-            id: `${wallet.id}-${balance.tokenAccountAddress}`,
-            walletLabel: wallet.label || 'Unlabelled wallet',
-            walletAddress: wallet.walletAddress,
-            mintAddress: balance.mintAddress,
-            amount: balance.amount,
-            decimals: balance.decimals,
-            tokenAccountAddress: balance.tokenAccountAddress,
-          }));
-        });
-
-        setRows(nextRows);
+        setWalletBalanceGroups(balanceResponses);
         await hydrateUser().catch(() => null);
       } catch (loadError) {
         setError(loadError.message || 'Unable to load your wallet balances.');
@@ -81,43 +76,6 @@ function MyWalletsPage() {
 
     load();
   }, [user?.id]);
-
-  const columns = useMemo(() => [
-    {
-      key: 'walletLabel',
-      label: 'Wallet',
-      render: (row) => (
-        <Stack spacing={0.25}>
-          <Typography sx={{ fontWeight: 700 }} variant="body2">{row.walletLabel}</Typography>
-          <Typography color="text.secondary" variant="caption">
-            {truncateMiddle(row.walletAddress, 12, 10)}
-          </Typography>
-        </Stack>
-      ),
-    },
-    {
-      key: 'mintAddress',
-      label: 'Mint',
-      render: (row) => (row.mintAddress === '-' ? '-' : truncateMiddle(row.mintAddress, 12, 10)),
-    },
-    {
-      key: 'amount',
-      label: 'Balance',
-      align: 'right',
-    },
-    {
-      key: 'decimals',
-      label: 'Decimals',
-      align: 'right',
-    },
-    {
-      key: 'tokenAccountAddress',
-      label: 'Token Account',
-      render: (row) => (
-        row.tokenAccountAddress === '-' ? '-' : truncateMiddle(row.tokenAccountAddress, 12, 10)
-      ),
-    },
-  ], []);
 
   if (loading) {
     return <LoadingScreen message="Loading your wallets..." />;
@@ -145,15 +103,27 @@ function MyWalletsPage() {
           <CardContent>
             <Stack spacing={2}>
               <Alert severity="info">
-                Balances come from the connected Solana RPC and reflect the current local-validator state.
+                Balances come from the connected Solana RPC and reflect the current network state for your linked wallets.
               </Alert>
-              <AppTable
-                columns={columns}
-                emptyDescription="No token balances were found for your wallets."
-                emptyTitle="No token balances"
-                pagination={null}
-                rows={rows}
-              />
+              <Stack direction="row" flexWrap="wrap" gap={1}>
+                <Chip label={`${summary.activeWallets} active wallets`} size="small" />
+                <Chip label={`${summary.walletsWithBalances} funded wallets`} size="small" variant="outlined" />
+                <Chip label={`${summary.holdings} token holdings`} size="small" variant="outlined" />
+              </Stack>
+              <Stack spacing={3}>
+                {walletBalanceGroups.map(({ wallet, balances }) => (
+                  <WalletBalanceShowcase
+                    key={wallet.id}
+                    balances={balances}
+                    emptyDescription="No SPL token balances were found for this wallet on the current Solana RPC."
+                    emptyTitle="No token balances"
+                    showWalletAddress
+                    tokenMetadataMap={tokenMetadataMap}
+                    walletAddress={wallet.walletAddress}
+                    walletLabel={wallet.label || 'Unlabelled wallet'}
+                  />
+                ))}
+              </Stack>
             </Stack>
           </CardContent>
         </Card>

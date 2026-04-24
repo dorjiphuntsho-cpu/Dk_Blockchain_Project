@@ -729,6 +729,17 @@ export const mockAdapter = {
           wallets = wallets.filter((wallet) => wallet.userId === query.userId);
         }
 
+        const requestedRoles = Array.from(new Set([
+          ...(query.role ? [query.role] : []),
+          ...(Array.isArray(query.roles) ? query.roles : []),
+        ]));
+
+        if (requestedRoles.length) {
+          wallets = wallets.filter((wallet) =>
+            wallet.user?.roles?.some((role) => requestedRoles.includes(role)),
+          );
+        }
+
         if (query.walletAddress) {
           const search = query.walletAddress.toLowerCase();
           wallets = wallets.filter((wallet) => wallet.walletAddress.toLowerCase().includes(search));

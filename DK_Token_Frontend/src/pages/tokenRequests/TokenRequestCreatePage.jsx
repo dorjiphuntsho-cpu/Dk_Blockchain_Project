@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Button, Card, CardContent, MenuItem, Stack, Typography } from '@mui/material';
+import { Alert, Button, Card, CardContent, Chip, MenuItem, Stack, Typography } from '@mui/material';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 import useSolanaWallet from '../../hooks/useSolanaWallet';
+import useAuth from '../../hooks/useAuth';
 
 import PageHeader from '../../components/common/PageHeader';
 import ErrorState from '../../components/common/ErrorState';
@@ -15,7 +16,7 @@ import { buildExplorerTransactionUrl, buildMakerInitiationTransaction, signAndSe
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
 import { tokenRequestSchema } from '../../modules/tokenRequests/tokenRequests.schemas';
 import { walletsApi } from '../../modules/wallets/wallets.api';
-import { REQUEST_TYPES } from '../../utils/constants';
+import { REQUEST_TYPES, ROLES } from '../../utils/constants';
 import { getErrorMessage } from '../../utils/error';
 import { truncateMiddle } from '../../utils/format';
 
@@ -23,6 +24,7 @@ function TokenRequestCreatePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
+  const { user } = useAuth();
   const {
     address: connectedWalletAddress,
     connect: connectWallet,
@@ -31,10 +33,12 @@ function TokenRequestCreatePage() {
     provider: walletProvider,
   } = useSolanaWallet();
   const draftRequest = location.state?.request || null;
-  const [wallets, setWallets] = useState([]);
+  const [makerWallets, setMakerWallets] = useState([]);
   const [managedTokens, setManagedTokens] = useState([]);
+  const [sourceWalletBalances, setSourceWalletBalances] = useState([]);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitLockRef = useRef(false);
   const methods = useForm({
     defaultValues: {
       requestType: draftRequest?.requestType || REQUEST_TYPES.MINT,
@@ -48,6 +52,35 @@ function TokenRequestCreatePage() {
   });
   const requestType = useWatch({ control: methods.control, name: 'requestType' });
 
+  const ownActiveWallets = useMemo(
+    () => (user?.wallets || []).filter((wallet) => wallet.isActive),
+    [user?.wallets],
+  );
+
+  const isMakerWallet = (wallet) => wallet?.isActive && wallet.user?.roles?.includes(ROLES.MAKER);
+
+  const selectedSourceWallet = useMemo(() => {
+    if (!ownActiveWallets.length) {
+      return null;
+    }
+
+    if (draftRequest?.sourceWalletId) {
+      const draftWallet = ownActiveWallets.find((wallet) => wallet.id === draftRequest.sourceWalletId);
+      if (draftWallet) {
+        return draftWallet;
+      }
+    }
+
+    if (connectedWalletAddress) {
+      const connectedWallet = ownActiveWallets.find((wallet) => wallet.walletAddress === connectedWalletAddress);
+      if (connectedWallet) {
+        return connectedWallet;
+      }
+    }
+
+    return ownActiveWallets.find((wallet) => wallet.isPrimary) || ownActiveWallets[0];
+  }, [connectedWalletAddress, draftRequest?.sourceWalletId, ownActiveWallets]);
+
   useEffect(() => {
     async function loadFormOptions() {
       try {
@@ -57,7 +90,7 @@ function TokenRequestCreatePage() {
           managedTokensApi.list({ page: 1, limit: 100 }),
         ]);
 
-        setWallets(walletResponse.data.items);
+        setMakerWallets(walletResponse.data.items);
         setManagedTokens(tokenResponse.data.items);
       } catch (loadError) {
         setError(loadError.message || 'Unable to load wallets and managed tokens.');
@@ -67,13 +100,61 @@ function TokenRequestCreatePage() {
     loadFormOptions();
   }, []);
 
+  useEffect(() => {
+    async function loadSourceWalletBalances() {
+      if (!selectedSourceWallet || ![REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType)) {
+        setSourceWalletBalances([]);
+        return;
+      }
+
+      try {
+        const response = await walletsApi.getTokenBalances(selectedSourceWallet.id);
+        setSourceWalletBalances(response.data?.balances || []);
+      } catch (loadError) {
+        setSourceWalletBalances([]);
+        setError(loadError.message || 'Unable to load wallet token balances.');
+      }
+    }
+
+    loadSourceWalletBalances();
+  }, [requestType, selectedSourceWallet]);
+
   const fieldVisibility = useMemo(() => ({
-    source: requestType === REQUEST_TYPES.TRANSFER || requestType === REQUEST_TYPES.BURN,
     destination: requestType === REQUEST_TYPES.MINT || requestType === REQUEST_TYPES.TRANSFER,
   }), [requestType]);
 
+  const availableManagedTokens = useMemo(() => {
+    if (![REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType)) {
+      return managedTokens;
+    }
+
+    const positiveBalanceMintAddresses = new Set(
+      sourceWalletBalances
+        .filter((balance) => Number(balance.rawAmount || balance.amount || 0) > 0)
+        .map((balance) => balance.mintAddress),
+    );
+
+    return managedTokens.filter((token) => positiveBalanceMintAddresses.has(token.mintAddress));
+  }, [managedTokens, requestType, sourceWalletBalances]);
+
+  const destinationWalletOptions = useMemo(() => {
+    const ownSourceWalletId = selectedSourceWallet?.id || null;
+
+    return makerWallets.filter((wallet) => {
+      if (!isMakerWallet(wallet)) {
+        return false;
+      }
+
+      if (requestType === REQUEST_TYPES.TRANSFER && ownSourceWalletId && wallet.id === ownSourceWalletId) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [makerWallets, requestType, selectedSourceWallet?.id]);
+
   const tokenOptions = useMemo(() => {
-    const options = [...managedTokens];
+    const options = [...availableManagedTokens];
 
     if (
       draftRequest?.tokenMintAddress
@@ -87,23 +168,51 @@ function TokenRequestCreatePage() {
     }
 
     return options;
-  }, [draftRequest?.decimals, draftRequest?.tokenMintAddress, managedTokens]);
+  }, [availableManagedTokens, draftRequest?.decimals, draftRequest?.tokenMintAddress]);
 
   useEffect(() => {
-    if (!fieldVisibility.source) {
+    if ([REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType)) {
+      methods.setValue('sourceWalletId', selectedSourceWallet?.id || '');
+    } else {
       methods.setValue('sourceWalletId', '');
     }
 
     if (!fieldVisibility.destination) {
       methods.setValue('destinationWalletId', '');
     }
-  }, [fieldVisibility.destination, fieldVisibility.source, methods]);
+  }, [fieldVisibility.destination, methods, requestType, selectedSourceWallet?.id]);
+
+  useEffect(() => {
+    const selectedTokenMintAddress = methods.getValues('tokenMintAddress');
+    if (
+      selectedTokenMintAddress
+      && !tokenOptions.some((token) => token.mintAddress === selectedTokenMintAddress)
+    ) {
+      methods.setValue('tokenMintAddress', '');
+    }
+
+    const selectedDestinationWalletId = methods.getValues('destinationWalletId');
+    if (
+      selectedDestinationWalletId
+      && !destinationWalletOptions.some((wallet) => wallet.id === selectedDestinationWalletId)
+    ) {
+      methods.setValue('destinationWalletId', '');
+    }
+  }, [destinationWalletOptions, methods, tokenOptions]);
+
+  const sourceWalletDisplay = selectedSourceWallet
+    ? selectedSourceWallet.label || truncateMiddle(selectedSourceWallet.walletAddress, 12, 10)
+    : 'No active wallet linked to your account';
+  const sourceWalletTokenCount = sourceWalletBalances
+    .filter((balance) => Number(balance.rawAmount || balance.amount || 0) > 0)
+    .length;
 
   async function save(values, submitForApproval = false) {
-    if (isSubmitting) {
+    if (submitLockRef.current) {
       return;
     }
 
+    submitLockRef.current = true;
     setIsSubmitting(true);
     let savedRequestId = null;
 
@@ -197,6 +306,7 @@ function TokenRequestCreatePage() {
 
       enqueueSnackbar(errorMessage, { variant: 'error' });
     } finally {
+      submitLockRef.current = false;
       setIsSubmitting(false);
     }
   }
@@ -210,9 +320,30 @@ function TokenRequestCreatePage() {
       {error ? <ErrorState description={error} onAction={() => window.location.reload()} /> : null}
       <Card>
         <CardContent>
-          <Typography color="text.secondary" sx={{ mb: 3 }}>
-            The form changes automatically for MINT, TRANSFER, and BURN workflows.
-          </Typography>
+          <Stack spacing={1.5} sx={{ mb: 3 }}>
+            <Typography color="text.secondary">
+              The form changes automatically for MINT, TRANSFER, and BURN workflows, and now limits wallets and tokens to the current maker flow.
+            </Typography>
+            <Stack direction="row" flexWrap="wrap" gap={1}>
+              <Chip label={`Flow: ${requestType}`} size="small" />
+              {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && selectedSourceWallet ? (
+                <Chip label={`Source: ${sourceWalletDisplay}`} size="small" variant="outlined" />
+              ) : null}
+              {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && selectedSourceWallet ? (
+                <Chip label={`${sourceWalletTokenCount} token holdings`} size="small" variant="outlined" />
+              ) : null}
+            </Stack>
+          </Stack>
+          {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && !selectedSourceWallet ? (
+            <Alert severity="warning" sx={{ mb: 3 }}>
+              Your account needs an active maker wallet before you can create transfer or burn requests.
+            </Alert>
+          ) : null}
+          {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && selectedSourceWallet && connectedWalletAddress && connectedWalletAddress !== selectedSourceWallet.walletAddress ? (
+            <Alert severity="info" sx={{ mb: 3 }}>
+              Connect the wallet {selectedSourceWallet.walletAddress} before signing this request.
+            </Alert>
+          ) : null}
           <FormProvider {...methods}>
             <Stack component="form" onSubmit={methods.handleSubmit((values) => save(values))} spacing={2.5}>
               <FormTextField label="Request Type" name="requestType" select>
@@ -226,35 +357,56 @@ function TokenRequestCreatePage() {
                 select
                 disabled={!tokenOptions.length}
                 helperText={tokenOptions.length
-                  ? 'Select from token mints already created in the portal.'
-                  : 'Create a managed token first before creating a request.'}
+                  ? [REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType)
+                    ? 'Only tokens currently held in your source wallet are shown.'
+                    : 'Select from token mints already created in the portal.'
+                  : [REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType)
+                    ? 'No managed tokens with balance were found in your source wallet.'
+                    : 'Create a managed token first before creating a request.'}
               >
                 {tokenOptions.map((token) => (
                   <MenuItem key={token.id || token.mintAddress} value={token.mintAddress}>
                     {token.name || token.onChain?.metadata?.name || truncateMiddle(token.mintAddress, 12, 10)}
-                    {(token.symbol || token.onChain?.metadata?.symbol) ? ` • ${token.symbol || token.onChain?.metadata?.symbol}` : ''}
-                    {typeof token.decimals === 'number' ? ` • ${token.decimals} decimals` : ''}
+                    {(token.symbol || token.onChain?.metadata?.symbol) ? ` - ${token.symbol || token.onChain?.metadata?.symbol}` : ''}
+                    {typeof token.decimals === 'number' ? ` - ${token.decimals} decimals` : ''}
                   </MenuItem>
                 ))}
               </FormTextField>
+              {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && selectedSourceWallet && !tokenOptions.length ? (
+                <Alert severity="info">
+                  No transferable managed tokens were found in the selected source wallet. Mint tokens to this wallet first or use a wallet that already holds the token.
+                </Alert>
+              ) : null}
               <FormAmountField label="Amount" name="amount" />
-              {fieldVisibility.source ? (
-                <FormTextField label="Source Wallet" name="sourceWalletId" select>
-                  {wallets.map((wallet) => (
+              {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) ? (
+                <FormTextField
+                  label="Source Wallet"
+                  name="sourceWalletId"
+                  helperText="Source wallet is fixed to your active maker wallet."
+                  InputProps={{ readOnly: true }}
+                  value={sourceWalletDisplay}
+                />
+              ) : null}
+              {fieldVisibility.destination ? (
+                <FormTextField
+                  label="Destination Wallet"
+                  name="destinationWalletId"
+                  select
+                  disabled={!destinationWalletOptions.length}
+                  helperText="Only wallets belonging to maker users are available."
+                >
+                  {destinationWalletOptions.map((wallet) => (
                     <MenuItem key={wallet.id} value={wallet.id}>
                       {wallet.label || wallet.walletAddress}
+                      {wallet.user?.fullName ? ` - ${wallet.user.fullName}` : ''}
                     </MenuItem>
                   ))}
                 </FormTextField>
               ) : null}
-              {fieldVisibility.destination ? (
-                <FormTextField label="Destination Wallet" name="destinationWalletId" select>
-                  {wallets.map((wallet) => (
-                    <MenuItem key={wallet.id} value={wallet.id}>
-                      {wallet.label || wallet.walletAddress}
-                    </MenuItem>
-                  ))}
-                </FormTextField>
+              {fieldVisibility.destination && !destinationWalletOptions.length ? (
+                <Alert severity="warning">
+                  No eligible maker destination wallets are available right now. Check that destination users have active wallet records and the `MAKER` role.
+                </Alert>
               ) : null}
               <FormTextField label="Remarks" multiline minRows={3} name="remarks" />
               <Stack direction="row" spacing={1.5}>
