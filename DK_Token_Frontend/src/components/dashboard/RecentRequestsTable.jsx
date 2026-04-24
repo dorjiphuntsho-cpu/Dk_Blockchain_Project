@@ -1,4 +1,3 @@
-import { Link, Typography } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 
 import AppTable from '../common/AppTable';
@@ -16,13 +15,9 @@ function RecentRequestsTable({ rows = [], onRowClick }) {
           label: 'Request ID',
           width: 170,
           render: (row) => (
-            <Link
-              component={RouterLink}
-              sx={{ fontWeight: 700, textDecoration: 'none' }}
-              to={`/token-requests/${row.id}`}
-            >
+            <RouterLink className="font-medium text-white hover:text-zinc-200" to={`/token-requests/${row.id}`}>
               {truncateMiddle(row.id, 10, 5)}
-            </Link>
+            </RouterLink>
           ),
         },
         {
@@ -48,11 +43,7 @@ function RecentRequestsTable({ rows = [], onRowClick }) {
           key: 'createdAt',
           label: 'Created',
           width: 180,
-          render: (row) => (
-            <Typography color="text.secondary" variant="body2">
-              {formatDateTime(row.createdAt)}
-            </Typography>
-          ),
+          render: (row) => <span className="text-sm text-zinc-500">{formatDateTime(row.createdAt)}</span>,
         },
       ]}
       emptyDescription="Recent request activity will appear here once token operations are created."

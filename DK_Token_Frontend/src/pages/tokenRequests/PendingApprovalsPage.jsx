@@ -1,16 +1,17 @@
-import { Button, Link, Stack, TextField } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
-import useSolanaWallet from '../../hooks/useSolanaWallet';
 
 import AppDialog from '../../components/common/AppDialog';
 import AppTable from '../../components/common/AppTable';
 import ErrorState from '../../components/common/ErrorState';
 import LoadingScreen from '../../components/common/LoadingScreen';
 import PageHeader from '../../components/common/PageHeader';
+import Button from '../../components/ui/Button';
+import Textarea from '../../components/ui/Textarea';
 import StatusChip from '../../components/common/StatusChip';
 import TypeChip from '../../components/common/TypeChip';
+import useSolanaWallet from '../../hooks/useSolanaWallet';
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
 import { rejectionSchema } from '../../modules/tokenRequests/tokenRequests.schemas';
 import {
@@ -58,26 +59,31 @@ function PendingApprovalsPage() {
       key: 'id',
       label: 'Request ID',
       render: (row) => (
-        <Link component={RouterLink} sx={{ fontWeight: 700, textDecoration: 'none' }} to={`/token-requests/${row.id}`}>
+        <RouterLink className="font-medium text-sky-400 hover:text-sky-300" to={`/token-requests/${row.id}`}>
           {truncateMiddle(row.id, 10, 5)}
-        </Link>
+        </RouterLink>
       ),
     },
     { key: 'requestType', label: 'Type', render: (row) => <TypeChip value={row.requestType} /> },
     { key: 'makerUser', label: 'Maker', render: (row) => row.makerUser?.fullName || '-' },
     { key: 'amount', label: 'Amount', align: 'right', render: (row) => formatAmount(row.amount) },
     {
+      key: 'status',
+      label: 'Status',
+      render: () => <StatusChip value="PENDING_APPROVAL" />,
+    },
+    {
       key: 'actions',
       label: 'Actions',
       align: 'right',
       disableRowClick: true,
       render: (row) => (
-        <Stack direction="row" justifyContent="flex-end" spacing={1}>
-          <Button onClick={() => navigate(`/token-requests/${row.id}`)} size="small" variant="text">Details</Button>
-          <Button color="error" onClick={() => setSelectedRequest(row)} size="small" variant="outlined">
+        <div className="flex justify-end gap-2">
+          <Button onClick={() => navigate(`/token-requests/${row.id}`)} size="sm" variant="ghost">Details</Button>
+          <Button onClick={() => setSelectedRequest(row)} size="sm" variant="danger">
             Reject
           </Button>
-        </Stack>
+        </div>
       ),
     },
   ], [navigate]);
@@ -91,16 +97,15 @@ function PendingApprovalsPage() {
   }
 
   return (
-    <Stack spacing={3}>
+    <div className="space-y-6">
       <PageHeader subtitle="Review pending maker requests." title="Pending Approvals" />
       <AppTable columns={columns} onRowClick={(row) => navigate(`/token-requests/${row.id}`)} pagination={null} rows={requests} />
 
       <AppDialog
-        actions={
+        actions={(
           <>
-            <Button disabled={rejectingRequest} onClick={() => setSelectedRequest(null)}>Cancel</Button>
+            <Button disabled={rejectingRequest} onClick={() => setSelectedRequest(null)} variant="outline">Cancel</Button>
             <Button
-              color="error"
               disabled={rejectingRequest}
               onClick={async () => {
                 try {
@@ -149,26 +154,27 @@ function PendingApprovalsPage() {
                   setRejectingRequest(false);
                 }
               }}
-              variant="contained"
+              variant="danger"
             >
               {rejectingRequest ? 'Processing...' : 'Confirm Reject'}
             </Button>
           </>
-        }
+        )}
         onClose={() => setSelectedRequest(null)}
         open={Boolean(selectedRequest)}
         title="Reject Request"
       >
-        <TextField
-          fullWidth
-          label="Rejection Reason"
-          multiline
-          minRows={3}
-          onChange={(event) => setRejectionReason(event.target.value)}
-          value={rejectionReason}
-        />
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-zinc-200" htmlFor="rejectionReason">Rejection Reason</label>
+          <Textarea
+            id="rejectionReason"
+            onChange={(event) => setRejectionReason(event.target.value)}
+            rows={3}
+            value={rejectionReason}
+          />
+        </div>
       </AppDialog>
-    </Stack>
+    </div>
   );
 }
 

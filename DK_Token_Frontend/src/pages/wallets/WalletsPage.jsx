@@ -1,4 +1,3 @@
-import { Button, Chip, Link, MenuItem, Stack, TextField } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
@@ -9,6 +8,10 @@ import ErrorState from '../../components/common/ErrorState';
 import LoadingScreen from '../../components/common/LoadingScreen';
 import PageHeader from '../../components/common/PageHeader';
 import SearchFilters from '../../components/common/SearchFilters';
+import Badge from '../../components/ui/Badge';
+import Button from '../../components/ui/Button';
+import Input from '../../components/ui/Input';
+import Select from '../../components/ui/Select';
 import usePagination from '../../hooks/usePagination';
 import { usersApi } from '../../modules/users/users.api';
 import { walletsApi } from '../../modules/wallets/wallets.api';
@@ -18,7 +21,7 @@ import { truncateMiddle } from '../../utils/format';
 function WalletsPage() {
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
-  const { page, limit, setPage, setLimit, paginationQuery } = usePagination();
+  const { setPage, setLimit, paginationQuery } = usePagination();
   const [filters, setFilters] = useState({ walletAddress: '', userId: '', isActive: '', isPrimary: '' });
   const [wallets, setWallets] = useState([]);
   const [users, setUsers] = useState([]);
@@ -56,9 +59,9 @@ function WalletsPage() {
       key: 'walletAddress',
       label: 'Wallet Address',
       render: (row) => (
-        <Link component={RouterLink} sx={{ fontWeight: 700, textDecoration: 'none' }} to={`/wallets/${row.id}`}>
+        <RouterLink className="font-medium text-sky-400 hover:text-sky-300" to={`/wallets/${row.id}`}>
           {truncateMiddle(row.walletAddress, 8, 6)}
-        </Link>
+        </RouterLink>
       ),
     },
     { key: 'user', label: 'User', render: (row) => row.user?.fullName || '-' },
@@ -66,28 +69,12 @@ function WalletsPage() {
     {
       key: 'isPrimary',
       label: 'Primary',
-      render: (row) => (
-        <Chip
-          label={row.isPrimary ? 'Primary' : 'Standard'}
-          sx={{
-            backgroundColor: row.isPrimary ? 'primary.light' : 'grey.100',
-            color: row.isPrimary ? 'primary.dark' : 'text.secondary',
-          }}
-        />
-      ),
+      render: (row) => <Badge tone={row.isPrimary ? 'blue' : 'slate'}>{row.isPrimary ? 'Primary' : 'Standard'}</Badge>,
     },
     {
       key: 'isActive',
       label: 'Status',
-      render: (row) => (
-        <Chip
-          label={row.isActive ? 'Active' : 'Inactive'}
-          sx={{
-            backgroundColor: row.isActive ? 'success.light' : 'grey.200',
-            color: row.isActive ? 'success.main' : 'text.secondary',
-          }}
-        />
-      ),
+      render: (row) => <Badge tone={row.isActive ? 'emerald' : 'slate'}>{row.isActive ? 'Active' : 'Inactive'}</Badge>,
     },
     {
       key: 'actions',
@@ -95,12 +82,12 @@ function WalletsPage() {
       align: 'right',
       disableRowClick: true,
       render: (row) => (
-        <Stack direction="row" justifyContent="flex-end" spacing={1}>
-          <Button onClick={() => navigate(`/wallets/${row.id}`)} size="small" variant="text">View</Button>
-          <Button color={row.isActive ? 'error' : 'success'} onClick={() => setSelectedWallet(row)} size="small" variant="outlined">
+        <div className="flex justify-end gap-2">
+          <Button onClick={() => navigate(`/wallets/${row.id}`)} size="sm" variant="ghost">View</Button>
+          <Button onClick={() => setSelectedWallet(row)} size="sm" variant={row.isActive ? 'danger' : 'secondary'}>
             {row.isActive ? 'Deactivate' : 'Activate'}
           </Button>
-        </Stack>
+        </div>
       ),
     },
   ], [navigate]);
@@ -114,63 +101,71 @@ function WalletsPage() {
   }
 
   return (
-    <Stack spacing={3}>
+    <div className="space-y-6">
       <PageHeader
         action={{ label: 'Create Wallet', onClick: () => navigate('/wallets/new') }}
         subtitle="Manage user-linked wallets and primary wallet selection."
         title="Wallets"
       />
 
-      <SearchFilters>
-        <TextField
-          label="Search address"
-          onChange={(event) => setFilters((current) => ({ ...current, walletAddress: event.target.value }))}
-          value={filters.walletAddress}
-        />
-        <TextField
-          label="User"
-          onChange={(event) => setFilters((current) => ({ ...current, userId: event.target.value }))}
-          select
-          value={filters.userId}
-        >
-          <MenuItem value="">All</MenuItem>
-          {users.map((user) => (
-            <MenuItem key={user.id} value={user.id}>{user.fullName}</MenuItem>
-          ))}
-        </TextField>
-        <TextField
-          label="Status"
-          onChange={(event) => setFilters((current) => ({ ...current, isActive: event.target.value }))}
-          select
-          value={filters.isActive}
-        >
-          <MenuItem value="">All</MenuItem>
-          <MenuItem value="true">Active</MenuItem>
-          <MenuItem value="false">Inactive</MenuItem>
-        </TextField>
-        <TextField
-          label="Primary"
-          onChange={(event) => setFilters((current) => ({ ...current, isPrimary: event.target.value }))}
-          select
-          value={filters.isPrimary}
-        >
-          <MenuItem value="">All</MenuItem>
-          <MenuItem value="true">Primary</MenuItem>
-          <MenuItem value="false">Non-primary</MenuItem>
-        </TextField>
-        <Button onClick={() => setFilters({ walletAddress: '', userId: '', isActive: '', isPrimary: '' })} variant="outlined">
-          Reset Filters
-        </Button>
+      <SearchFilters
+        actions={(
+          <Button onClick={() => setFilters({ walletAddress: '', userId: '', isActive: '', isPrimary: '' })} variant="outline">
+            Reset Filters
+          </Button>
+        )}
+      >
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-zinc-200">Search address</span>
+          <Input
+            onChange={(event) => setFilters((current) => ({ ...current, walletAddress: event.target.value }))}
+            value={filters.walletAddress}
+          />
+        </label>
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-zinc-200">User</span>
+          <Select
+            onChange={(event) => setFilters((current) => ({ ...current, userId: event.target.value }))}
+            value={filters.userId}
+          >
+            <option value="">All</option>
+            {users.map((user) => (
+              <option key={user.id} value={user.id}>{user.fullName}</option>
+            ))}
+          </Select>
+        </label>
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-zinc-200">Status</span>
+          <Select
+            onChange={(event) => setFilters((current) => ({ ...current, isActive: event.target.value }))}
+            value={filters.isActive}
+          >
+            <option value="">All</option>
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+          </Select>
+        </label>
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-zinc-200">Primary</span>
+          <Select
+            onChange={(event) => setFilters((current) => ({ ...current, isPrimary: event.target.value }))}
+            value={filters.isPrimary}
+          >
+            <option value="">All</option>
+            <option value="true">Primary</option>
+            <option value="false">Non-primary</option>
+          </Select>
+        </label>
       </SearchFilters>
 
       <AppTable
         columns={columns}
         error={error}
         loading={loading}
-        onRowClick={(row) => navigate(`/wallets/${row.id}`)}
         onPageChange={setPage}
-        onRowsPerPageChange={setLimit}
         onRetry={loadWallets}
+        onRowClick={(row) => navigate(`/wallets/${row.id}`)}
+        onRowsPerPageChange={setLimit}
         pagination={pagination}
         rows={wallets}
       />
@@ -196,7 +191,7 @@ function WalletsPage() {
         open={Boolean(selectedWallet)}
         title="Confirm Wallet Status Change"
       />
-    </Stack>
+    </div>
   );
 }
 

@@ -1,6 +1,5 @@
-import { Button, Stack, Typography } from '@mui/material';
-
 import AppDialog from './AppDialog';
+import Button from '../ui/Button';
 
 function ConfirmDialog({
   open,
@@ -15,8 +14,8 @@ function ConfirmDialog({
     <AppDialog
       actions={
         <>
-          <Button disabled={isLoading} onClick={onClose}>Cancel</Button>
-          <Button color="error" disabled={isLoading} onClick={onConfirm} variant="contained">
+          <Button disabled={isLoading} onClick={onClose} variant="outline">Cancel</Button>
+          <Button disabled={isLoading} onClick={onConfirm} variant="danger">
             {isLoading ? 'Processing...' : confirmLabel}
           </Button>
         </>
@@ -25,9 +24,9 @@ function ConfirmDialog({
       open={open}
       title={title}
     >
-      <Stack spacing={1.5}>
-        <Typography color="text.secondary">{description}</Typography>
-      </Stack>
+      <div className="space-y-2">
+        <p className="text-sm leading-6 text-zinc-400">{description}</p>
+      </div>
     </AppDialog>
   );
 }

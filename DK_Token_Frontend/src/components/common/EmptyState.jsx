@@ -1,24 +1,15 @@
-import { Button, Paper, Stack, Typography } from '@mui/material';
+import Button from '../ui/Button';
+import Card from '../ui/Card';
 
 function EmptyState({ title, description, actionLabel, onAction }) {
   return (
-    <Paper
-      variant="outlined"
-      sx={{
-        p: { xs: 4, md: 5 },
-        textAlign: 'center',
-        backgroundColor: 'background.paper',
-        boxShadow: 'none',
-      }}
-    >
-      <Stack alignItems="center" spacing={1.5}>
-        <Typography variant="h6">{title}</Typography>
-        <Typography color="text.secondary" sx={{ maxWidth: 520 }}>
-          {description}
-        </Typography>
-        {actionLabel ? <Button variant="contained" onClick={onAction}>{actionLabel}</Button> : null}
-      </Stack>
-    </Paper>
+    <Card className="border-dashed text-center" padded={false}>
+      <div className="flex flex-col items-center gap-3 px-6 py-10 md:px-10 md:py-12">
+        <h3 className="text-lg font-semibold text-white">{title}</h3>
+        <p className="max-w-xl text-sm leading-6 text-zinc-400">{description}</p>
+        {actionLabel ? <Button onClick={onAction} variant="secondary">{actionLabel}</Button> : null}
+      </div>
+    </Card>
   );
 }
 

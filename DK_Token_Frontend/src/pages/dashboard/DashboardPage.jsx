@@ -1,18 +1,13 @@
 import {
-  Grid,
-  Skeleton,
-  Stack,
-} from '@mui/material';
-import ApprovalOutlinedIcon from '@mui/icons-material/ApprovalOutlined';
-import AssignmentOutlinedIcon from '@mui/icons-material/AssignmentOutlined';
-import AssignmentTurnedInOutlinedIcon from '@mui/icons-material/AssignmentTurnedInOutlined';
-import CheckCircleOutlineOutlinedIcon from '@mui/icons-material/CheckCircleOutlineOutlined';
-import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
-import PendingActionsOutlinedIcon from '@mui/icons-material/PendingActionsOutlined';
-import PlaylistAddCheckOutlinedIcon from '@mui/icons-material/PlaylistAddCheckOutlined';
-import ReportGmailerrorredOutlinedIcon from '@mui/icons-material/ReportGmailerrorredOutlined';
-import RuleFolderOutlinedIcon from '@mui/icons-material/RuleFolderOutlined';
-import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined';
+  CheckCircleIcon,
+  ClipboardDocumentCheckIcon,
+  ClockIcon,
+  DocumentChartBarIcon,
+  ExclamationCircleIcon,
+  InboxStackIcon,
+  PencilSquareIcon,
+  XCircleIcon,
+} from '@heroicons/react/24/outline';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -31,31 +26,25 @@ import { REQUEST_STATUSES, ROLES } from '../../utils/constants';
 
 function DashboardSkeleton() {
   return (
-    <Stack spacing={3.5}>
-      <Stack spacing={1.25}>
-        <Skeleton height={20} width={120} />
-        <Skeleton height={42} width={320} />
-        <Skeleton height={22} width="55%" />
-      </Stack>
-      <Grid container spacing={2.5}>
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <div className="h-4 w-24 animate-pulse rounded bg-zinc-900-200" />
+        <div className="h-8 w-48 animate-pulse rounded bg-zinc-900-200" />
+        <div className="h-4 w-80 animate-pulse rounded bg-zinc-900-200" />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
-          <Grid key={index} size={{ xs: 12, sm: 6, xl: 3 }}>
-            <Skeleton height={148} variant="rounded" />
-          </Grid>
+          <div className="h-28 animate-pulse rounded-lg border border-slate-200 bg-zinc-900-100" key={index} />
         ))}
-      </Grid>
-      <Grid container spacing={3}>
-        <Grid size={{ xs: 12, lg: 8 }}>
-          <Skeleton height={420} variant="rounded" />
-        </Grid>
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <Stack spacing={2.5}>
-            <Skeleton height={240} variant="rounded" />
-            <Skeleton height={240} variant="rounded" />
-          </Stack>
-        </Grid>
-      </Grid>
-    </Stack>
+      </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+        <div className="h-80 animate-pulse rounded-lg border border-slate-200 bg-zinc-900-100" />
+        <div className="space-y-4">
+          <div className="h-48 animate-pulse rounded-lg border border-slate-200 bg-zinc-900-100" />
+          <div className="h-48 animate-pulse rounded-lg border border-slate-200 bg-zinc-900-100" />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -171,7 +160,7 @@ function DashboardPage() {
         return {
           eyebrow: 'Admin Overview',
           title: 'Dashboard',
-          subtitle: 'Monitor workflow volume, request progress, and recent control activity across the portal.',
+          subtitle: 'Monitor request volume, review queues, and recent control activity across the portal.',
           recentTitle: 'Latest Token Requests',
           recentSubtitle: 'Newest requests across makers, approvals, and execution stages.',
         };
@@ -179,7 +168,7 @@ function DashboardPage() {
         return {
           eyebrow: 'Maker Workspace',
           title: 'Dashboard',
-          subtitle: 'Track your drafts, submissions, and requests that need revision or follow-up.',
+          subtitle: 'Track drafts, submissions, and requests that need revision or follow-up.',
           recentTitle: 'My Recent Requests',
           recentSubtitle: 'The most recent requests you created across the workflow.',
         };
@@ -216,30 +205,30 @@ function DashboardPage() {
     switch (dashboardRole) {
       case ROLES.ADMIN:
         return [
-          metric('total', 'Total Requests', summary.totalRequests ?? 0, 'Across all visible workflows', <PlaylistAddCheckOutlinedIcon fontSize="small" />, 'primary.main'),
-          metric('pending', 'Pending Approvals', summary.pendingApprovals ?? 0, 'Waiting for checker action', <PendingActionsOutlinedIcon fontSize="small" />, 'warning.main'),
-          metric('ready', 'In Progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Recoverable requests still syncing wallet and chain state', <FactCheckOutlinedIcon fontSize="small" />, 'secondary.main'),
-          metric('failed', 'Failed', summary.failedRequests ?? 0, 'Need operational follow-up', <ReportGmailerrorredOutlinedIcon fontSize="small" />, 'error.main'),
+          metric('total', 'Total requests', summary.totalRequests ?? 0, 'Across all visible workflows', <DocumentChartBarIcon className="size-4" />, 'primary.main'),
+          metric('pending', 'Pending approvals', summary.pendingApprovals ?? 0, 'Waiting for checker action', <ClockIcon className="size-4" />, 'warning.main'),
+          metric('ready', 'In progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Still syncing wallet and chain state', <InboxStackIcon className="size-4" />, 'secondary.main'),
+          metric('failed', 'Failed', summary.failedRequests ?? 0, 'Need operational follow-up', <ExclamationCircleIcon className="size-4" />, 'error.main'),
         ];
       case ROLES.MAKER:
         return [
-          metric('drafts', 'Drafts', state.draftCount, 'Still editable by you', <AssignmentOutlinedIcon fontSize="small" />, 'primary.main'),
-          metric('pending', 'Pending Review', summary.pendingApprovals ?? 0, 'Submitted and awaiting a checker', <PendingActionsOutlinedIcon fontSize="small" />, 'warning.main'),
-          metric('rejected', 'Rejected', state.rejectedCount, 'Need revision before resubmission', <RuleFolderOutlinedIcon fontSize="small" />, 'error.main'),
-          metric('ready', 'In Progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Requests still syncing wallet submission or on-chain confirmation', <ApprovalOutlinedIcon fontSize="small" />, 'secondary.main'),
+          metric('drafts', 'Drafts', state.draftCount, 'Still editable by you', <PencilSquareIcon className="size-4" />, 'primary.main'),
+          metric('pending', 'Pending review', summary.pendingApprovals ?? 0, 'Submitted and awaiting a checker', <ClockIcon className="size-4" />, 'warning.main'),
+          metric('rejected', 'Rejected', state.rejectedCount, 'Need revision before resubmission', <XCircleIcon className="size-4" />, 'error.main'),
+          metric('ready', 'In progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Still syncing wallet or chain confirmation', <InboxStackIcon className="size-4" />, 'secondary.main'),
         ];
       case ROLES.CHECKER:
         return [
-          metric('pending', 'Pending Approvals', summary.pendingApprovals ?? 0, 'Requests waiting in your queue', <PendingActionsOutlinedIcon fontSize="small" />, 'warning.main'),
-          metric('ready', 'In Progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Requests still settling after wallet approval', <AssignmentTurnedInOutlinedIcon fontSize="small" />, 'primary.main'),
-          metric('reviewed', 'Reviewed Recently', state.reviewedCount, 'Latest decisions linked to you', <TaskAltOutlinedIcon fontSize="small" />, 'secondary.main'),
-          metric('failed', 'Failed Downstream', summary.failedRequests ?? 0, 'Approved items that later failed execution', <ReportGmailerrorredOutlinedIcon fontSize="small" />, 'error.main'),
+          metric('pending', 'Pending approvals', summary.pendingApprovals ?? 0, 'Requests waiting in your queue', <ClockIcon className="size-4" />, 'warning.main'),
+          metric('ready', 'In progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Still settling after wallet approval', <InboxStackIcon className="size-4" />, 'primary.main'),
+          metric('reviewed', 'Reviewed recently', state.reviewedCount, 'Latest decisions linked to you', <ClipboardDocumentCheckIcon className="size-4" />, 'secondary.main'),
+          metric('failed', 'Failed downstream', summary.failedRequests ?? 0, 'Approved items that later failed execution', <ExclamationCircleIcon className="size-4" />, 'error.main'),
         ];
       case ROLES.EXECUTOR:
         return [
-          metric('ready', 'In Progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Requests still settling between wallet and backend capture', <FactCheckOutlinedIcon fontSize="small" />, 'secondary.main'),
-          metric('executed', 'Executed', summary.executedRequests ?? 0, 'Successfully recorded outcomes', <CheckCircleOutlineOutlinedIcon fontSize="small" />, 'success.main'),
-          metric('failed', 'Failed', summary.failedRequests ?? 0, 'Need retry or investigation', <ReportGmailerrorredOutlinedIcon fontSize="small" />, 'error.main'),
+          metric('ready', 'In progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Still settling between wallet and backend capture', <InboxStackIcon className="size-4" />, 'secondary.main'),
+          metric('executed', 'Executed', summary.executedRequests ?? 0, 'Successfully recorded outcomes', <CheckCircleIcon className="size-4" />, 'success.main'),
+          metric('failed', 'Failed', summary.failedRequests ?? 0, 'Need retry or investigation', <ExclamationCircleIcon className="size-4" />, 'error.main'),
         ];
       default:
         return [];
@@ -267,25 +256,24 @@ function DashboardPage() {
   }
 
   return (
-    <Stack spacing={3.5} sx={{ width: '100%', minWidth: 0 }}>
+    <div className="min-w-0 space-y-4">
       <PageHeader eyebrow={pageCopy.eyebrow} subtitle={pageCopy.subtitle} title={pageCopy.title} />
 
       <PageSection>
         <DashboardMetricGrid items={metrics} />
       </PageSection>
 
-      <Grid container spacing={3.25}>
-        <Grid size={{ xs: 12, lg: 8 }}>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+        <div className="min-w-0">
           <PageSection subtitle={pageCopy.recentSubtitle} title={pageCopy.recentTitle}>
             <RecentRequestsTable
               onRowClick={(row) => navigate(`/token-requests/${row.id}`)}
               rows={recentRows}
             />
           </PageSection>
-        </Grid>
+        </div>
 
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <Stack spacing={2.25}>
+        <div className="space-y-4">
             {dashboardRole === ROLES.ADMIN ? (
               <>
                 <RequestListPanel
@@ -355,10 +343,9 @@ function DashboardPage() {
                 <WalletConnectCard />
               </>
             ) : null}
-          </Stack>
-        </Grid>
-      </Grid>
-    </Stack>
+        </div>
+      </div>
+    </div>
   );
 }
 

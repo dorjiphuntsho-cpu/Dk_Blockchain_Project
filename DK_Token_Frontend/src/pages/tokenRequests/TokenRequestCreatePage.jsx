@@ -1,5 +1,4 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Alert, Button, Card, CardContent, Chip, MenuItem, Stack, Typography } from '@mui/material';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -7,6 +6,10 @@ import { useSnackbar } from 'notistack';
 import useSolanaWallet from '../../hooks/useSolanaWallet';
 import useAuth from '../../hooks/useAuth';
 
+import Alert from '../../components/ui/Alert';
+import Badge from '../../components/ui/Badge';
+import Button from '../../components/ui/Button';
+import Card from '../../components/ui/Card';
 import PageHeader from '../../components/common/PageHeader';
 import ErrorState from '../../components/common/ErrorState';
 import FormAmountField from '../../components/form/FormAmountField';
@@ -315,44 +318,48 @@ function TokenRequestCreatePage() {
   }
 
   return (
-    <Stack spacing={3}>
+    <div className="space-y-6">
       <PageHeader
         subtitle="Capture the request details, then submit with the maker wallet so the checker can finalize it on chain."
         title={draftRequest ? 'Edit Draft Request' : 'Create Token Request'}
       />
       {error ? <ErrorState description={error} onAction={() => window.location.reload()} /> : null}
-      <Card>
-        <CardContent>
-          <Stack spacing={1.5} sx={{ mb: 3 }}>
-            <Typography color="text.secondary">
-              The form changes automatically for MINT, TRANSFER, and BURN workflows, and now limits wallets and tokens to the current maker flow.
-            </Typography>
-            <Stack direction="row" flexWrap="wrap" gap={1}>
-              <Chip label={`Flow: ${requestType}`} size="small" />
+      <section className="max-w-3xl">
+        <Card className="rounded-2xl bg-zinc-900/80">
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <div>
+                <h2 className="text-base font-semibold text-white">Request details</h2>
+                <p className="mt-1 text-sm text-zinc-400">
+                  The form changes automatically for mint, transfer, and burn workflows and limits wallets and tokens to the current maker flow.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Badge tone="blue">{`Flow: ${requestType}`}</Badge>
               {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && selectedSourceWallet ? (
-                <Chip label={`Source: ${sourceWalletDisplay}`} size="small" variant="outlined" />
+                <Badge tone="slate">{`Source: ${sourceWalletDisplay}`}</Badge>
               ) : null}
               {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && selectedSourceWallet ? (
-                <Chip label={`${sourceWalletTokenCount} token holdings`} size="small" variant="outlined" />
+                <Badge tone="slate">{`${sourceWalletTokenCount} token holdings`}</Badge>
               ) : null}
-            </Stack>
-          </Stack>
+              </div>
+            </div>
           {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && !selectedSourceWallet ? (
-            <Alert severity="warning" sx={{ mb: 3 }}>
+            <Alert tone="warning">
               Your account needs an active maker wallet before you can create transfer or burn requests.
             </Alert>
           ) : null}
           {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && selectedSourceWallet && connectedWalletAddress && connectedWalletAddress !== selectedSourceWallet.walletAddress ? (
-            <Alert severity="info" sx={{ mb: 3 }}>
+            <Alert tone="info">
               Connect the wallet {selectedSourceWallet.walletAddress} before signing this request.
             </Alert>
           ) : null}
           <FormProvider {...methods}>
-            <Stack component="form" onSubmit={methods.handleSubmit((values) => save(values))} spacing={2.5}>
+            <form className="space-y-6" onSubmit={methods.handleSubmit((values) => save(values))}>
               <FormTextField label="Request Type" name="requestType" select>
-                <MenuItem value={REQUEST_TYPES.MINT}>MINT</MenuItem>
-                <MenuItem value={REQUEST_TYPES.TRANSFER}>TRANSFER</MenuItem>
-                <MenuItem value={REQUEST_TYPES.BURN}>BURN</MenuItem>
+                <option value={REQUEST_TYPES.MINT}>MINT</option>
+                <option value={REQUEST_TYPES.TRANSFER}>TRANSFER</option>
+                <option value={REQUEST_TYPES.BURN}>BURN</option>
               </FormTextField>
               <FormTextField
                 label="Managed Token"
@@ -365,18 +372,18 @@ function TokenRequestCreatePage() {
                     : 'Select from token mints already created in the portal.'
                   : [REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType)
                     ? 'No managed tokens with balance were found in your source wallet.'
-                    : 'Create a managed token first before creating a request.'}
+                  : 'Create a managed token first before creating a request.'}
               >
                 {tokenOptions.map((token) => (
-                  <MenuItem key={token.id || token.mintAddress} value={token.mintAddress}>
+                  <option key={token.id || token.mintAddress} value={token.mintAddress}>
                     {token.name || token.onChain?.metadata?.name || truncateMiddle(token.mintAddress, 12, 10)}
                     {(token.symbol || token.onChain?.metadata?.symbol) ? ` - ${token.symbol || token.onChain?.metadata?.symbol}` : ''}
                     {typeof token.decimals === 'number' ? ` - ${token.decimals} decimals` : ''}
-                  </MenuItem>
+                  </option>
                 ))}
               </FormTextField>
               {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && selectedSourceWallet && !tokenOptions.length ? (
-                <Alert severity="info">
+                <Alert tone="info">
                   No transferable managed tokens were found in the selected source wallet. Mint tokens to this wallet first or use a wallet that already holds the token.
                 </Alert>
               ) : null}
@@ -399,36 +406,37 @@ function TokenRequestCreatePage() {
                   helperText="Only wallets belonging to maker users are available."
                 >
                   {destinationWalletOptions.map((wallet) => (
-                    <MenuItem key={wallet.id} value={wallet.id}>
+                    <option key={wallet.id} value={wallet.id}>
                       {wallet.label || wallet.walletAddress}
                       {wallet.user?.fullName ? ` - ${wallet.user.fullName}` : ''}
-                    </MenuItem>
+                    </option>
                   ))}
                 </FormTextField>
               ) : null}
               {fieldVisibility.destination && !destinationWalletOptions.length ? (
-                <Alert severity="warning">
+                <Alert tone="warning">
                   No eligible maker destination wallets are available right now. Check that destination users have active wallet records and the `MAKER` role.
                 </Alert>
               ) : null}
               <FormTextField label="Remarks" multiline minRows={3} name="remarks" />
-              <Stack direction="row" spacing={1.5}>
-                <Button disabled={isSubmitting} onClick={() => methods.reset()} variant="outlined">Reset</Button>
-                <Button disabled={isSubmitting} type="submit" variant="outlined">Save Draft</Button>
+              <div className="flex justify-end gap-3 border-t border-white/10 pt-6">
+                <Button disabled={isSubmitting} onClick={() => methods.reset()} variant="secondary">Reset</Button>
+                <Button disabled={isSubmitting} type="submit" variant="secondary">Save Draft</Button>
                 <Button
                   disabled={isSubmitting}
                   onClick={methods.handleSubmit((values) => save(values, true))}
                   type="button"
-                  variant="contained"
+                  variant="primary"
                 >
                   {isSubmitting ? 'Submitting...' : 'Submit & Sign With Wallet'}
                 </Button>
-              </Stack>
-            </Stack>
+              </div>
+            </form>
           </FormProvider>
-        </CardContent>
-      </Card>
-    </Stack>
+          </div>
+        </Card>
+      </section>
+    </div>
   );
 }
 

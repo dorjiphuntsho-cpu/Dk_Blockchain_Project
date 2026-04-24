@@ -1,11 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Button, MenuItem, Stack } from '@mui/material';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 
 import PageHeader from '../../components/common/PageHeader';
+import Button from '../../components/ui/Button';
+import Card from '../../components/ui/Card';
 import FormTextField from '../../components/form/FormTextField';
 import { usersApi } from '../../modules/users/users.api';
 import { walletsApi } from '../../modules/wallets/wallets.api';
@@ -61,30 +62,38 @@ function WalletCreatePage() {
   });
 
   return (
-    <Stack spacing={3}>
+    <div className="space-y-6">
       <PageHeader subtitle="Register a wallet and assign it to a user." title="Create Wallet" />
-      <FormProvider {...methods}>
-        <Stack component="form" onSubmit={handleSubmit} spacing={2.5}>
-          <FormTextField label="User" name="userId" select>
+      <section className="max-w-2xl">
+        <Card className="rounded-2xl bg-zinc-900/80">
+          <FormProvider {...methods}>
+            <form className="space-y-6" onSubmit={handleSubmit}>
+              <div>
+                <h2 className="text-base font-semibold text-white">Wallet details</h2>
+                <p className="mt-1 text-sm text-zinc-400">Assign the wallet to a user and define whether it should be their primary wallet.</p>
+              </div>
+              <FormTextField label="User" name="userId" select>
             {users.map((user) => (
-              <MenuItem key={user.id} value={user.id}>{user.fullName}</MenuItem>
+              <option key={user.id} value={user.id}>{user.fullName}</option>
             ))}
           </FormTextField>
           <FormTextField label="Wallet Address" name="walletAddress" />
           <FormTextField label="Label" name="label" />
           <FormTextField label="Is Primary" name="isPrimary" select>
-            <MenuItem value={false}>No</MenuItem>
-            <MenuItem value={true}>Yes</MenuItem>
+            <option value={false}>No</option>
+            <option value={true}>Yes</option>
           </FormTextField>
-          <Stack direction="row" spacing={1.5}>
-            <Button disabled={submitting} onClick={() => navigate('/wallets')} variant="outlined">Cancel</Button>
-            <Button disabled={submitting} type="submit" variant="contained">
+              <div className="flex justify-end gap-3 border-t border-white/10 pt-6">
+            <Button disabled={submitting} onClick={() => navigate('/wallets')} variant="secondary">Cancel</Button>
+            <Button disabled={submitting} type="submit" variant="primary">
               {submitting ? 'Creating...' : 'Create Wallet'}
             </Button>
-          </Stack>
-        </Stack>
-      </FormProvider>
-    </Stack>
+              </div>
+            </form>
+          </FormProvider>
+        </Card>
+      </section>
+    </div>
   );
 }
 

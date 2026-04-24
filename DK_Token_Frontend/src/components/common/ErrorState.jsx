@@ -1,4 +1,5 @@
-import { Button, Paper, Stack, Typography } from '@mui/material';
+import Button from '../ui/Button';
+import Card from '../ui/Card';
 
 function ErrorState({
   title = 'Something went wrong',
@@ -7,15 +8,13 @@ function ErrorState({
   onAction,
 }) {
   return (
-    <Paper sx={{ p: { xs: 4, md: 5 } }}>
-      <Stack alignItems="flex-start" spacing={1.5}>
-        <Typography variant="h6">{title}</Typography>
-        <Typography color="text.secondary" sx={{ maxWidth: 560 }}>
-          {description}
-        </Typography>
-        {onAction ? <Button onClick={onAction} variant="contained">{actionLabel}</Button> : null}
-      </Stack>
-    </Paper>
+    <Card>
+      <div className="flex flex-col items-start gap-3">
+        <h3 className="text-lg font-semibold text-white">{title}</h3>
+        <p className="max-w-2xl text-sm leading-6 text-zinc-400">{description}</p>
+        {onAction ? <Button onClick={onAction} variant="secondary">{actionLabel}</Button> : null}
+      </div>
+    </Card>
   );
 }
 

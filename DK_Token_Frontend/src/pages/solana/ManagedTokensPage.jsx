@@ -1,13 +1,15 @@
-import { Alert, Card, CardContent, Chip, Link, Stack, TextField, Typography } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 
+import Alert from '../../components/ui/Alert';
 import AppTable from '../../components/common/AppTable';
 import ErrorState from '../../components/common/ErrorState';
 import LoadingScreen from '../../components/common/LoadingScreen';
 import PageHeader from '../../components/common/PageHeader';
 import SearchFilters from '../../components/common/SearchFilters';
-import usePagination from '../../hooks/usePagination';
+import Badge from '../../components/ui/Badge';
+import Input from '../../components/ui/Input';
 import { managedTokensApi } from '../../modules/solana/managedTokens.api';
+import usePagination from '../../hooks/usePagination';
 import { formatDateTime } from '../../utils/date';
 import { truncateMiddle } from '../../utils/format';
 
@@ -23,25 +25,25 @@ function ManagedTokensPage() {
     [tokens],
   );
 
-  useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true);
-        setError('');
-        const response = await managedTokensApi.list({
-          ...filters,
-          ...paginationQuery,
-        });
-        setTokens(response.data.items);
-        setPagination(response.data.pagination);
-      } catch (loadError) {
-        setError(loadError.message || 'Unable to load managed tokens.');
-      } finally {
-        setLoading(false);
-      }
+  async function loadTokens() {
+    try {
+      setLoading(true);
+      setError('');
+      const response = await managedTokensApi.list({
+        ...filters,
+        ...paginationQuery,
+      });
+      setTokens(response.data.items);
+      setPagination(response.data.pagination);
+    } catch (loadError) {
+      setError(loadError.message || 'Unable to load managed tokens.');
+    } finally {
+      setLoading(false);
     }
+  }
 
-    load();
+  useEffect(() => {
+    loadTokens();
   }, [filters, paginationQuery.page, paginationQuery.limit]);
 
   const columns = useMemo(() => [
@@ -49,33 +51,25 @@ function ManagedTokensPage() {
       key: 'name',
       label: 'Token',
       render: (row) => (
-        <Stack spacing={0.35}>
-          <Typography sx={{ fontWeight: 700 }} variant="body2">
-            {row.name || row.onChain?.metadata?.name || 'Unnamed Token'}
-          </Typography>
-          <Typography color="text.secondary" variant="caption">
-            {row.symbol || row.onChain?.metadata?.symbol || '-'}
-          </Typography>
-        </Stack>
+        <div className="space-y-0.5">
+          <p className="font-medium text-white">{row.name || row.onChain?.metadata?.name || 'Unnamed Token'}</p>
+          <p className="text-xs text-zinc-400">{row.symbol || row.onChain?.metadata?.symbol || '-'}</p>
+        </div>
       ),
     },
     {
       key: 'mintAddress',
       label: 'Mint Address',
       render: (row) => (
-        <Stack spacing={0.75}>
-          <Typography sx={{ fontWeight: 700 }} variant="body2">
-            {truncateMiddle(row.mintAddress, 12, 10)}
-          </Typography>
+        <div className="space-y-2">
+          <p className="font-medium text-white">{truncateMiddle(row.mintAddress, 12, 10)}</p>
           {row.warning ? (
-            <Stack spacing={0.5}>
-              <Chip color="warning" label="On-chain warning" size="small" sx={{ width: 'fit-content' }} />
-              <Typography color="warning.main" sx={{ maxWidth: 320, wordBreak: 'break-word' }} variant="caption">
-                {row.warning}
-              </Typography>
-            </Stack>
+            <div className="space-y-1">
+              <Badge tone="amber">On-chain warning</Badge>
+              <p className="max-w-xs break-words text-xs text-amber-300">{row.warning}</p>
+            </div>
           ) : null}
-        </Stack>
+        </div>
       ),
     },
     {
@@ -93,20 +87,18 @@ function ManagedTokensPage() {
     {
       key: 'tokenAuthority',
       label: 'Token Authority',
-      render: (row) => truncateMiddle(row.tokenAuthority, 12, 10),
+      render: (row) => (
+        <span className="break-all font-mono text-xs text-zinc-300">{truncateMiddle(row.tokenAuthority, 12, 10)}</span>
+      ),
     },
     {
       key: 'authorities',
       label: 'Authorities',
       render: (row) => (
-        <Stack spacing={0.35}>
-          <Typography variant="caption">
-            Mint: {truncateMiddle(row.onChain?.mintAuthority || row.mintAuthority, 12, 10)}
-          </Typography>
-          <Typography variant="caption">
-            Freeze: {truncateMiddle(row.onChain?.freezeAuthority || row.freezeAuthority, 12, 10)}
-          </Typography>
-        </Stack>
+        <div className="space-y-1 text-xs text-zinc-400">
+          <p>Mint: {truncateMiddle(row.onChain?.mintAuthority || row.mintAuthority, 12, 10)}</p>
+          <p>Freeze: {truncateMiddle(row.onChain?.freezeAuthority || row.freezeAuthority, 12, 10)}</p>
+        </div>
       ),
     },
     {
@@ -124,9 +116,9 @@ function ManagedTokensPage() {
       label: 'Creation Tx',
       render: (row) => (
         row.explorerUrl ? (
-          <Link href={row.explorerUrl} rel="noreferrer" target="_blank">
+          <a className="text-sky-400 hover:text-sky-300" href={row.explorerUrl} rel="noreferrer" target="_blank">
             {truncateMiddle(row.createdTxSignature, 12, 10)}
-          </Link>
+          </a>
         ) : truncateMiddle(row.createdTxSignature, 12, 10)
       ),
     },
@@ -137,63 +129,59 @@ function ManagedTokensPage() {
   }
 
   if (error && !tokens.length) {
-    return <ErrorState description={error} onAction={() => window.location.reload()} />;
+    return <ErrorState description={error} onAction={loadTokens} />;
   }
 
   return (
-    <Stack spacing={3}>
+    <div className="space-y-6">
       <PageHeader
         subtitle="Persistent registry of SPL mints created through the portal, with live on-chain supply and authority details."
         title="Managed Tokens"
       />
 
       <SearchFilters>
-        <TextField
-          label="Search name, symbol, mint, or authority"
-          onChange={(event) => setFilters({ search: event.target.value })}
-          value={filters.search}
-        />
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-zinc-200">Search name, symbol, mint, or authority</span>
+          <Input
+            onChange={(event) => setFilters({ search: event.target.value })}
+            value={filters.search}
+          />
+        </label>
       </SearchFilters>
 
       {tokensWithWarnings.length ? (
-        <Alert severity="warning">
+        <Alert tone="warning">
           Some tokens could not be refreshed fully from chain. Showing the live warning from the backend for each affected token.
         </Alert>
       ) : null}
 
       {tokensWithWarnings.length ? (
-        <Card>
-          <CardContent>
-            <Stack spacing={1.25}>
-              <Typography variant="h6">On-Chain Refresh Warnings</Typography>
-              {tokensWithWarnings.map((token) => (
-                <Alert key={token.id} severity="warning">
-                  <strong>{token.name || token.symbol || truncateMiddle(token.mintAddress, 12, 10)}</strong>
-                  {`: ${token.warning}`}
-                </Alert>
-              ))}
-            </Stack>
-          </CardContent>
-        </Card>
+        <div className="rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-xl">
+          <div className="space-y-3">
+            <h2 className="text-base font-semibold text-white">On-Chain Refresh Warnings</h2>
+            {tokensWithWarnings.map((token) => (
+              <Alert key={token.id} tone="warning">
+                <span className="font-semibold">{token.name || token.symbol || truncateMiddle(token.mintAddress, 12, 10)}</span>
+                {`: ${token.warning}`}
+              </Alert>
+            ))}
+          </div>
+        </div>
       ) : null}
 
-      <Card>
-        <CardContent>
-          <AppTable
-            columns={columns}
-            error={error}
-            loading={loading}
-            onPageChange={setPage}
-            onRowsPerPageChange={setLimit}
-            onRetry={() => window.location.reload()}
-            pagination={pagination}
-            rows={tokens}
-            emptyDescription="No managed token mints have been created through the portal yet."
-            emptyTitle="No managed tokens"
-          />
-        </CardContent>
-      </Card>
-    </Stack>
+      <AppTable
+        columns={columns}
+        emptyDescription="No managed token mints have been created through the portal yet."
+        emptyTitle="No managed tokens"
+        error={error}
+        loading={loading}
+        onPageChange={setPage}
+        onRetry={loadTokens}
+        onRowsPerPageChange={setLimit}
+        pagination={pagination}
+        rows={tokens}
+      />
+    </div>
   );
 }
 

@@ -1,15 +1,5 @@
-import {
-  Alert,
-  Button,
-  Card,
-  CardContent,
-  Grid,
-  Link,
-  MenuItem,
-  Stack,
-  TextField,
-  Typography,
-} from '@mui/material';
+import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
+import { XMarkIcon } from '@heroicons/react/16/solid';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
@@ -20,7 +10,6 @@ import {
 } from '@solana/spl-token';
 import { PublicKey } from '@solana/web3.js';
 
-import AppDialog from '../../components/common/AppDialog';
 import AppTable from '../../components/common/AppTable';
 import ErrorState from '../../components/common/ErrorState';
 import LoadingScreen from '../../components/common/LoadingScreen';
@@ -46,19 +35,60 @@ import {
 } from '../../modules/tokenRequests/tokenRequestRecovery';
 import { rejectionSchema } from '../../modules/tokenRequests/tokenRequests.schemas';
 import { getNextActorMessage, getStatusTimeline } from '../../modules/tokenRequests/tokenRequests.utils';
+import { EXECUTION_MODES, ON_CHAIN_PENDING_STATUSES, REQUEST_STATUSES } from '../../utils/constants';
 import { formatDateTime } from '../../utils/date';
 import { getErrorMessage } from '../../utils/error';
 import { formatAmount, truncateMiddle } from '../../utils/format';
 import {
   canApproveWalletExecution,
   canEditDraftRequest,
-  canInitiateWalletExecution,
   canExecuteRequest,
+  canInitiateWalletExecution,
   canRejectRequest,
   canSubmitDraftRequest,
 } from '../../utils/permissions';
-import { EXECUTION_MODES, ON_CHAIN_PENDING_STATUSES } from '../../utils/constants';
-import { REQUEST_STATUSES } from '../../utils/constants';
+
+function InfoAlert({ tone = 'info', children }) {
+  const tones = {
+    info: 'border-sky-500/20 bg-sky-500/10 text-sky-200',
+    success: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200',
+    warning: 'border-amber-500/20 bg-amber-500/10 text-amber-200',
+    error: 'border-red-500/20 bg-red-500/10 text-red-200',
+  };
+
+  return (
+    <div className={`rounded-xl border px-4 py-3 text-sm ${tones[tone] || tones.info}`}>
+      {children}
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div>
+      <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</dt>
+      <dd className="mt-1 break-words text-sm text-zinc-100">{children || '-'}</dd>
+    </div>
+  );
+}
+
+function ActionButton({ children, tone = 'secondary', ...props }) {
+  const styles = {
+    primary: 'bg-white text-zinc-950 hover:bg-zinc-200',
+    secondary: 'bg-white/5 text-white ring-1 ring-inset ring-white/10 hover:bg-white/10',
+    danger: 'bg-red-500/10 text-red-300 ring-1 ring-inset ring-red-500/20 hover:bg-red-500/20',
+  };
+
+  return (
+    <button
+      type="button"
+      className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${styles[tone]}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
 
 function TokenRequestDetailsPage() {
   const { id } = useParams();
@@ -70,6 +100,7 @@ function TokenRequestDetailsPage() {
     connected: walletConnected,
     provider: walletProvider,
   } = useSolanaWallet();
+
   const [request, setRequest] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -81,9 +112,17 @@ function TokenRequestDetailsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectSubmitting, setRejectSubmitting] = useState(false);
-  const [formState, setFormState] = useState({
-    rejectionReason: '',
-  });
+  const [formState, setFormState] = useState({ rejectionReason: '' });
+
+  const reload = async () => {
+    try {
+      setError('');
+      const response = await tokenRequestsApi.getById(id);
+      setRequest(response.data);
+    } catch (loadError) {
+      setError(loadError.message || 'Unable to refresh request details.');
+    }
+  };
 
   useEffect(() => {
     async function load() {
@@ -102,16 +141,6 @@ function TokenRequestDetailsPage() {
     load();
   }, [id]);
 
-  const reload = async () => {
-    try {
-      setError('');
-      const response = await tokenRequestsApi.getById(id);
-      setRequest(response.data);
-    } catch (loadError) {
-      setError(loadError.message || 'Unable to refresh request details.');
-    }
-  };
-
   useEffect(() => {
     if (!request || !ON_CHAIN_PENDING_STATUSES.includes(request.status)) {
       setExecutionPayload(null);
@@ -127,18 +156,14 @@ function TokenRequestDetailsPage() {
         setExecutionPayloadLoading(true);
         setExecutionPayloadError('');
         const response = await tokenRequestsApi.getExecutionPayload(request.id);
-        if (!cancelled) {
-          setExecutionPayload(response.data);
-        }
+        if (!cancelled) setExecutionPayload(response.data);
       } catch (loadError) {
         if (!cancelled) {
           setExecutionPayload(null);
           setExecutionPayloadError(loadError.message || 'Unable to load execution payload.');
         }
       } finally {
-        if (!cancelled) {
-          setExecutionPayloadLoading(false);
-        }
+        if (!cancelled) setExecutionPayloadLoading(false);
       }
     }
 
@@ -151,28 +176,20 @@ function TokenRequestDetailsPage() {
 
   useEffect(() => {
     async function recoverInitiation() {
-      if (!request?.id || request.status !== REQUEST_STATUSES.DRAFT || recoveringInitiation) {
-        return;
-      }
+      if (!request?.id || request.status !== REQUEST_STATUSES.DRAFT || recoveringInitiation) return;
 
       const recovery = getPendingInitiationRecovery(request.id);
-      if (!recovery?.payload) {
-        return;
-      }
+      if (!recovery?.payload) return;
 
       try {
         setRecoveringInitiation(true);
         await tokenRequestsApi.recordInitiation(request.id, recovery.payload);
         clearPendingInitiationRecovery(request.id);
-        enqueueSnackbar('Recovered the previous wallet submission and finalized the request record.', {
-          variant: 'success',
-        });
+        enqueueSnackbar('Recovered previous wallet submission.', { variant: 'success' });
         await reload();
       } catch (recoveryError) {
-        const message = getErrorMessage(recoveryError, 'Unable to recover the previous wallet submission');
-        const shouldClearRecovery = /only draft requests|already processed on chain|not found/i.test(message);
-
-        if (shouldClearRecovery) {
+        const message = getErrorMessage(recoveryError, 'Unable to recover previous wallet submission');
+        if (/only draft requests|already processed on chain|not found/i.test(message)) {
           clearPendingInitiationRecovery(request.id);
           await reload();
         }
@@ -185,42 +202,48 @@ function TokenRequestDetailsPage() {
   }, [enqueueSnackbar, recoveringInitiation, request]);
 
   const timeline = useMemo(() => getStatusTimeline(request || {}), [request]);
+
   const expectedMakerWalletAddress = executionPayload?.walletInitiation?.expectedMakerWalletAddress || null;
   const onChainCheckers = executionPayload?.onChainCheckers || [];
-  const connectedWalletRegisteredOnChain = !onChainCheckers.length || (
-    walletConnected && connectedWalletAddress && onChainCheckers.includes(connectedWalletAddress)
-  );
+  const connectedWalletRegisteredOnChain =
+    !onChainCheckers.length ||
+    (walletConnected && connectedWalletAddress && onChainCheckers.includes(connectedWalletAddress));
+
   const walletMismatch = Boolean(
-    walletConnected && expectedMakerWalletAddress && connectedWalletAddress && expectedMakerWalletAddress !== connectedWalletAddress,
+    walletConnected &&
+      expectedMakerWalletAddress &&
+      connectedWalletAddress &&
+      expectedMakerWalletAddress !== connectedWalletAddress,
   );
+
   const canInitiateWithWallet = canInitiateWalletExecution(user, request, executionPayload);
   const canApproveWithWallet = canApproveWalletExecution(user, request);
 
   const isAlreadyProcessedMessage = (value) => {
     const normalized = String(value || '').toLowerCase();
-    return normalized.includes('alreadyprocessed')
-      || normalized.includes('request already processed')
-      || normalized.includes('already been processed')
-      || normalized.includes('error code: 6000')
-      || normalized.includes('custom program error: 0x1770');
+    return (
+      normalized.includes('alreadyprocessed') ||
+      normalized.includes('request already processed') ||
+      normalized.includes('already been processed') ||
+      normalized.includes('error code: 6000') ||
+      normalized.includes('custom program error: 0x1770')
+    );
   };
 
-  const collectApprovalErrorDetails = async (error) => {
+  const collectApprovalErrorDetails = async (err) => {
     const details = [
-      error?.message,
-      error?.cause?.message,
-      ...(Array.isArray(error?.logs) ? error.logs : []),
-      ...(Array.isArray(error?.transactionLogs) ? error.transactionLogs : []),
+      err?.message,
+      err?.cause?.message,
+      ...(Array.isArray(err?.logs) ? err.logs : []),
+      ...(Array.isArray(err?.transactionLogs) ? err.transactionLogs : []),
     ].filter(Boolean);
 
-    if (typeof error?.getLogs === 'function') {
+    if (typeof err?.getLogs === 'function') {
       try {
-        const rpcLogs = await error.getLogs();
-        if (Array.isArray(rpcLogs) && rpcLogs.length) {
-          details.push(...rpcLogs);
-        }
+        const rpcLogs = await err.getLogs();
+        if (Array.isArray(rpcLogs)) details.push(...rpcLogs);
       } catch {
-        // Ignore secondary log lookup failures and keep the original error chain.
+        // ignore
       }
     }
 
@@ -228,38 +251,40 @@ function TokenRequestDetailsPage() {
   };
 
   const ensureDestinationTokenAccount = async (transaction, checkerPayload, connection) => {
-    const destinationWalletAddress = request.destinationWallet?.walletAddress
-      || checkerPayload.destinationWalletAddress
-      || checkerPayload.walletInitiation?.destinationWalletAddress
-      || null;
+    const destinationWalletAddress =
+      request.destinationWallet?.walletAddress ||
+      checkerPayload.destinationWalletAddress ||
+      checkerPayload.walletInitiation?.destinationWalletAddress ||
+      null;
 
-    if (!destinationWalletAddress) {
-      return;
-    }
+    if (!destinationWalletAddress) return;
 
     const mintAddress = checkerPayload.tokenMintAddress || request.tokenMintAddress;
-    if (!mintAddress) {
-      return;
-    }
+    if (!mintAddress) return;
 
     const mintPublicKey = new PublicKey(mintAddress);
     const destinationWalletPublicKey = new PublicKey(destinationWalletAddress);
-    const expectedDestinationAta = await getAssociatedTokenAddress(mintPublicKey, destinationWalletPublicKey);
-    const configuredDestinationAddress = request.destinationTokenAccountAddress
-      || checkerPayload.destinationTokenAccountAddress
-      || checkerPayload.destinationTokenAccount
-      || null;
+    const expectedDestinationAta = await getAssociatedTokenAddress(
+      mintPublicKey,
+      destinationWalletPublicKey,
+    );
 
-    if (configuredDestinationAddress && configuredDestinationAddress !== expectedDestinationAta.toBase58()) {
-      return;
-    }
+    const configuredDestinationAddress =
+      request.destinationTokenAccountAddress ||
+      checkerPayload.destinationTokenAccountAddress ||
+      checkerPayload.destinationTokenAccount ||
+      null;
+
+    if (configuredDestinationAddress && configuredDestinationAddress !== expectedDestinationAta.toBase58()) return;
 
     try {
       await getAccount(connection, expectedDestinationAta, 'confirmed');
     } catch {
       transaction.instructions.unshift(
         createAssociatedTokenAccountInstruction(
-          checkerPayload.expectedCheckerWalletAddress || checkerPayload.checkerWalletAddress || connectedWalletAddress,
+          checkerPayload.expectedCheckerWalletAddress ||
+            checkerPayload.checkerWalletAddress ||
+            connectedWalletAddress,
           expectedDestinationAta,
           destinationWalletPublicKey,
           mintPublicKey,
@@ -267,26 +292,24 @@ function TokenRequestDetailsPage() {
       );
     }
   };
-  if (loading) {
-    return <LoadingScreen message="Loading request details..." />;
-  }
 
-  if (error || !request) {
-    return <ErrorState description={error || 'Request not available.'} onAction={reload} />;
-  }
+  if (loading) return <LoadingScreen message="Loading request details..." />;
+  if (error || !request) return <ErrorState description={error || 'Request not available.'} onAction={reload} />;
 
   return (
-    <Stack spacing={3}>
+    <div className="space-y-6">
       <PageHeader subtitle="Review request details, history, and next actions." title={request.id} />
 
-      <Stack direction="row" flexWrap="wrap" gap={1}>
-        {canEditDraftRequest(user, request) ? (
-          <Button onClick={() => navigate('/token-requests/new', { state: { request } })} variant="outlined">
-            Edit Draft
-          </Button>
-        ) : null}
-        {canSubmitDraftRequest(user, request) ? (
-          <Button
+      <div className="flex flex-wrap gap-2">
+        {canEditDraftRequest(user, request) && (
+          <ActionButton onClick={() => navigate('/token-requests/new', { state: { request } })}>
+            Edit draft
+          </ActionButton>
+        )}
+
+        {canSubmitDraftRequest(user, request) && (
+          <ActionButton
+            tone="primary"
             onClick={async () => {
               try {
                 await tokenRequestsApi.submit(request.id);
@@ -296,32 +319,26 @@ function TokenRequestDetailsPage() {
                 enqueueSnackbar(getErrorMessage(submitError, 'Unable to submit request'), { variant: 'error' });
               }
             }}
-            variant="contained"
           >
             Submit
-          </Button>
-        ) : null}
-        {canRejectRequest(user, request) ? (
-          <Button color="error" onClick={() => setRejectDialogOpen(true)} variant="outlined">
+          </ActionButton>
+        )}
+
+        {canRejectRequest(user, request) && (
+          <ActionButton tone="danger" onClick={() => setRejectDialogOpen(true)}>
             Reject
-          </Button>
-        ) : null}
-        {canInitiateWithWallet ? (
-          <Button
+          </ActionButton>
+        )}
+
+        {canInitiateWithWallet && (
+          <ActionButton
+            tone="primary"
             disabled={walletInitiating || !walletConnected || walletMismatch || executionPayloadLoading}
             onClick={async () => {
               try {
-                if (!walletConnected || !connectedWalletAddress) {
-                  throw new Error('Connect the maker wallet before initiating this request.');
-                }
-
-                if (!walletProvider) {
-                  throw new Error('Wallet provider is not available.');
-                }
-
-                if (!executionPayload) {
-                  throw new Error('Execution payload is not ready yet. Try again in a moment.');
-                }
+                if (!walletConnected || !connectedWalletAddress) throw new Error('Connect the maker wallet first.');
+                if (!walletProvider) throw new Error('Wallet provider is not available.');
+                if (!executionPayload) throw new Error('Execution payload is not ready.');
 
                 setWalletInitiating(true);
 
@@ -361,113 +378,107 @@ function TokenRequestDetailsPage() {
                 });
                 await reload();
               } catch (walletError) {
-                enqueueSnackbar(
-                  getErrorMessage(walletError, 'Wallet initiation failed. If the wallet already signed, the page will retry recording it automatically.'),
-                  { variant: 'error' },
-                );
+                enqueueSnackbar(getErrorMessage(walletError, 'Wallet initiation failed'), { variant: 'error' });
               } finally {
                 setWalletInitiating(false);
               }
             }}
-            variant="contained"
           >
-            {walletInitiating ? 'Initiating...' : 'Initiate With Wallet'}
-          </Button>
-        ) : null}
-        {canApproveWithWallet ? (
-            <Button
-              disabled={isSubmitting || !walletConnected || executionPayloadLoading}
-              onClick={async () => {
-                if (isSubmitting) {
-                  return;
+            {walletInitiating ? 'Initiating...' : 'Initiate with wallet'}
+          </ActionButton>
+        )}
+
+        {canApproveWithWallet && (
+          <ActionButton
+            tone="primary"
+            disabled={isSubmitting || !walletConnected || executionPayloadLoading}
+            onClick={async () => {
+              if (isSubmitting) return;
+
+              let checkerPayload = null;
+              let approvalConnection = null;
+
+              try {
+                if (!walletConnected || !connectedWalletAddress) {
+                  throw new Error('Connect a registered checker wallet first.');
+                }
+                if (!walletProvider) throw new Error('Wallet provider is not available.');
+
+                setIsSubmitting(true);
+
+                const preparedResponse = await tokenRequestsApi.prepareCheckerApproval(
+                  request.id,
+                  connectedWalletAddress,
+                );
+
+                checkerPayload = preparedResponse.data;
+
+                const checkerOnChainCheckers = Array.isArray(checkerPayload.onChainCheckers)
+                  ? checkerPayload.onChainCheckers
+                  : [];
+
+                if (checkerOnChainCheckers.length && !checkerOnChainCheckers.includes(connectedWalletAddress)) {
+                  throw new Error(`Connected wallet ${connectedWalletAddress} is not registered on chain.`);
                 }
 
-                let checkerPayload = null;
-                let approvalConnection = null;
+                if (!checkerPayload.approvalInstruction) {
+                  throw new Error('Checker approval instruction was not returned by the backend.');
+                }
 
-                try {
-                  if (!walletConnected || !connectedWalletAddress) {
-                    throw new Error('Connect a registered checker wallet before approving this request on chain.');
-                  }
+                const builtTransaction = await buildCheckerApprovalTransaction({
+                  executionPayload: checkerPayload,
+                  checkerWalletAddress: connectedWalletAddress,
+                  sourceWalletAddress: request.sourceWallet?.walletAddress || null,
+                  destinationWalletAddress: request.destinationWallet?.walletAddress || null,
+                  sourceTokenAccountAddress: request.sourceTokenAccountAddress || null,
+                  destinationTokenAccountAddress: request.destinationTokenAccountAddress || null,
+                });
 
-                  if (!walletProvider) {
-                    throw new Error('Wallet provider is not available.');
-                  }
+                approvalConnection = builtTransaction.connection;
 
-                  setIsSubmitting(true);
+                await ensureDestinationTokenAccount(
+                  builtTransaction.transaction,
+                  checkerPayload,
+                  builtTransaction.connection,
+                );
 
-                  const preparedResponse = await tokenRequestsApi.prepareCheckerApproval(
-                    request.id,
-                    connectedWalletAddress,
-                  );
-                  checkerPayload = preparedResponse.data;
-                  const checkerOnChainCheckers = Array.isArray(checkerPayload.onChainCheckers) ? checkerPayload.onChainCheckers : [];
+                const approvalSignature = await signAndSendWalletTransaction({
+                  connection: builtTransaction.connection,
+                  provider: walletProvider,
+                  transaction: builtTransaction.transaction,
+                });
 
-                  if (checkerOnChainCheckers.length && !checkerOnChainCheckers.includes(connectedWalletAddress)) {
-                    throw new Error(
-                      `Connected wallet ${connectedWalletAddress} is not registered on chain as a checker. ` +
-                      `Registered checkers: ${checkerOnChainCheckers.join(', ')}`,
-                    );
-                  }
+                await tokenRequestsApi.approve(request.id, {
+                  comment: 'Approved on chain with wallet',
+                  txSignature: approvalSignature,
+                  explorerUrl: buildExplorerTransactionUrl(approvalSignature, checkerPayload.rpcUrl),
+                });
 
-                  if (!checkerPayload.approvalInstruction) {
-                    throw new Error('Checker approval instruction was not returned by the backend. Restart the backend and try again.');
-                  }
-
-                  const builtTransaction = await buildCheckerApprovalTransaction({
-                    executionPayload: checkerPayload,
-                    checkerWalletAddress: connectedWalletAddress,
-                    sourceWalletAddress: request.sourceWallet?.walletAddress || null,
-                    destinationWalletAddress: request.destinationWallet?.walletAddress || null,
-                    sourceTokenAccountAddress: request.sourceTokenAccountAddress || null,
-                    destinationTokenAccountAddress: request.destinationTokenAccountAddress || null,
+                enqueueSnackbar(`Checker approval submitted: ${truncateMiddle(approvalSignature, 8, 6)}`, {
+                  variant: 'success',
+                });
+              } catch (walletError) {
+                const details = await collectApprovalErrorDetails(walletError);
+                if (details.some(isAlreadyProcessedMessage)) {
+                  enqueueSnackbar('This request has already been processed.', { variant: 'warning' });
+                } else {
+                  enqueueSnackbar(getErrorMessage(walletError, 'Checker wallet approval failed'), {
+                    variant: 'error',
                   });
-                  approvalConnection = builtTransaction.connection;
-
-                  await ensureDestinationTokenAccount(
-                    builtTransaction.transaction,
-                    checkerPayload,
-                    builtTransaction.connection,
-                  );
-
-                  const approvalSignature = await signAndSendWalletTransaction({
-                    connection: builtTransaction.connection,
-                    provider: walletProvider,
-                    transaction: builtTransaction.transaction,
-                  });
-
-                  await tokenRequestsApi.approve(request.id, {
-                    comment: 'Approved on chain with wallet',
-                    txSignature: approvalSignature,
-                    explorerUrl: buildExplorerTransactionUrl(approvalSignature, checkerPayload.rpcUrl),
-                  });
-
-                  enqueueSnackbar(`Checker approval submitted: ${truncateMiddle(approvalSignature, 8, 6)}`, {
-                    variant: 'success',
-                  });
-                } catch (walletError) {
-                  const approvalErrorDetails = await collectApprovalErrorDetails(walletError);
-                  const alreadyProcessed = approvalErrorDetails.some(isAlreadyProcessedMessage);
-
-                  if (alreadyProcessed) {
-                    enqueueSnackbar('This request has already been processed.', { variant: 'warning' });
-                  } else {
-                    enqueueSnackbar(getErrorMessage(walletError, 'Checker wallet approval failed'), { variant: 'error' });
-                  }
+                }
               } finally {
-                  setIsSubmitting(false);
-                  if (approvalConnection || checkerPayload) {
-                    await reload();
-                  }
+                setIsSubmitting(false);
+                if (approvalConnection || checkerPayload) await reload();
               }
-              }}
-              variant="contained"
-            >
-              {isSubmitting ? 'Approving...' : 'Approve On Chain With Wallet'}
-            </Button>
-          ) : null}
-        {canExecuteRequest(user, request) ? (
-          <Button
+            }}
+          >
+            {isSubmitting ? 'Approving...' : 'Approve on chain'}
+          </ActionButton>
+        )}
+
+        {canExecuteRequest(user, request) && (
+          <ActionButton
+            tone="primary"
             onClick={async () => {
               try {
                 const response = await tokenRequestsApi.execute(request.id);
@@ -481,252 +492,257 @@ function TokenRequestDetailsPage() {
                 enqueueSnackbar(getErrorMessage(executionError, 'Execution failed'), { variant: 'error' });
               }
             }}
-            variant="contained"
           >
-            Execute On Chain
-          </Button>
-        ) : null}
-      </Stack>
+            Execute on chain
+          </ActionButton>
+        )}
+      </div>
 
-      <Grid container spacing={3}>
-        <Grid size={{ xs: 12, lg: 8 }}>
-          <Card>
-            <CardContent>
-              <Stack spacing={2}>
-                <Stack direction="row" spacing={1}>
-                  <StatusChip kind="type" value={request.requestType} />
-                  <StatusChip value={request.status} />
-                </Stack>
-                <Typography variant="h6">Request Metadata</Typography>
-                <Grid container spacing={2}>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Typography color="text.secondary" variant="body2">Token Mint Address</Typography>
-                    <Typography>{truncateMiddle(request.tokenMintAddress, 10, 8)}</Typography>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Typography color="text.secondary" variant="body2">Amount</Typography>
-                    <Typography>{formatAmount(request.amount)}</Typography>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Typography color="text.secondary" variant="body2">Source Wallet</Typography>
-                    <Typography>{request.sourceWallet?.label || '-'}</Typography>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Typography color="text.secondary" variant="body2">Destination Wallet</Typography>
-                    <Typography>{request.destinationWallet?.label || '-'}</Typography>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Typography color="text.secondary" variant="body2">Maker</Typography>
-                    <Typography>{request.makerUser?.fullName || '-'}</Typography>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Typography color="text.secondary" variant="body2">Checker</Typography>
-                    <Typography>{request.checkerUser?.fullName || '-'}</Typography>
-                  </Grid>
-                </Grid>
-                <Grid container spacing={2}>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Typography color="text.secondary" variant="body2">Execution Mode</Typography>
-                    <Typography>{request.executionMode || EXECUTION_MODES.SERVER_MANAGED}</Typography>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Typography color="text.secondary" variant="body2">Maker Wallet Address</Typography>
-                    <Typography sx={{ wordBreak: 'break-all' }}>{request.makerWalletAddress || request.sourceWallet?.walletAddress || '-'}</Typography>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Typography color="text.secondary" variant="body2">On-Chain Request</Typography>
-                    <Typography sx={{ wordBreak: 'break-all' }}>{request.onChainRequestAddress || '-'}</Typography>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Typography color="text.secondary" variant="body2">Maker Initiated</Typography>
-                    <Typography>{formatDateTime(request.makerInitiatedAt)}</Typography>
-                  </Grid>
-                </Grid>
-                <Typography color="text.secondary" variant="body2">Remarks</Typography>
-                <Typography>{request.remarks || 'No remarks provided'}</Typography>
-                {request.rejectionReason ? <Alert severity="error">Rejection reason: {request.rejectionReason}</Alert> : null}
-                {request.executionError ? <Alert severity="warning">Execution error: {request.executionError}</Alert> : null}
-                {executionPayloadLoading ? (
-                  <Alert severity="info">Refreshing execution payload and wallet requirements...</Alert>
-                ) : null}
-                {recoveringInitiation ? (
-                  <Alert severity="info">Finalizing a previously signed maker wallet submission...</Alert>
-                ) : null}
-                {executionPayloadError ? (
-                  <Alert severity="warning">{executionPayloadError}</Alert>
-                ) : null}
-                <Alert severity="info">
-                  {getNextActorMessage(request, executionPayload)}
-                </Alert>
-                {executionPayload?.walletInitiation?.supported ? (
-                  <Alert severity={walletMismatch ? 'warning' : executionPayload.walletInitiation.recorded ? 'success' : 'info'}>
-                    {executionPayload.walletInitiation.recorded
-                      ? 'This request already has maker-side wallet initiation recorded.'
-                      : walletMismatch
-                        ? `Connected wallet ${connectedWalletAddress} does not match the expected maker wallet ${expectedMakerWalletAddress}.`
-                        : expectedMakerWalletAddress
-                          ? `This request is ready for maker-side browser signing by ${expectedMakerWalletAddress}.`
-                          : 'This request type supports maker-side browser initiation.'}
-                  </Alert>
-                ) : null}
-                {canApproveWithWallet ? (
-                  <Alert severity="info">
-                    This request has maker initiation recorded. A connected Phantom wallet that is registered on chain as a checker can approve it directly.
-                  </Alert>
-                ) : null}
-                {walletConnected && onChainCheckers.length && !connectedWalletRegisteredOnChain ? (
-                  <Alert severity="warning">
-                    The connected Phantom wallet is not registered on chain as a checker for this configuration. Switch to a registered checker wallet or update the Solana config.
-                  </Alert>
-                ) : null}
-                {onChainCheckers.length ? (
-                  <Alert severity={connectedWalletRegisteredOnChain ? 'success' : 'warning'}>
-                    On-chain checkers: {onChainCheckers.join(', ')}
-                  </Alert>
-                ) : null}
-                {request.initiationExplorerUrl ? (
-                  <Link href={request.initiationExplorerUrl} rel="noreferrer" target="_blank">
-                    View initiation transaction
-                  </Link>
-                ) : null}
-                {request.explorerUrl ? (
-                  <Link href={request.explorerUrl} rel="noreferrer" target="_blank">
-                    View explorer transaction
-                  </Link>
-                ) : null}
-              </Stack>
-            </CardContent>
-          </Card>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-6">
+          <section className="rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-xl">
+            <div className="mb-6 flex flex-wrap gap-2">
+              <StatusChip kind="type" value={request.requestType} />
+              <StatusChip value={request.status} />
+            </div>
 
-          <Card sx={{ mt: 3 }}>
-            <CardContent>
-              <Typography sx={{ mb: 2 }} variant="h6">Approval History</Typography>
-              <AppTable
-                columns={[
-                  { key: 'action', label: 'Action' },
-                  { key: 'checkerUser', label: 'Checker', render: (row) => row.checkerUser?.fullName || '-' },
-                  { key: 'comment', label: 'Comment' },
-                  { key: 'createdAt', label: 'Created', render: (row) => formatDateTime(row.createdAt) },
-                ]}
-                pagination={null}
-                rows={request.approvals || []}
-              />
-            </CardContent>
-          </Card>
-        </Grid>
+            <h2 className="text-base font-semibold text-white">Request metadata</h2>
 
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <Stack spacing={3}>
-            <Card>
-              <CardContent>
-                <Typography sx={{ mb: 2 }} variant="h6">Request Timeline</Typography>
-                <RequestTimeline items={timeline} request={request} />
-              </CardContent>
-            </Card>
+            <dl className="mt-5 grid gap-5 sm:grid-cols-2">
+              <Field label="Token mint address">
+                <span className="font-mono">{truncateMiddle(request.tokenMintAddress, 10, 8)}</span>
+              </Field>
+              <Field label="Amount">{formatAmount(request.amount)}</Field>
+              <Field label="Source wallet">{request.sourceWallet?.label || '-'}</Field>
+              <Field label="Destination wallet">{request.destinationWallet?.label || '-'}</Field>
+              <Field label="Maker">{request.makerUser?.fullName || '-'}</Field>
+              <Field label="Checker">{request.checkerUser?.fullName || '-'}</Field>
+              <Field label="Execution mode">{request.executionMode || EXECUTION_MODES.SERVER_MANAGED}</Field>
+              <Field label="Maker wallet address">
+                <span className="font-mono">{request.makerWalletAddress || request.sourceWallet?.walletAddress || '-'}</span>
+              </Field>
+              <Field label="On-chain request">
+                <span className="font-mono">{request.onChainRequestAddress || '-'}</span>
+              </Field>
+              <Field label="Maker initiated">{formatDateTime(request.makerInitiatedAt)}</Field>
+            </dl>
 
-            <Card>
-              <CardContent>
-                <Typography sx={{ mb: 2 }} variant="h6">Timestamps</Typography>
-                <Stack spacing={1}>
-                  <Typography>Created: {formatDateTime(request.createdAt)}</Typography>
-                  <Typography>Approved: {formatDateTime(request.approvedAt)}</Typography>
-                  <Typography>Rejected: {formatDateTime(request.rejectedAt)}</Typography>
-                  <Typography>Executed: {formatDateTime(request.executedAt)}</Typography>
-                </Stack>
-              </CardContent>
-            </Card>
+            <div className="mt-6 border-t border-white/10 pt-5">
+              <Field label="Remarks">{request.remarks || 'No remarks provided'}</Field>
+            </div>
 
-            <WalletConnectCard executionPayload={executionPayload} requestStatus={request.status} />
-          </Stack>
-        </Grid>
-      </Grid>
+            <div className="mt-6 space-y-3">
+              {request.rejectionReason && <InfoAlert tone="error">Rejection reason: {request.rejectionReason}</InfoAlert>}
+              {request.executionError && <InfoAlert tone="warning">Execution error: {request.executionError}</InfoAlert>}
+              {executionPayloadLoading && <InfoAlert>Refreshing execution payload and wallet requirements...</InfoAlert>}
+              {recoveringInitiation && <InfoAlert>Finalizing a previously signed maker wallet submission...</InfoAlert>}
+              {executionPayloadError && <InfoAlert tone="warning">{executionPayloadError}</InfoAlert>}
 
-      <AppDialog
-        actions={
-          <>
-            <Button
-              disabled={rejectSubmitting}
-              onClick={() => {
-                setRejectDialogOpen(false);
-                setFormState((current) => ({ ...current, rejectionReason: '' }));
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              color="error"
-              disabled={rejectSubmitting}
-              onClick={async () => {
-                try {
-                  setRejectSubmitting(true);
-                  if (!walletConnected || !connectedWalletAddress) {
-                    throw new Error('Connect a checker wallet before rejecting this request.');
+              <InfoAlert>{getNextActorMessage(request, executionPayload)}</InfoAlert>
+
+              {executionPayload?.walletInitiation?.supported && (
+                <InfoAlert
+                  tone={
+                    walletMismatch
+                      ? 'warning'
+                      : executionPayload.walletInitiation.recorded
+                        ? 'success'
+                        : 'info'
                   }
+                >
+                  {executionPayload.walletInitiation.recorded
+                    ? 'This request already has maker-side wallet initiation recorded.'
+                    : walletMismatch
+                      ? `Connected wallet ${connectedWalletAddress} does not match expected maker wallet ${expectedMakerWalletAddress}.`
+                      : expectedMakerWalletAddress
+                        ? `Ready for maker-side browser signing by ${expectedMakerWalletAddress}.`
+                        : 'This request type supports maker-side browser initiation.'}
+                </InfoAlert>
+              )}
 
-                  if (!walletProvider) {
-                    throw new Error('Wallet provider is not available.');
-                  }
+              {canApproveWithWallet && (
+                <InfoAlert>
+                  This request has maker initiation recorded. A registered checker wallet can approve it directly.
+                </InfoAlert>
+              )}
 
-                  const parsed = rejectionSchema.safeParse({
-                    rejectionReason: formState.rejectionReason,
-                    comment: formState.rejectionReason,
-                  });
-                  if (!parsed.success) {
-                    throw new Error(parsed.error.issues[0]?.message || 'Rejection reason is required');
-                  }
+              {walletConnected && onChainCheckers.length && !connectedWalletRegisteredOnChain && (
+                <InfoAlert tone="warning">
+                  Connected Phantom wallet is not registered on chain as a checker.
+                </InfoAlert>
+              )}
 
-                  const preparedResponse = await tokenRequestsApi.prepareCheckerRejection(request.id);
-                  const checkerPayload = preparedResponse.data;
-                  const builtTransaction = buildCheckerRejectionTransaction({
-                    executionPayload: checkerPayload,
-                    checkerWalletAddress: connectedWalletAddress,
-                  });
+              {onChainCheckers.length > 0 && (
+                <InfoAlert tone={connectedWalletRegisteredOnChain ? 'success' : 'warning'}>
+                  On-chain checkers: {onChainCheckers.join(', ')}
+                </InfoAlert>
+              )}
+            </div>
 
-                  const txSignature = await signAndSendWalletTransaction({
-                    connection: builtTransaction.connection,
-                    provider: walletProvider,
-                    transaction: builtTransaction.transaction,
-                  });
+            <div className="mt-5 flex flex-wrap gap-3">
+              {request.initiationExplorerUrl && (
+                <a
+                  href={request.initiationExplorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm font-medium text-sky-400 hover:text-sky-300"
+                >
+                  View initiation transaction
+                </a>
+              )}
 
-                  await tokenRequestsApi.reject(request.id, {
-                    ...parsed.data,
-                    txSignature,
-                    explorerUrl: buildExplorerTransactionUrl(txSignature, checkerPayload.rpcUrl),
-                  });
-                  enqueueSnackbar('Request rejected with wallet signature', { variant: 'success' });
-                  setFormState((current) => ({ ...current, rejectionReason: '' }));
-                  setRejectDialogOpen(false);
-                  reload();
-                } catch (rejectionError) {
-                  enqueueSnackbar(getErrorMessage(rejectionError, 'Unable to reject request'), { variant: 'error' });
-                } finally {
-                  setRejectSubmitting(false);
+              {request.explorerUrl && (
+                <a
+                  href={request.explorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm font-medium text-sky-400 hover:text-sky-300"
+                >
+                  View explorer transaction
+                </a>
+              )}
+            </div>
+          </section>
+
+          <section className="overflow-hidden rounded-2xl border border-white/10 bg-zinc-900 shadow-xl">
+            <div className="border-b border-white/10 px-6 py-4">
+              <h2 className="text-base font-semibold text-white">Approval history</h2>
+            </div>
+
+            <AppTable
+              columns={[
+                { key: 'action', label: 'Action' },
+                { key: 'checkerUser', label: 'Checker', render: (row) => row.checkerUser?.fullName || '-' },
+                { key: 'comment', label: 'Comment' },
+                { key: 'createdAt', label: 'Created', render: (row) => formatDateTime(row.createdAt) },
+              ]}
+              pagination={null}
+              rows={request.approvals || []}
+            />
+          </section>
+        </div>
+
+        <aside className="space-y-6">
+          <section className="rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-xl">
+            <h2 className="mb-4 text-base font-semibold text-white">Request timeline</h2>
+            <RequestTimeline items={timeline} request={request} />
+          </section>
+
+          <section className="rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-xl">
+            <h2 className="mb-4 text-base font-semibold text-white">Timestamps</h2>
+            <div className="space-y-3 text-sm text-zinc-300">
+              <p>Created: {formatDateTime(request.createdAt)}</p>
+              <p>Approved: {formatDateTime(request.approvedAt)}</p>
+              <p>Rejected: {formatDateTime(request.rejectedAt)}</p>
+              <p>Executed: {formatDateTime(request.executedAt)}</p>
+            </div>
+          </section>
+
+          <WalletConnectCard executionPayload={executionPayload} requestStatus={request.status} />
+        </aside>
+      </div>
+
+      <Dialog open={rejectDialogOpen} onClose={() => setRejectDialogOpen(false)} className="relative z-50">
+        <div className="fixed inset-0 bg-black/70" aria-hidden="true" />
+
+        <div className="fixed inset-0 flex items-center justify-center p-4">
+          <DialogPanel className="w-full max-w-lg rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-base font-semibold text-white">Reject request</DialogTitle>
+              <button
+                type="button"
+                onClick={() => setRejectDialogOpen(false)}
+                className="rounded-md p-1 text-zinc-400 hover:bg-white/10 hover:text-white"
+              >
+                <XMarkIcon className="size-5" />
+              </button>
+            </div>
+
+            <div className="mt-5">
+              <label className="block text-sm font-medium text-zinc-300">Rejection reason</label>
+              <textarea
+                rows={4}
+                value={formState.rejectionReason}
+                onChange={(event) =>
+                  setFormState((current) => ({ ...current, rejectionReason: event.target.value }))
                 }
-              }}
-              variant="contained"
-            >
-              {rejectSubmitting ? 'Processing...' : 'Confirm Reject'}
-            </Button>
-          </>
-        }
-        onClose={() => {
-          setRejectDialogOpen(false);
-          setFormState((current) => ({ ...current, rejectionReason: '' }));
-        }}
-        open={rejectDialogOpen}
-        title="Reject Request"
-      >
-        <TextField
-          fullWidth
-          label="Rejection Reason"
-          multiline
-          minRows={3}
-          onChange={(event) => setFormState((current) => ({ ...current, rejectionReason: event.target.value }))}
-          value={formState.rejectionReason}
-        />
-      </AppDialog>
+                className="mt-2 block w-full rounded-lg border-0 bg-white/5 px-3 py-2.5 text-sm text-white ring-1 ring-inset ring-white/10 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-white/20"
+              />
+            </div>
 
-    </Stack>
+            <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+              <ActionButton
+                disabled={rejectSubmitting}
+                onClick={() => {
+                  setRejectDialogOpen(false);
+                  setFormState({ rejectionReason: '' });
+                }}
+              >
+                Cancel
+              </ActionButton>
+
+              <ActionButton
+                tone="danger"
+                disabled={rejectSubmitting}
+                onClick={async () => {
+                  try {
+                    setRejectSubmitting(true);
+
+                    if (!walletConnected || !connectedWalletAddress) {
+                      throw new Error('Connect a checker wallet before rejecting this request.');
+                    }
+
+                    if (!walletProvider) throw new Error('Wallet provider is not available.');
+
+                    const parsed = rejectionSchema.safeParse({
+                      rejectionReason: formState.rejectionReason,
+                      comment: formState.rejectionReason,
+                    });
+
+                    if (!parsed.success) {
+                      throw new Error(parsed.error.issues[0]?.message || 'Rejection reason is required');
+                    }
+
+                    const preparedResponse = await tokenRequestsApi.prepareCheckerRejection(request.id);
+                    const checkerPayload = preparedResponse.data;
+
+                    const builtTransaction = buildCheckerRejectionTransaction({
+                      executionPayload: checkerPayload,
+                      checkerWalletAddress: connectedWalletAddress,
+                    });
+
+                    const txSignature = await signAndSendWalletTransaction({
+                      connection: builtTransaction.connection,
+                      provider: walletProvider,
+                      transaction: builtTransaction.transaction,
+                    });
+
+                    await tokenRequestsApi.reject(request.id, {
+                      ...parsed.data,
+                      txSignature,
+                      explorerUrl: buildExplorerTransactionUrl(txSignature, checkerPayload.rpcUrl),
+                    });
+
+                    enqueueSnackbar('Request rejected with wallet signature', { variant: 'success' });
+                    setFormState({ rejectionReason: '' });
+                    setRejectDialogOpen(false);
+                    reload();
+                  } catch (rejectionError) {
+                    enqueueSnackbar(getErrorMessage(rejectionError, 'Unable to reject request'), {
+                      variant: 'error',
+                    });
+                  } finally {
+                    setRejectSubmitting(false);
+                  }
+                }}
+              >
+                {rejectSubmitting ? 'Processing...' : 'Confirm reject'}
+              </ActionButton>
+            </div>
+          </DialogPanel>
+        </div>
+      </Dialog>
+    </div>
   );
 }
 

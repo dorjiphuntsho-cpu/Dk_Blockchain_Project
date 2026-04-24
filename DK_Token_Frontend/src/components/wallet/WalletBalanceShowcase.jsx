@@ -1,14 +1,4 @@
-import {
-  Box,
-  Card,
-  CardContent,
-  Chip,
-  Divider,
-  Grid,
-  Paper,
-  Stack,
-  Typography,
-} from '@mui/material';
+import Badge from '../ui/Badge';
 
 import { truncateMiddle } from '../../utils/format';
 
@@ -21,7 +11,7 @@ function getTokenPresentation(balance, tokenMetadataMap) {
 
   return {
     name: tokenMetadata.name || tokenMetadata.symbol || 'Managed Token',
-    subtitle: tokenMetadata.symbol ? `Token - ${tokenMetadata.symbol}` : 'Token',
+    subtitle: tokenMetadata.symbol ? `Token • ${tokenMetadata.symbol}` : 'Token',
   };
 }
 
@@ -36,147 +26,71 @@ function WalletBalanceShowcase({
 }) {
   if (!balances.length) {
     return (
-      <Paper
-        sx={{
-          border: '1px dashed',
-          borderColor: 'divider',
-          borderRadius: 4,
-          p: 3,
-          background: 'linear-gradient(180deg, rgba(243,246,251,0.7) 0%, rgba(255,255,255,0.95) 100%)',
-        }}
-      >
-        <Stack spacing={1}>
-          <Typography variant="h6">{emptyTitle}</Typography>
-          <Typography color="text.secondary">
-            {emptyDescription}
-          </Typography>
-        </Stack>
-      </Paper>
+      <div className="rounded-xl border border-dashed border-white/10 bg-zinc-900 p-6">
+        <div className="space-y-1">
+          <h3 className="text-base font-semibold text-white">{emptyTitle}</h3>
+          <p className="text-sm text-zinc-400">{emptyDescription}</p>
+        </div>
+      </div>
     );
   }
 
   return (
-    <Stack spacing={2}>
+    <div className="space-y-4">
       {walletLabel || walletAddress ? (
-        <Card
-          sx={{
-            borderRadius: 4,
-            border: '1px solid',
-            borderColor: 'divider',
-            boxShadow: '0 18px 38px rgba(15, 23, 42, 0.06)',
-            background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.03) 0%, rgba(255,255,255,0.98) 70%)',
-          }}
-        >
-          <CardContent>
-            <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={2}>
-              <Stack spacing={0.75}>
-                <Typography sx={{ fontWeight: 700 }} variant="h6">
-                  {walletLabel || 'Wallet Holdings'}
-                </Typography>
-                {showWalletAddress && walletAddress ? (
-                  <Typography color="text.secondary" variant="body2">
-                    {truncateMiddle(walletAddress, 16, 12)}
-                  </Typography>
-                ) : null}
-              </Stack>
-              <Stack alignItems={{ xs: 'flex-start', md: 'flex-end' }} spacing={1}>
-                <Chip
-                  label={formatHoldingCount(balances.length)}
-                  sx={{
-                    fontWeight: 700,
-                    backgroundColor: 'rgba(30, 64, 175, 0.08)',
-                    color: 'primary.dark',
-                  }}
-                />
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border border-white/10 bg-zinc-900 p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 space-y-1">
+              <h3 className="text-base font-semibold text-white">{walletLabel || 'Wallet Holdings'}</h3>
+              {showWalletAddress && walletAddress ? (
+                <p className="break-all font-mono text-sm text-zinc-400">{truncateMiddle(walletAddress, 16, 12)}</p>
+              ) : null}
+            </div>
+            <Badge tone="blue">{formatHoldingCount(balances.length)}</Badge>
+          </div>
+        </div>
       ) : null}
 
-      <Grid container spacing={2}>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {balances.map((balance) => {
           const tokenPresentation = getTokenPresentation(balance, tokenMetadataMap);
 
           return (
-            <Grid key={balance.tokenAccountAddress || balance.mintAddress} size={{ xs: 12, md: 6, xl: 4 }}>
-              <Card
-                sx={{
-                  height: '100%',
-                  borderRadius: 4,
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  boxShadow: '0 12px 30px rgba(15, 23, 42, 0.05)',
-                  overflow: 'hidden',
-                }}
-              >
-                <Box
-                  sx={{
-                    px: 2.5,
-                    py: 2,
-                    background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(14, 165, 233, 0.04) 100%)',
-                    borderBottom: '1px solid',
-                    borderColor: 'divider',
-                  }}
-                >
-                  <Stack direction="row" justifyContent="space-between" spacing={1.5}>
-                    <Stack spacing={0.5}>
-                      <Typography color="text.secondary" variant="caption">
-                        {tokenPresentation.subtitle}
-                      </Typography>
-                      <Typography sx={{ fontWeight: 700 }} variant="body1">
-                        {tokenPresentation.name}
-                      </Typography>
-                      <Typography color="text.secondary" variant="body2">
-                        {truncateMiddle(balance.mintAddress, 14, 12)}
-                      </Typography>
-                    </Stack>
-                    <Chip
-                      label={`${balance.amount}`}
-                      sx={{
-                        alignSelf: 'flex-start',
-                        fontWeight: 800,
-                        backgroundColor: 'rgba(255,255,255,0.88)',
-                      }}
-                    />
-                  </Stack>
-                </Box>
-                <CardContent>
-                  <Stack spacing={1.5}>
-                    <Stack direction="row" justifyContent="space-between" spacing={2}>
-                      <Typography color="text.secondary" variant="body2">
-                        Decimals
-                      </Typography>
-                      <Typography sx={{ fontWeight: 700 }} variant="body2">
-                        {balance.decimals}
-                      </Typography>
-                    </Stack>
-                    <Divider />
-                    <Stack direction="row" justifyContent="space-between" spacing={2}>
-                      <Typography color="text.secondary" variant="body2">
-                        Raw Amount
-                      </Typography>
-                      <Typography sx={{ fontWeight: 700 }} variant="body2">
-                        {balance.rawAmount}
-                      </Typography>
-                    </Stack>
-                    <Divider />
-                    <Stack spacing={0.5}>
-                      <Typography color="text.secondary" variant="body2">
-                        Token Account
-                      </Typography>
-                      <Typography sx={{ fontFamily: 'monospace', fontSize: '0.9rem', wordBreak: 'break-all' }}>
-                        {balance.tokenAccountAddress}
-                      </Typography>
-                    </Stack>
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Grid>
+            <div
+              className="overflow-hidden rounded-xl border border-white/10 bg-zinc-900"
+              key={balance.tokenAccountAddress || balance.mintAddress}
+            >
+              <div className="border-b border-white/10 bg-zinc-950/70 px-4 py-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-xs font-medium text-zinc-500">{tokenPresentation.subtitle}</p>
+                    <h4 className="text-sm font-semibold text-white">{tokenPresentation.name}</h4>
+                    <p className="break-all text-sm text-zinc-400">{truncateMiddle(balance.mintAddress, 14, 12)}</p>
+                  </div>
+                  <Badge tone="slate">{balance.amount}</Badge>
+                </div>
+              </div>
+              <div className="space-y-3 px-4 py-4 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-zinc-400">Decimals</span>
+                  <span className="font-medium text-white">{balance.decimals}</span>
+                </div>
+                <div className="border-t border-white/10" />
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-zinc-400">Raw Amount</span>
+                  <span className="break-all font-medium text-white">{balance.rawAmount}</span>
+                </div>
+                <div className="border-t border-white/10" />
+                <div className="space-y-1">
+                  <span className="text-zinc-400">Token Account</span>
+                  <p className="break-all font-mono text-sm text-zinc-200">{balance.tokenAccountAddress}</p>
+                </div>
+              </div>
+            </div>
           );
         })}
-      </Grid>
-    </Stack>
+      </div>
+    </div>
   );
 }
 

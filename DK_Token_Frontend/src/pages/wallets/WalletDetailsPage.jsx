@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Button, Card, CardContent, MenuItem, Stack, Typography } from '@mui/material';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 
+import Button from '../../components/ui/Button';
+import Card from '../../components/ui/Card';
 import ErrorState from '../../components/common/ErrorState';
 import LoadingScreen from '../../components/common/LoadingScreen';
 import PageHeader from '../../components/common/PageHeader';
@@ -114,29 +115,30 @@ function WalletDetailsPage() {
   }
 
   return (
-    <Stack spacing={3}>
+    <div className="space-y-6">
       <PageHeader subtitle="Review wallet status and update wallet details." title="Wallet Details" />
-      <Card>
-        <CardContent>
-          <Typography color="text.secondary" sx={{ mb: 2 }}>
-            Update wallet metadata, user assignment, and primary status.
-          </Typography>
+      <section className="max-w-2xl">
+        <Card className="rounded-2xl bg-zinc-900/80">
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-base font-semibold text-white">Wallet settings</h2>
+              <p className="mt-1 text-sm text-zinc-400">Update wallet metadata, user assignment, and primary status.</p>
+            </div>
           <FormProvider {...methods}>
-            <Stack component="form" onSubmit={handleSubmit} spacing={2.5}>
+            <form className="space-y-6" onSubmit={handleSubmit}>
               <FormTextField label="User" name="userId" select>
                 {users.map((user) => (
-                  <MenuItem key={user.id} value={user.id}>{user.fullName}</MenuItem>
+                  <option key={user.id} value={user.id}>{user.fullName}</option>
                 ))}
               </FormTextField>
               <FormTextField label="Wallet Address" name="walletAddress" />
               <FormTextField label="Label" name="label" />
               <FormTextField label="Is Primary" name="isPrimary" select>
-                <MenuItem value={false}>No</MenuItem>
-                <MenuItem value={true}>Yes</MenuItem>
+                <option value={false}>No</option>
+                <option value={true}>Yes</option>
               </FormTextField>
-              <Stack direction="row" spacing={1.5}>
+              <div className="flex justify-end gap-3 border-t border-white/10 pt-6">
                 <Button
-                  color="warning"
                   disabled={submitting}
                   onClick={async () => {
                     try {
@@ -154,25 +156,27 @@ function WalletDetailsPage() {
                       setSubmitting(false);
                     }
                   }}
-                  variant="outlined"
+                  variant="danger"
                 >
                   {submitting ? 'Saving...' : 'Deactivate'}
                 </Button>
-                <Button disabled={submitting} type="submit" variant="contained">
+                <Button disabled={submitting} type="submit" variant="primary">
                   {submitting ? 'Saving...' : 'Save Changes'}
                 </Button>
-              </Stack>
-            </Stack>
+              </div>
+            </form>
           </FormProvider>
-        </CardContent>
-      </Card>
+          </div>
+        </Card>
+      </section>
       <Card>
-        <CardContent>
-          <Stack spacing={2}>
-            <Typography variant="h6">Token Balances</Typography>
-            <Typography color="text.secondary">
+          <div className="space-y-4">
+            <div>
+            <h2 className="text-base font-semibold text-white">Token Balances</h2>
+            <p className="mt-1 text-sm text-zinc-400">
               Live SPL token balances for this wallet from the connected Solana RPC.
-            </Typography>
+            </p>
+            </div>
             {balanceError ? (
               <ErrorState
                 actionLabel="Reload Balances"
@@ -191,10 +195,9 @@ function WalletDetailsPage() {
                 walletLabel={walletRecord?.label || 'Wallet Holdings'}
               />
             )}
-          </Stack>
-        </CardContent>
+          </div>
       </Card>
-    </Stack>
+    </div>
   );
 }
 

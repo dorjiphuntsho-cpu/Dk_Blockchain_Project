@@ -1,4 +1,3 @@
-import { Link, List, ListItemButton, Stack, Typography } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 
 import InfoPanel from '../common/InfoPanel';
@@ -19,44 +18,43 @@ function RequestListPanel({
     <InfoPanel
       action={
         actionLabel && items.length ? (
-          <Link component={RouterLink} sx={{ fontWeight: 700, textDecoration: 'none' }} to={actionTo}>
+          <RouterLink className="text-sm text-zinc-400 hover:text-white" to={actionTo}>
             {actionLabel}
-          </Link>
+          </RouterLink>
         ) : null
       }
       subtitle={subtitle}
       title={title}
     >
-      <List disablePadding sx={{ display: 'grid', gap: 1 }}>
+      <div className="grid gap-2">
         {items.length ? (
           items.slice(0, 4).map((request) => (
-            <ListItemButton
+            <button
+              className="rounded-md border border-white/10 bg-zinc-950/40 px-3 py-2 text-left transition hover:bg-zinc-900/5"
               key={request.id}
               onClick={() => onSelect(request)}
-              sx={{ alignItems: 'flex-start', px: 1.25, py: 1 }}
+              type="button"
             >
-              <Stack spacing={1.05} sx={{ width: '100%' }}>
-                <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
-                  <Typography sx={{ fontWeight: 700 }} variant="body2">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-white">
                     {truncateMiddle(request.id, 10, 5)}
-                  </Typography>
+                  </span>
                   <StatusChip value={request.status} />
-                </Stack>
-                <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
+                </div>
+                <div className="flex items-center justify-between gap-2">
                   <TypeChip value={request.requestType} />
-                  <Typography color="text.secondary" variant="body2">
+                  <span className="text-sm text-zinc-500">
                     {formatAmount(request.amount)}
-                  </Typography>
-                </Stack>
-              </Stack>
-            </ListItemButton>
+                  </span>
+                </div>
+              </div>
+            </button>
           ))
         ) : (
-          <Typography color="text.secondary" variant="body2">
-            {emptyText}
-          </Typography>
+          <p className="text-sm text-zinc-500">{emptyText}</p>
         )}
-      </List>
+      </div>
     </InfoPanel>
   );
 }

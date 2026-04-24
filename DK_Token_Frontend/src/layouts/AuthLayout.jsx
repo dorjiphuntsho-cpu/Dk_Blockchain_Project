@@ -1,22 +1,14 @@
-import { Box, Container, Paper } from '@mui/material';
 import { Outlet } from 'react-router-dom';
 
 function AuthLayout() {
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        display: 'grid',
-        placeItems: 'center',
-        p: 3,
-      }}
-    >
-      <Container maxWidth="sm">
-        <Paper sx={{ p: { xs: 3, md: 5 } }}>
+    <div className="grid min-h-screen place-items-center px-4 py-10">
+      <div className="w-full max-w-lg">
+        <div className="overflow-hidden rounded-[2rem] border border-white/60 bg-zinc-900/90 p-6 shadow-panel backdrop-blur md:p-10">
           <Outlet />
-        </Paper>
-      </Container>
-    </Box>
+        </div>
+      </div>
+    </div>
   );
 }
 

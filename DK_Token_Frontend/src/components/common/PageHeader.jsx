@@ -1,31 +1,18 @@
-import { Button, Stack, Typography } from '@mui/material';
+import Button from '../ui/Button';
 
 function PageHeader({ title, subtitle, action, breadcrumbs, eyebrow }) {
   return (
-    <Stack spacing={1} sx={{ mb: 4 }}>
+    <div className="mb-6 space-y-2">
       {breadcrumbs || null}
-      {eyebrow ? (
-        <Typography color="text.secondary" sx={{ textTransform: 'uppercase' }} variant="caption">
-          {eyebrow}
-        </Typography>
-      ) : null}
-      <Stack
-        alignItems={{ xs: 'flex-start', md: 'center' }}
-        direction={{ xs: 'column', md: 'row' }}
-        justifyContent="space-between"
-        spacing={2}
-      >
-        <Stack spacing={0.5}>
-          <Typography sx={{ letterSpacing: '-0.045em' }} variant="h4">{title}</Typography>
-          {subtitle ? (
-            <Typography color="text.secondary" sx={{ maxWidth: 700 }} variant="body1">
-              {subtitle}
-            </Typography>
-          ) : null}
-        </Stack>
-        {action ? <Button variant={action.variant || 'contained'} onClick={action.onClick}>{action.label}</Button> : null}
-      </Stack>
-    </Stack>
+      {eyebrow ? <p className="text-sm text-zinc-400">{eyebrow}</p> : null}
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold text-white md:text-3xl">{title}</h1>
+          {subtitle ? <p className="max-w-3xl text-sm leading-6 text-zinc-400">{subtitle}</p> : null}
+        </div>
+        {action ? <Button onClick={action.onClick} size="md" variant={action.variant || 'primary'}>{action.label}</Button> : null}
+      </div>
+    </div>
   );
 }
 

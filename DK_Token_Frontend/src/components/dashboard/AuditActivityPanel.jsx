@@ -1,4 +1,3 @@
-import { Link, List, ListItemButton, Stack, Typography } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 
 import InfoPanel from '../common/InfoPanel';
@@ -10,39 +9,37 @@ function AuditActivityPanel({ items = [] }) {
     <InfoPanel
       action={
         items.length ? (
-          <Link component={RouterLink} sx={{ fontWeight: 700, textDecoration: 'none' }} to="/audit-logs">
+          <RouterLink className="text-sm text-zinc-400 hover:text-white" to="/audit-logs">
             View logs
-          </Link>
+          </RouterLink>
         ) : null
       }
       subtitle="Most recent system activity across users, wallets, and token requests."
       title="Audit Activity"
     >
-      <List disablePadding sx={{ display: 'grid', gap: 1 }}>
+      <div className="grid gap-2">
         {items.length ? (
           items.slice(0, 4).map((log) => (
-            <ListItemButton key={log.id} sx={{ alignItems: 'flex-start', px: 1.25, py: 1 }}>
-              <Stack spacing={0.45} sx={{ width: '100%' }}>
-                <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
-                  <Typography sx={{ fontWeight: 700 }} variant="body2">
+            <div className="rounded-md border border-white/10 bg-zinc-950/40 px-3 py-2" key={log.id}>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-white">
                     {log.action}
-                  </Typography>
-                  <Typography color="text.secondary" variant="caption">
+                  </span>
+                  <span className="text-xs text-zinc-500">
                     {formatDateTime(log.createdAt)}
-                  </Typography>
-                </Stack>
-                <Typography color="text.secondary" variant="body2">
+                  </span>
+                </div>
+                <p className="text-sm text-zinc-500">
                   {log.actorUser?.fullName || 'System'} | {log.entityType} | {truncateMiddle(log.entityId, 10, 5)}
-                </Typography>
-              </Stack>
-            </ListItemButton>
+                </p>
+              </div>
+            </div>
           ))
         ) : (
-          <Typography color="text.secondary" variant="body2">
-            Recent audit activity will appear here once the system is in use.
-          </Typography>
+          <p className="text-sm text-zinc-500">Recent audit activity will appear here once the system is in use.</p>
         )}
-      </List>
+      </div>
     </InfoPanel>
   );
 }

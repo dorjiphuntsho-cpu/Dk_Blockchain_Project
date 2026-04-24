@@ -1,12 +1,3 @@
-import {
-  Autocomplete,
-  Button,
-  Chip,
-  MenuItem,
-  Stack,
-  TextField,
-  Typography,
-} from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
@@ -18,16 +9,20 @@ import ErrorState from '../../components/common/ErrorState';
 import LoadingScreen from '../../components/common/LoadingScreen';
 import PageHeader from '../../components/common/PageHeader';
 import SearchFilters from '../../components/common/SearchFilters';
+import Badge from '../../components/ui/Badge';
+import Button from '../../components/ui/Button';
+import Input from '../../components/ui/Input';
+import Select from '../../components/ui/Select';
 import usePagination from '../../hooks/usePagination';
 import { usersApi } from '../../modules/users/users.api';
 import { ROLE_OPTIONS } from '../../utils/constants';
-import { getErrorMessage } from '../../utils/error';
 import { formatDateTime } from '../../utils/date';
+import { getErrorMessage } from '../../utils/error';
 
 function UsersPage() {
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
-  const { page, limit, setPage, setLimit, paginationQuery } = usePagination();
+  const { setPage, setLimit, paginationQuery } = usePagination();
   const [filters, setFilters] = useState({ search: '', isActive: '' });
   const [users, setUsers] = useState([]);
   const [pagination, setPagination] = useState(null);
@@ -60,39 +55,27 @@ function UsersPage() {
   const columns = useMemo(
     () => [
       { key: 'fullName', label: 'Full Name' },
-      { key: 'email', label: 'Email', sx: { color: 'text.secondary' } },
+      { key: 'email', label: 'Email', render: (row) => <span className="text-zinc-400">{row.email}</span> },
       {
         key: 'roles',
         label: 'Roles',
         render: (row) => (
-          <Stack direction="row" flexWrap="wrap" gap={0.5}>
+          <div className="flex flex-wrap gap-1">
             {row.roles.map((role) => (
-              <Chip key={role} label={role} sx={{ backgroundColor: 'primary.light', color: 'primary.dark' }} />
+              <Badge key={role} tone="blue">{role}</Badge>
             ))}
-          </Stack>
+          </div>
         ),
       },
       {
         key: 'isActive',
         label: 'Status',
-        render: (row) => (
-          <Chip
-            label={row.isActive ? 'Active' : 'Inactive'}
-            sx={{
-              backgroundColor: row.isActive ? 'success.light' : 'grey.200',
-              color: row.isActive ? 'success.main' : 'text.secondary',
-            }}
-          />
-        ),
+        render: (row) => <Badge tone={row.isActive ? 'emerald' : 'slate'}>{row.isActive ? 'Active' : 'Inactive'}</Badge>,
       },
       {
         key: 'createdAt',
         label: 'Created',
-        render: (row) => (
-          <Typography color="text.secondary" variant="body2">
-            {formatDateTime(row.createdAt)}
-          </Typography>
-        ),
+        render: (row) => <span className="text-zinc-400">{formatDateTime(row.createdAt)}</span>,
       },
       {
         key: 'actions',
@@ -100,18 +83,26 @@ function UsersPage() {
         align: 'right',
         disableRowClick: true,
         render: (row) => (
-          <Stack direction="row" justifyContent="flex-end" spacing={1}>
-            <Button onClick={() => navigate(`/users/${row.id}`)} size="small" variant="text">View</Button>
-            <Button onClick={() => {
-              setRolesDialogUser(row);
-              setSelectedRoles(ROLE_OPTIONS.filter((option) => row.roles.includes(option.value)));
-            }} size="small" variant="text">
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => navigate(`/users/${row.id}`)} size="sm" variant="ghost">View</Button>
+            <Button
+              onClick={() => {
+                setRolesDialogUser(row);
+                setSelectedRoles(ROLE_OPTIONS.filter((option) => row.roles.includes(option.value)));
+              }}
+              size="sm"
+              variant="outline"
+            >
               Roles
             </Button>
-            <Button color={row.isActive ? 'error' : 'success'} onClick={() => setSelectedUser(row)} size="small" variant="outlined">
+            <Button
+              onClick={() => setSelectedUser(row)}
+              size="sm"
+              variant={row.isActive ? 'danger' : 'secondary'}
+            >
               {row.isActive ? 'Deactivate' : 'Activate'}
             </Button>
-          </Stack>
+          </div>
         ),
       },
     ],
@@ -127,46 +118,49 @@ function UsersPage() {
   }
 
   return (
-    <Stack spacing={3}>
+    <div className="space-y-6">
       <PageHeader
         action={{ label: 'Create User', onClick: () => navigate('/users/new') }}
         subtitle="Manage users, status, and role assignments."
         title="Users"
       />
 
-      <SearchFilters>
-        <TextField
-          label="Search"
-          onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
-          value={filters.search}
-        />
-        <TextField
-          label="Status"
-          onChange={(event) => setFilters((current) => ({ ...current, isActive: event.target.value }))}
-          select
-          value={filters.isActive}
-        >
-          <MenuItem value="">All</MenuItem>
-          <MenuItem value="true">Active</MenuItem>
-          <MenuItem value="false">Inactive</MenuItem>
-        </TextField>
-        <Button
-          onClick={() => setFilters({ search: '', isActive: '' })}
-          variant="outlined"
-        >
-          Reset Filters
-        </Button>
+      <SearchFilters
+        actions={(
+          <Button onClick={() => setFilters({ search: '', isActive: '' })} variant="outline">
+            Reset Filters
+          </Button>
+        )}
+      >
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-zinc-200">Search</span>
+          <Input
+            onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
+            value={filters.search}
+          />
+        </label>
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-zinc-200">Status</span>
+          <Select
+            onChange={(event) => setFilters((current) => ({ ...current, isActive: event.target.value }))}
+            value={filters.isActive}
+          >
+            <option value="">All</option>
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+          </Select>
+        </label>
       </SearchFilters>
 
       <AppTable
         columns={columns}
         error={error}
         loading={loading}
-        onRowClick={(row) => navigate(`/users/${row.id}`)}
         onPageChange={setPage}
+        onRetry={loadUsers}
+        onRowClick={(row) => navigate(`/users/${row.id}`)}
         onRowsPerPageChange={setLimit}
         pagination={pagination}
-        onRetry={loadUsers}
         rows={users}
       />
 
@@ -193,10 +187,10 @@ function UsersPage() {
       />
 
       <AppDialog
-        actions={
+        actions={(
           <>
-          <Button onClick={() => setRolesDialogUser(null)}>Cancel</Button>
-          <Button
+            <Button onClick={() => setRolesDialogUser(null)} variant="outline">Cancel</Button>
+            <Button
               disabled={rolesSaving}
               onClick={async () => {
                 try {
@@ -211,26 +205,44 @@ function UsersPage() {
                   setRolesSaving(false);
                 }
               }}
-              variant="contained"
+              variant="secondary"
             >
               {rolesSaving ? 'Saving...' : 'Save Roles'}
             </Button>
           </>
-        }
+        )}
         onClose={() => setRolesDialogUser(null)}
         open={Boolean(rolesDialogUser)}
         title="Assign Roles"
       >
-        <Autocomplete
-          disableCloseOnSelect
-          multiple
-          onChange={(_event, value) => setSelectedRoles(value)}
-          options={ROLE_OPTIONS}
-          renderInput={(params) => <TextField {...params} label="Roles" />}
-          value={selectedRoles}
-        />
+        <div className="space-y-4">
+          <p className="text-sm text-zinc-400">Choose one or more roles for this user.</p>
+          <div className="space-y-2">
+            <span className="text-sm font-medium text-zinc-200">Roles</span>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {ROLE_OPTIONS.map((option) => {
+                const checked = selectedRoles.some((role) => role.value === option.value);
+                return (
+                  <label className="flex items-center gap-3 rounded-lg border border-white/10 bg-zinc-950 px-3 py-2.5" key={option.value}>
+                    <input
+                      checked={checked}
+                      className="rounded border-white/10 bg-zinc-950 text-white focus:ring-white/20"
+                      onChange={(event) => {
+                        setSelectedRoles((current) => (event.target.checked
+                          ? [...current, option]
+                          : current.filter((role) => role.value !== option.value)));
+                      }}
+                      type="checkbox"
+                    />
+                    <span className="text-sm text-zinc-200">{option.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       </AppDialog>
-    </Stack>
+    </div>
   );
 }
 

@@ -1,13 +1,13 @@
-import { Alert, Button, Link, Stack, Typography } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
-import { useSnackbar } from 'notistack';
 
+import Alert from '../../components/ui/Alert';
 import AppDialog from '../../components/common/AppDialog';
 import AppTable from '../../components/common/AppTable';
 import ErrorState from '../../components/common/ErrorState';
 import LoadingScreen from '../../components/common/LoadingScreen';
 import PageHeader from '../../components/common/PageHeader';
+import Button from '../../components/ui/Button';
 import StatusChip from '../../components/common/StatusChip';
 import TypeChip from '../../components/common/TypeChip';
 import WalletConnectCard from '../../components/wallet/WalletConnectCard';
@@ -18,7 +18,6 @@ import { EXECUTION_MODES, ON_CHAIN_PENDING_STATUSES, REQUEST_STATUSES } from '..
 
 function ReadyForExecutionPage() {
   const navigate = useNavigate();
-  const { enqueueSnackbar } = useSnackbar();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -26,7 +25,6 @@ function ReadyForExecutionPage() {
   const [selectedExecutionPayload, setSelectedExecutionPayload] = useState(null);
   const [selectedExecutionPayloadError, setSelectedExecutionPayloadError] = useState('');
   const [selectedExecutionPayloadLoading, setSelectedExecutionPayloadLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
 
   async function load() {
     try {
@@ -87,9 +85,9 @@ function ReadyForExecutionPage() {
       key: 'id',
       label: 'Request ID',
       render: (row) => (
-        <Link component={RouterLink} sx={{ fontWeight: 700, textDecoration: 'none' }} to={`/token-requests/${row.id}`}>
+        <RouterLink className="font-medium text-sky-400 hover:text-sky-300" to={`/token-requests/${row.id}`}>
           {truncateMiddle(row.id, 10, 5)}
-        </Link>
+        </RouterLink>
       ),
     },
     { key: 'requestType', label: 'Type', render: (row) => <TypeChip value={row.requestType} /> },
@@ -102,15 +100,13 @@ function ReadyForExecutionPage() {
       align: 'right',
       disableRowClick: true,
       render: (row) => (
-        <Stack direction="row" justifyContent="flex-end" spacing={1}>
-          <Button onClick={() => navigate(`/token-requests/${row.id}`)} size="small" variant="text">Details</Button>
-          <Button onClick={() => setSelectedRequest(row)} size="small" variant="outlined">
-            Execute
-          </Button>
-        </Stack>
+        <div className="flex justify-end gap-2">
+          <Button onClick={() => navigate(`/token-requests/${row.id}`)} size="sm" variant="ghost">Details</Button>
+          <Button onClick={() => setSelectedRequest(row)} size="sm" variant="outline">Execute</Button>
+        </div>
       ),
     },
-  ], [enqueueSnackbar, navigate]);
+  ], [navigate]);
 
   if (loading) {
     return <LoadingScreen message="Loading execution queue..." />;
@@ -121,50 +117,50 @@ function ReadyForExecutionPage() {
   }
 
   return (
-    <Stack spacing={3}>
+    <div className="space-y-6">
       <PageHeader subtitle="Handle requests that are approved, on-chain pending, and ready for browser signing or execution capture." title="On-chain Pending" />
       <WalletConnectCard executionPayload={selectedExecutionPayload} requestStatus={selectedRequest?.status} />
       <AppTable columns={columns} error={error} onRetry={load} onRowClick={(row) => navigate(`/token-requests/${row.id}`)} pagination={null} rows={requests} />
 
       <AppDialog
-        actions={
+        actions={(
           <>
-            <Button onClick={() => setSelectedRequest(null)}>Cancel</Button>
-            <Button onClick={() => navigate(`/token-requests/${selectedRequest.id}`)} variant="contained">
+            <Button onClick={() => setSelectedRequest(null)} variant="outline">Cancel</Button>
+            <Button onClick={() => navigate(`/token-requests/${selectedRequest.id}`)} variant="secondary">
               Open Request
             </Button>
           </>
-        }
+        )}
         onClose={() => setSelectedRequest(null)}
         open={Boolean(selectedRequest)}
         title="Execute Request"
       >
-        <Stack spacing={2}>
-          {selectedExecutionPayloadLoading ? <Alert severity="info">Loading execution boundary...</Alert> : null}
-          {selectedExecutionPayloadError ? <Alert severity="warning">{selectedExecutionPayloadError}</Alert> : null}
+        <div className="space-y-3">
+          {selectedExecutionPayloadLoading ? <Alert tone="info">Loading execution boundary...</Alert> : null}
+          {selectedExecutionPayloadError ? <Alert tone="warning">{selectedExecutionPayloadError}</Alert> : null}
           {selectedExecutionPayload?.walletInitiation?.supported ? (
-            <Alert severity={selectedExecutionPayload.walletInitiation.recorded ? 'success' : 'info'}>
+            <Alert tone={selectedExecutionPayload.walletInitiation.recorded ? 'success' : 'info'}>
               {selectedExecutionPayload.walletInitiation.recorded
                 ? 'Maker-side wallet initiation is already recorded. Execution can reuse the on-chain request address.'
                 : 'This request is already in the on-chain pending queue and still needs maker-side wallet initiation before final approval.'}
             </Alert>
           ) : null}
-          <Alert severity="info">{getNextActorMessage(selectedRequest, selectedExecutionPayload)}</Alert>
-          <Alert severity="info">
+          <Alert tone="info">{getNextActorMessage(selectedRequest, selectedExecutionPayload)}</Alert>
+          <Alert tone="info">
             {selectedExecutionPayload?.executionMode === EXECUTION_MODES.BROWSER_WALLET
               ? 'The browser wallet flow will finalize the already-recorded on-chain request.'
               : 'The backend will record the execution result for requests still using the server-managed path.'}
           </Alert>
-          <Typography color="text.secondary" variant="body2">
+          <p className="text-sm text-zinc-400">
             {selectedExecutionPayload?.walletInitiation?.supported
               ? 'This request can be initiated in the browser by the maker wallet before checker approval.'
               : selectedExecutionPayload?.serverManagedCreateSupported
                 ? 'This path still uses the backend-managed maker and checker wallets configured in the backend.'
                 : 'Browser wallet connection is available in the UI.'}
-          </Typography>
-        </Stack>
+          </p>
+        </div>
       </AppDialog>
-    </Stack>
+    </div>
   );
 }
 

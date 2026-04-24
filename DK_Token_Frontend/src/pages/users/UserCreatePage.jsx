@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Button, Stack } from '@mui/material';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 
 import PageHeader from '../../components/common/PageHeader';
+import Button from '../../components/ui/Button';
+import Card from '../../components/ui/Card';
 import FormAutocomplete from '../../components/form/FormAutocomplete';
 import FormTextField from '../../components/form/FormTextField';
 import { usersApi } from '../../modules/users/users.api';
@@ -35,21 +36,29 @@ function UserCreatePage() {
   });
 
   return (
-    <Stack spacing={3}>
+    <div className="space-y-6">
       <PageHeader subtitle="Create a new user and assign initial roles." title="Create User" />
+      <section className="max-w-2xl">
+        <Card className="rounded-2xl bg-zinc-900/80">
       <FormProvider {...methods}>
-        <Stack component="form" onSubmit={handleSubmit} spacing={2.5}>
+        <form className="space-y-6" onSubmit={handleSubmit}>
+          <div>
+            <h2 className="text-base font-semibold text-white">User details</h2>
+            <p className="mt-1 text-sm text-zinc-400">Create a user account and assign the roles they need to operate in the portal.</p>
+          </div>
           <FormTextField label="Full Name" name="fullName" />
           <FormTextField label="Email" name="email" />
           <FormTextField label="Password" name="password" type="password" />
           <FormAutocomplete label="Roles" multiple name="roles" options={ROLE_OPTIONS} />
-          <Stack direction="row" spacing={1.5}>
-            <Button onClick={() => navigate('/users')} variant="outlined">Cancel</Button>
-            <Button type="submit" variant="contained">Create User</Button>
-          </Stack>
-        </Stack>
+          <div className="flex justify-end gap-3 border-t border-white/10 pt-6">
+            <Button onClick={() => navigate('/users')} variant="secondary">Cancel</Button>
+            <Button type="submit" variant="primary">Create User</Button>
+          </div>
+        </form>
       </FormProvider>
-    </Stack>
+        </Card>
+      </section>
+    </div>
   );
 }
 

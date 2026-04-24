@@ -1,11 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Alert, Box, Button, Stack, Typography } from '@mui/material';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 import { useState } from 'react';
 
 import FormTextField from '../../components/form/FormTextField';
+import Alert from '../../components/ui/Alert';
+import Button from '../../components/ui/Button';
 import useAuth from '../../hooks/useAuth';
 import { loginSchema } from '../../modules/auth/auth.schemas';
 
@@ -35,28 +36,52 @@ function LoginPage() {
   });
 
   return (
-    <Stack spacing={4}>
-      <Box>
-        <Typography variant="h4"> Lizard Token Portal</Typography>
-        {/* <Typography color="text.secondary" sx={{ mt: 1 }}>
-          Sign in to manage off-chain token workflows, approvals, and execution readiness.
-        </Typography> */}
-      </Box>
-      <Alert severity="info">
-        Mock credentials: `admin@example.com`, `maker@example.com`, `checker@example.com`, `executor@example.com`
-        with passwords `Admin@123`, `Maker@123`, `Checker@123`, `Executor@123`.
-      </Alert>
-      {formError ? <Alert severity="error">{formError}</Alert> : null}
-      <FormProvider {...methods}>
-        <Stack component="form" onSubmit={handleSubmit} spacing={2.5}>
-          <FormTextField label="Email" name="email" />
-          <FormTextField label="Password" name="password" type="password" />
-          <Button disabled={isLoading} size="large" type="submit" variant="contained">
-            {isLoading ? 'Signing in...' : 'Sign In'}
-          </Button>
-        </Stack>
-      </FormProvider>
-    </Stack>
+    <div className="mx-auto w-full max-w-md">
+      <div className="mb-8">
+        <h1 className="text-2xl font-semibold tracking-tight text-white">
+          Lizard Token Portal
+        </h1>
+        <p className="mt-2 text-sm leading-6 text-zinc-400">
+          Sign in to manage token operations, maker-checker approvals, wallet coordination, and on-chain execution.
+        </p>
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-zinc-900/80 p-8 shadow-2xl">
+        <div className="mb-6">
+          <span className="inline-flex items-center rounded-md bg-zinc-900/10 px-2 py-1 text-xs font-medium text-zinc-300 ring-1 ring-inset ring-white/10">
+            Secure operations
+          </span>
+        </div>
+
+        <Alert tone="info">
+          Mock credentials: <span className="font-mono">admin@example.com</span>,{' '}
+          <span className="font-mono">maker@example.com</span>,{' '}
+          <span className="font-mono">checker@example.com</span>,{' '}
+          <span className="font-mono">executor@example.com</span> with passwords{' '}
+          <span className="font-mono">Admin@123</span>,{' '}
+          <span className="font-mono">Maker@123</span>,{' '}
+          <span className="font-mono">Checker@123</span>,{' '}
+          <span className="font-mono">Executor@123</span>.
+        </Alert>
+
+        {formError ? (
+          <div className="mt-4">
+            <Alert tone="error">{formError}</Alert>
+          </div>
+        ) : null}
+
+        <FormProvider {...methods}>
+          <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
+            <FormTextField label="Email" name="email" />
+            <FormTextField label="Password" name="password" type="password" />
+
+            <Button className="w-full" disabled={isLoading} size="lg" type="submit">
+              {isLoading ? 'Signing in...' : 'Sign in'}
+            </Button>
+          </form>
+        </FormProvider>
+      </div>
+    </div>
   );
 }
 

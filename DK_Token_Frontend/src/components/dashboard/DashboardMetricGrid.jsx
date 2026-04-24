@@ -1,21 +1,8 @@
-import { Box } from '@mui/material';
-
 import DashboardCard from '../common/DashboardCard';
 
 function DashboardMetricGrid({ items = [] }) {
   return (
-    <Box
-      sx={{
-        display: 'grid',
-        gap: 1.75,
-        gridTemplateColumns: {
-          xs: '1fr',
-          sm: 'repeat(2, minmax(0, 1fr))',
-          lg: 'repeat(3, minmax(0, 1fr))',
-          xl: 'repeat(4, minmax(0, 1fr))',
-        },
-      }}
-    >
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {items.map((item) => (
         <DashboardCard
           key={item.key}
@@ -26,7 +13,7 @@ function DashboardMetricGrid({ items = [] }) {
           value={item.value}
         />
       ))}
-    </Box>
+    </div>
   );
 }
 

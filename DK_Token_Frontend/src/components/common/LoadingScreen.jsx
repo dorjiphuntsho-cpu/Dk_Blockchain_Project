@@ -1,16 +1,11 @@
-import { Box, CircularProgress, Stack, Typography } from '@mui/material';
+import LoadingSpinner from '../ui/LoadingSpinner';
 
 function LoadingScreen({ message = 'Loading...' }) {
   return (
-    <Stack
-      alignItems="center"
-      justifyContent="center"
-      spacing={2}
-      sx={{ minHeight: '60vh' }}
-    >
-      <CircularProgress />
-      <Typography color="text.secondary">{message}</Typography>
-    </Stack>
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
+      <LoadingSpinner className="size-10 border-[5px]" />
+      <p className="text-sm text-zinc-400">{message}</p>
+    </div>
   );
 }
 
