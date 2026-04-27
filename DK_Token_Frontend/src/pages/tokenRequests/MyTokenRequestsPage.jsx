@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { useSnackbar } from 'notistack';
 
 import AppTable from '../../components/common/AppTable';
 import ErrorState from '../../components/common/ErrorState';
@@ -12,22 +13,37 @@ import StatusChip from '../../components/common/StatusChip';
 import TypeChip from '../../components/common/TypeChip';
 import useAuth from '../../hooks/useAuth';
 import usePagination from '../../hooks/usePagination';
+import useSolanaWallet from '../../hooks/useSolanaWallet';
+import {
+  buildExplorerTransactionUrl,
+  buildMakerCancellationTransaction,
+  signAndSendWalletTransaction,
+} from '../../modules/solana/walletExecution';
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
 import { REQUEST_STATUS_OPTIONS } from '../../utils/constants';
 import { formatDateTime } from '../../utils/date';
+import { getErrorMessage } from '../../utils/error';
 import { formatAmount, truncateMiddle } from '../../utils/format';
+import { canCancelPendingRequest } from '../../utils/permissions';
 
 function MyTokenRequestsPage() {
   const navigate = useNavigate();
+  const { enqueueSnackbar } = useSnackbar();
   const { user } = useAuth();
+  const {
+    address: connectedWalletAddress,
+    connected: walletConnected,
+    provider: walletProvider,
+  } = useSolanaWallet();
   const { setPage, setLimit, paginationQuery } = usePagination();
   const [filters, setFilters] = useState({ status: '' });
   const [requests, setRequests] = useState([]);
   const [pagination, setPagination] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [cancellingRequestId, setCancellingRequestId] = useState('');
 
-  async function loadRequests() {
+  const loadRequests = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -43,11 +59,13 @@ function MyTokenRequestsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [filters, paginationQuery, user.id]);
 
   useEffect(() => {
-    loadRequests();
-  }, [filters, paginationQuery.page, paginationQuery.limit, user.id]);
+    (async () => {
+      await loadRequests();
+    })();
+  }, [loadRequests]);
 
   const columns = useMemo(() => [
     {
@@ -80,10 +98,78 @@ function MyTokenRequestsPage() {
               Edit
             </Button>
           ) : null}
+          {canCancelPendingRequest(user, row) ? (
+            <Button
+              disabled={cancellingRequestId === row.id}
+              onClick={async () => {
+                try {
+                  setCancellingRequestId(row.id);
+                  if (row.onChainRequestAddress) {
+                    if (!walletConnected || !connectedWalletAddress) {
+                      throw new Error('Connect the maker wallet before cancelling this on-chain request.');
+                    }
+
+                    if (!walletProvider) {
+                      throw new Error('Wallet provider is not available.');
+                    }
+
+                    const preparedResponse = await tokenRequestsApi.prepareMakerCancellation(
+                      row.id,
+                      connectedWalletAddress,
+                    );
+                    const cancellationPayload = preparedResponse.data;
+                    const txSignature = cancellationPayload.cancelInstruction
+                      ? await (async () => {
+                        const builtTransaction = buildMakerCancellationTransaction({
+                          executionPayload: cancellationPayload,
+                          makerWalletAddress: connectedWalletAddress,
+                        });
+
+                        return signAndSendWalletTransaction({
+                          connection: builtTransaction.connection,
+                          provider: walletProvider,
+                          transaction: builtTransaction.transaction,
+                        });
+                      })()
+                      : `mock-cancel-${Date.now()}`;
+
+                    await tokenRequestsApi.recordCancellation(row.id, {
+                      makerWalletAddress: connectedWalletAddress,
+                      txSignature,
+                      explorerUrl: buildExplorerTransactionUrl(txSignature, cancellationPayload.rpcUrl),
+                    });
+                  } else {
+                    await tokenRequestsApi.cancel(row.id);
+                  }
+
+                  enqueueSnackbar('Request cancelled', { variant: 'success' });
+                  await loadRequests();
+                } catch (cancelError) {
+                  const message = getErrorMessage(cancelError, 'Unable to cancel request');
+                  if (/already cancelled on chain|current status is cancelled/i.test(message)) {
+                    enqueueSnackbar('This request is already cancelled on chain.', { variant: 'warning' });
+                    await loadRequests();
+                  } else {
+                    enqueueSnackbar(message, { variant: 'error' });
+                  }
+                } finally {
+                  setCancellingRequestId('');
+                }
+              }}
+              size="sm"
+              variant="danger"
+            >
+              {cancellingRequestId === row.id
+                ? 'Cancelling...'
+                : row.onChainRequestAddress
+                  ? 'Cancel Request'
+                  : 'Cancel'}
+            </Button>
+          ) : null}
         </div>
       ),
     },
-  ], [navigate]);
+  ], [cancellingRequestId, connectedWalletAddress, enqueueSnackbar, loadRequests, navigate, user, walletConnected, walletProvider]);
 
   if (loading && !requests.length) {
     return <LoadingScreen message="Loading your requests..." />;

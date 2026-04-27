@@ -14,6 +14,7 @@ import WalletBalanceShowcase from '../../components/wallet/WalletBalanceShowcase
 import useAuth from '../../hooks/useAuth';
 import { managedTokensApi } from '../../modules/solana/managedTokens.api';
 import { walletsApi } from '../../modules/wallets/wallets.api';
+import { dropdownMenuButtonClass, dropdownMenuItemClass, dropdownMenuPanelClass } from '../../utils/dropdownStyles';
 
 function WalletActionsMenu({ walletAddress }) {
   const copyAddress = async () => {
@@ -22,7 +23,7 @@ function WalletActionsMenu({ walletAddress }) {
 
   return (
     <Menu as="div" className="relative inline-block text-right">
-      <MenuButton className="inline-flex items-center gap-2 rounded-md bg-gray-800 px-3 py-1.5 text-sm/6 font-semibold text-white shadow-inner shadow-white/10 focus:not-data-focus:outline-none data-focus:outline data-focus:outline-white data-hover:bg-gray-700 data-open:bg-gray-700">
+      <MenuButton className={dropdownMenuButtonClass}>
         Options
         <ChevronDownIcon className="size-4 fill-white/60" />
       </MenuButton>
@@ -30,12 +31,12 @@ function WalletActionsMenu({ walletAddress }) {
       <MenuItems
         transition
         anchor="bottom end"
-        className="w-52 origin-top-right rounded-xl border border-white/5 bg-white/5 p-1 text-sm/6 text-white transition duration-100 ease-out [--anchor-gap:--spacing(1)] focus:outline-none data-closed:scale-95 data-closed:opacity-0"
+        className={`${dropdownMenuPanelClass} w-52`}
       >
         <MenuItem>
           <button
             type="button"
-            className="group flex w-full items-center gap-2 rounded-lg px-3 py-1.5 data-focus:bg-white/10"
+            className={dropdownMenuItemClass}
           >
             <EyeIcon className="size-4 fill-white/30" />
             View balances
@@ -46,7 +47,7 @@ function WalletActionsMenu({ walletAddress }) {
           <button
             type="button"
             onClick={copyAddress}
-            className="group flex w-full items-center gap-2 rounded-lg px-3 py-1.5 data-focus:bg-white/10"
+            className={dropdownMenuItemClass}
           >
             <ClipboardDocumentIcon className="size-4 fill-white/30" />
             Copy address
@@ -59,7 +60,7 @@ function WalletActionsMenu({ walletAddress }) {
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="group flex w-full items-center gap-2 rounded-lg px-3 py-1.5 data-focus:bg-white/10"
+            className={dropdownMenuItemClass}
           >
             <ArrowPathIcon className="size-4 fill-white/30" />
             Refresh

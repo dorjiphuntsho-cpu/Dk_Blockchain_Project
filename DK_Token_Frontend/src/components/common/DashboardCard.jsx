@@ -1,4 +1,4 @@
-function DashboardCard({ label, value, subtitle, icon, accent = 'primary.main' }) {
+function DashboardCard({ label, value, subtitle, icon }) {
   return (
     <div className="h-full rounded-xl border border-white/10 bg-zinc-900 p-4">
       <div className="flex items-start justify-between gap-3">

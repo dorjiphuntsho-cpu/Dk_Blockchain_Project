@@ -1,6 +1,6 @@
 import { useContext } from 'react';
 
-import { SolanaContext } from '../app/solanaProvider';
+import SolanaContext from '../app/solanaContext';
 
 function useSolanaWallet() {
   const context = useContext(SolanaContext);

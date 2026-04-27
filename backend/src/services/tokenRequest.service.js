@@ -215,9 +215,18 @@ async function reconcileProcessedOnChainRequest(tokenRequest) {
     return tokenRequest;
   }
 
-  const nextStatus = onChainRequest.status === 'APPROVED'
-    ? TOKEN_REQUEST_STATUSES.APPROVED
-    : TOKEN_REQUEST_STATUSES.REJECTED;
+  let nextStatus = null;
+  if (onChainRequest.status === 'APPROVED') {
+    nextStatus = TOKEN_REQUEST_STATUSES.APPROVED;
+  } else if (onChainRequest.status === 'REJECTED') {
+    nextStatus = TOKEN_REQUEST_STATUSES.REJECTED;
+  } else if (onChainRequest.status === 'CANCELLED') {
+    nextStatus = TOKEN_REQUEST_STATUSES.CANCELLED;
+  }
+
+  if (!nextStatus) {
+    return tokenRequest;
+  }
 
   let checkerUserId = null;
   if (onChainRequest.checker) {
@@ -483,6 +492,208 @@ async function submitTokenRequest(id, actorUserId) {
       },
       tx,
     );
+
+    return updatedRequest;
+  });
+
+  return tokenRequest;
+}
+
+async function cancelTokenRequest(id, actorUserId) {
+  const existingRequest = await getTokenRequestOrThrow(id);
+
+  if (existingRequest.makerUserId !== actorUserId) {
+    throw new ApiError(403, 'You can only cancel your own token requests');
+  }
+
+  if (existingRequest.status !== TOKEN_REQUEST_STATUSES.PENDING_APPROVAL) {
+    throw new ApiError(400, 'Only PENDING_APPROVAL requests can be cancelled');
+  }
+
+  if (existingRequest.onChainRequestAddress) {
+    throw new ApiError(
+      400,
+      'Requests already initiated on chain cannot be cancelled from the portal',
+    );
+  }
+
+  assertTransition(existingRequest.status, TOKEN_REQUEST_STATUSES.CANCELLED);
+
+  const tokenRequest = await prisma.$transaction(async (tx) => {
+    const updatedRequest = await tx.tokenRequest.update({
+      where: { id },
+      data: {
+        status: TOKEN_REQUEST_STATUSES.CANCELLED,
+      },
+      include: tokenRequestInclude,
+    });
+
+    await auditLogService.createAuditLog(
+      {
+        actorUserId,
+        entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+        entityId: id,
+        action: AUDIT_ACTIONS.CANCEL,
+        metadata: {
+          previousStatus: existingRequest.status,
+          newStatus: TOKEN_REQUEST_STATUSES.CANCELLED,
+        },
+      },
+      tx,
+    );
+
+    await auditLogService.createAuditLog(
+      {
+        actorUserId,
+        entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+        entityId: id,
+        action: AUDIT_ACTIONS.STATUS_CHANGE,
+        metadata: {
+          previousStatus: existingRequest.status,
+          newStatus: TOKEN_REQUEST_STATUSES.CANCELLED,
+        },
+      },
+      tx,
+    );
+
+    return updatedRequest;
+  });
+
+  return tokenRequest;
+}
+
+async function prepareMakerCancellation(id, actorUser, makerWalletAddress) {
+  let existingRequest = await getTokenRequestOrThrow(id);
+  existingRequest = await reconcileProcessedOnChainRequest(existingRequest);
+
+  if (existingRequest.makerUserId !== actorUser.id) {
+    throw new ApiError(403, 'You can only cancel your own token requests');
+  }
+
+  if (existingRequest.status === TOKEN_REQUEST_STATUSES.CANCELLED) {
+    throw new ApiError(409, 'This request is already cancelled on chain. Reload the page to sync the latest status.');
+  }
+
+  if (existingRequest.status !== TOKEN_REQUEST_STATUSES.PENDING_APPROVAL) {
+    throw new ApiError(400, `Only PENDING_APPROVAL requests can be cancelled. Current status is ${existingRequest.status}.`);
+  }
+
+  if (!existingRequest.onChainRequestAddress) {
+    throw new ApiError(400, 'This request has not been initiated on chain');
+  }
+
+  const expectedMakerWalletAddress =
+    existingRequest.makerWalletAddress || existingRequest.sourceWallet?.walletAddress || null;
+
+  if (
+    makerWalletAddress
+    && expectedMakerWalletAddress
+    && makerWalletAddress !== expectedMakerWalletAddress
+  ) {
+    throw new ApiError(
+      400,
+      `makerWalletAddress must match the expected wallet address ${expectedMakerWalletAddress}`,
+    );
+  }
+
+  const payload = await blockchainService.prepareMakerCancellationPayload(id, makerWalletAddress);
+  await createPreparationAuditLog({
+    actorUserId: actorUser.id,
+    tokenRequest: existingRequest,
+    preparationType: 'MAKER_CANCELLATION',
+    payload,
+  });
+
+  return payload;
+}
+
+async function recordCancellation(id, payload, actorUserId) {
+  const originalRequest = await getTokenRequestOrThrow(id);
+
+  if (originalRequest.makerUserId !== actorUserId) {
+    throw new ApiError(403, 'You can only record cancellation for your own token requests');
+  }
+
+  if (!originalRequest.onChainRequestAddress) {
+    throw new ApiError(400, 'This request has not been initiated on chain');
+  }
+
+  const expectedMakerWalletAddress =
+    originalRequest.makerWalletAddress || originalRequest.sourceWallet?.walletAddress || null;
+
+  if (
+    expectedMakerWalletAddress
+    && payload.makerWalletAddress !== expectedMakerWalletAddress
+  ) {
+    throw new ApiError(
+      400,
+      `makerWalletAddress must match the expected wallet address ${expectedMakerWalletAddress}`,
+    );
+  }
+
+  const onChainRequest = await solanaService.fetchTokenRequestAccount(originalRequest.onChainRequestAddress);
+  if (!onChainRequest) {
+    throw new ApiError(404, 'On-chain request not found');
+  }
+
+  if (onChainRequest.status !== 'CANCELLED') {
+    throw new ApiError(
+      409,
+      `On-chain request status is ${onChainRequest.status || 'UNKNOWN'}. Reload the page and try again after confirmation.`,
+    );
+  }
+
+  let existingRequest = await reconcileProcessedOnChainRequest(originalRequest);
+
+  if (
+    existingRequest.status !== TOKEN_REQUEST_STATUSES.PENDING_APPROVAL
+    && existingRequest.status !== TOKEN_REQUEST_STATUSES.CANCELLED
+  ) {
+    throw new ApiError(400, `Only PENDING_APPROVAL requests can be cancelled. Current status is ${existingRequest.status}.`);
+  }
+
+  const tokenRequest = await prisma.$transaction(async (tx) => {
+    const updatedRequest = await blockchainService.recordCancellationResult(
+      id,
+      payload.makerWalletAddress,
+      payload.txSignature,
+      payload.explorerUrl,
+      tx,
+    );
+
+    await auditLogService.createAuditLog(
+      {
+        actorUserId,
+        entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+        entityId: id,
+        action: AUDIT_ACTIONS.CANCEL,
+        metadata: {
+          previousStatus: originalRequest.status,
+          newStatus: TOKEN_REQUEST_STATUSES.CANCELLED,
+          txSignature: payload.txSignature || null,
+          explorerUrl: payload.explorerUrl || null,
+          onChainRequestAddress: existingRequest.onChainRequestAddress,
+          recordedAfterOnChainConfirmation: existingRequest.status === TOKEN_REQUEST_STATUSES.CANCELLED,
+        },
+      },
+      tx,
+    );
+
+    if (originalRequest.status !== TOKEN_REQUEST_STATUSES.CANCELLED) {
+      await auditLogService.createAuditLog(
+        {
+          actorUserId,
+          entityType: AUDIT_ENTITY_TYPES.TOKEN_REQUEST,
+          entityId: id,
+          action: AUDIT_ACTIONS.STATUS_CHANGE,
+          metadata: {
+            previousStatus: originalRequest.status,
+            newStatus: TOKEN_REQUEST_STATUSES.CANCELLED,
+          },
+        },
+        tx,
+      );
+    }
 
     return updatedRequest;
   });
@@ -929,14 +1140,17 @@ module.exports = {
   getTokenRequestById,
   updateTokenRequest,
   submitTokenRequest,
+  cancelTokenRequest,
   markReadyForExecution,
   prepareExecution,
   prepareMintRequest,
   prepareTransferRequest,
   prepareBurnRequest,
+  prepareMakerCancellation,
   prepareCheckerApproval,
   prepareCheckerRejection,
   recordInitiation,
+  recordCancellation,
   recordExecution,
   executeReadyRequest,
 };

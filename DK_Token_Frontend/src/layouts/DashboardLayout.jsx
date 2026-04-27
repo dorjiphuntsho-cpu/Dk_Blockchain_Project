@@ -26,6 +26,7 @@ import useAuth from '../hooks/useAuth';
 import useSolanaWallet from '../hooks/useSolanaWallet';
 import { NAV_ITEMS, ROUTE_TITLES } from '../utils/constants';
 import { cn } from '../utils/cn';
+import { dropdownMenuButtonClass, dropdownMenuItemClass, dropdownMenuPanelClass } from '../utils/dropdownStyles';
 import { getInitials, truncateMiddle } from '../utils/format';
 import { hasRole } from '../utils/permissions';
 
@@ -74,7 +75,6 @@ function useIsDesktop() {
   useEffect(() => {
     const media = window.matchMedia('(min-width: 1024px)');
     const handleChange = (event) => setIsDesktop(event.matches);
-    setIsDesktop(media.matches);
     media.addEventListener('change', handleChange);
     return () => media.removeEventListener('change', handleChange);
   }, []);
@@ -159,7 +159,7 @@ function DashboardLayout() {
               <Badge tone="emerald">{user?.roles?.[0] || 'USER'}</Badge>
             </div>
             <p className="text-sm font-medium text-white">{user?.fullName}</p>
-            <p className="mt-0.5 text-xs text-zinc-500">Console access active</p>
+            <p className="mt-0.5 text-xs text-zinc-500"></p>
           </div>
         ) : (
           <div className="flex justify-center">
@@ -227,7 +227,7 @@ function DashboardLayout() {
                 <Badge tone="blue">{`${walletName || 'Wallet'}: ${truncateMiddle(address, 8, 6)}`}</Badge>
               )}
               <Menu as="div" className="relative">
-                <MenuButton className="inline-flex items-center gap-2 rounded-lg bg-zinc-800 px-3 py-2 text-sm font-medium text-white shadow-sm ring-1 ring-white/10 transition hover:bg-zinc-700 focus:outline-none focus:ring-2 focus:ring-white/20">
+                <MenuButton className={dropdownMenuButtonClass}>
                   <span className="flex size-6 items-center justify-center rounded-md bg-zinc-700 text-[11px] font-medium text-white">
                     {getInitials(user?.fullName)}
                   </span>
@@ -242,7 +242,7 @@ function DashboardLayout() {
                   leaveFrom="opacity-100 scale-100"
                   leaveTo="opacity-0 scale-95"
                 >
-                  <MenuItems anchor="bottom end" className="z-50 mt-2 w-56 origin-top-right rounded-xl border border-white/10 bg-zinc-900/95 p-1 text-sm text-zinc-200 shadow-xl backdrop-blur transition duration-100 ease-out focus:outline-none data-[closed]:scale-95 data-[closed]:opacity-0">
+                  <MenuItems anchor="bottom end" className={`${dropdownMenuPanelClass} w-56`}>
                     <div className="border-b border-white/10 px-3 py-2">
                       <p className="text-sm font-medium text-white">{user?.fullName}</p>
                       <p className="mt-1 text-xs text-zinc-500">{user?.email}</p>
@@ -250,7 +250,7 @@ function DashboardLayout() {
                     <MenuItem>
                       {({ focus }) => (
                         <button
-                          className={cn('group mt-1 flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-zinc-300', focus ? 'bg-zinc-900/10 text-white' : '')}
+                          className={cn(`${dropdownMenuItemClass} mt-1 justify-between`, focus ? '' : '')}
                           onClick={async () => {
                             await logout();
                             navigate('/login');

@@ -1,9 +1,8 @@
-import { createContext, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { registerWalletResetHandler } from './sessionManager';
+import SolanaContext from './solanaContext';
 import { SOLANA_CLUSTER, SOLANA_RPC_URL } from '../utils/constants';
-
-export const SolanaContext = createContext(null);
 
 function getAddress(provider) {
   return provider?.publicKey?.toBase58?.() || null;
@@ -71,8 +70,6 @@ function SolanaProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    refreshProvider();
-
     if (typeof window === 'undefined') {
       return undefined;
     }

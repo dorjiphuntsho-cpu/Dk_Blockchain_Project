@@ -22,7 +22,7 @@ import { tokenRequestSchema } from '../../modules/tokenRequests/tokenRequests.sc
 import { walletsApi } from '../../modules/wallets/wallets.api';
 import { REQUEST_TYPES, ROLES } from '../../utils/constants';
 import { getErrorMessage } from '../../utils/error';
-import { truncateMiddle } from '../../utils/format';
+import { formatAmount, truncateMiddle } from '../../utils/format';
 
 function TokenRequestCreatePage() {
   const location = useLocation();
@@ -55,6 +55,7 @@ function TokenRequestCreatePage() {
     resolver: zodResolver(tokenRequestSchema),
   });
   const requestType = useWatch({ control: methods.control, name: 'requestType' });
+  const selectedTokenMintAddress = useWatch({ control: methods.control, name: 'tokenMintAddress' });
 
   const ownActiveWallets = useMemo(
     () => (user?.wallets || []).filter((wallet) => wallet.isActive),
@@ -63,7 +64,7 @@ function TokenRequestCreatePage() {
 
   const isMakerWallet = (wallet) => wallet?.isActive && wallet.user?.roles?.includes(ROLES.MAKER);
 
-  const selectedSourceWallet = useMemo(() => {
+  const selectedSourceWallet = (() => {
     if (!ownActiveWallets.length) {
       return null;
     }
@@ -83,7 +84,7 @@ function TokenRequestCreatePage() {
     }
 
     return ownActiveWallets.find((wallet) => wallet.isPrimary) || ownActiveWallets[0];
-  }, [connectedWalletAddress, draftRequest?.sourceWalletId, ownActiveWallets]);
+  })();
 
   useEffect(() => {
     async function loadFormOptions() {
@@ -157,7 +158,7 @@ function TokenRequestCreatePage() {
     });
   }, [makerWallets, requestType, selectedSourceWallet?.id]);
 
-  const tokenOptions = useMemo(() => {
+  const tokenOptions = (() => {
     const options = [...availableManagedTokens];
 
     if (
@@ -172,7 +173,7 @@ function TokenRequestCreatePage() {
     }
 
     return options;
-  }, [availableManagedTokens, draftRequest?.decimals, draftRequest?.tokenMintAddress]);
+  })();
 
   useEffect(() => {
     if ([REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType)) {
@@ -210,6 +211,20 @@ function TokenRequestCreatePage() {
   const sourceWalletTokenCount = sourceWalletBalances
     .filter((balance) => Number(balance.rawAmount || balance.amount || 0) > 0)
     .length;
+  const selectedSourceTokenBalance = useMemo(
+    () => sourceWalletBalances.find((balance) => balance.mintAddress === selectedTokenMintAddress) || null,
+    [selectedTokenMintAddress, sourceWalletBalances],
+  );
+  const selectedManagedToken = useMemo(
+    () => managedTokens.find((token) => token.mintAddress === selectedTokenMintAddress) || null,
+    [managedTokens, selectedTokenMintAddress],
+  );
+  const selectedSourceTokenBalanceLabel = selectedSourceTokenBalance
+    ? formatAmount(selectedSourceTokenBalance.amount ?? selectedSourceTokenBalance.rawAmount ?? 0)
+    : null;
+  const selectedSourceTokenName = selectedManagedToken?.name
+    || selectedManagedToken?.onChain?.metadata?.name
+    || (selectedTokenMintAddress ? truncateMiddle(selectedTokenMintAddress, 12, 10) : null);
 
   async function save(values, submitForApproval = false) {
     if (submitLockRef.current) {
@@ -317,6 +332,24 @@ function TokenRequestCreatePage() {
     }
   }
 
+  async function submitDraft() {
+    const valid = await methods.trigger();
+    if (!valid) {
+      return;
+    }
+
+    await save(methods.getValues(), false);
+  }
+
+  async function submitAndSign() {
+    const valid = await methods.trigger();
+    if (!valid) {
+      return;
+    }
+
+    await save(methods.getValues(), true);
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -342,6 +375,9 @@ function TokenRequestCreatePage() {
               {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && selectedSourceWallet ? (
                 <Badge tone="slate">{`${sourceWalletTokenCount} token holdings`}</Badge>
               ) : null}
+              {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && selectedSourceTokenBalance ? (
+                <Badge tone="green">{`Current balance: ${selectedSourceTokenBalanceLabel}`}</Badge>
+              ) : null}
               </div>
             </div>
           {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && !selectedSourceWallet ? (
@@ -355,7 +391,13 @@ function TokenRequestCreatePage() {
             </Alert>
           ) : null}
           <FormProvider {...methods}>
-            <form className="space-y-6" onSubmit={methods.handleSubmit((values) => save(values))}>
+            <form
+              className="space-y-6"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                await submitDraft();
+              }}
+            >
               <FormTextField label="Request Type" name="requestType" select>
                 <option value={REQUEST_TYPES.MINT}>MINT</option>
                 <option value={REQUEST_TYPES.TRANSFER}>TRANSFER</option>
@@ -387,7 +429,20 @@ function TokenRequestCreatePage() {
                   No transferable managed tokens were found in the selected source wallet. Mint tokens to this wallet first or use a wallet that already holds the token.
                 </Alert>
               ) : null}
-              <FormAmountField label="Amount" name="amount" />
+              {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && selectedSourceTokenBalance ? (
+                <Alert tone="info">
+                  Current balance for {selectedSourceTokenName}: {selectedSourceTokenBalanceLabel}
+                </Alert>
+              ) : null}
+              <FormAmountField
+                label="Amount"
+                name="amount"
+                helperText={
+                  [REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) && selectedSourceTokenBalance
+                    ? `Available in your source wallet: ${selectedSourceTokenBalanceLabel}`
+                    : undefined
+                }
+              />
               {[REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType) ? (
                 <FormTextField
                   label="Source Wallet"
@@ -419,12 +474,13 @@ function TokenRequestCreatePage() {
                 </Alert>
               ) : null}
               <FormTextField label="Remarks" multiline minRows={3} name="remarks" />
-              <div className="flex justify-end gap-3 border-t border-white/10 pt-6">
-                <Button disabled={isSubmitting} onClick={() => methods.reset()} variant="secondary">Reset</Button>
-                <Button disabled={isSubmitting} type="submit" variant="secondary">Save Draft</Button>
+              <div className="flex flex-col gap-3 border-t border-white/10 pt-6 sm:flex-row sm:justify-end">
+                <Button className="w-full sm:w-auto" disabled={isSubmitting} onClick={() => methods.reset()} variant="secondary">Reset</Button>
+                <Button className="w-full sm:w-auto" disabled={isSubmitting} type="submit" variant="secondary">Save Draft</Button>
                 <Button
+                  className="w-full sm:w-auto"
                   disabled={isSubmitting}
-                  onClick={methods.handleSubmit((values) => save(values, true))}
+                  onClick={submitAndSign}
                   type="button"
                   variant="primary"
                 >

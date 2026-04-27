@@ -71,14 +71,17 @@ backend/
 1. `MAKER` creates a token request in `DRAFT`.
 2. `MAKER` can edit only their own `DRAFT` request.
 3. `MAKER` submits the request to move it to `PENDING_APPROVAL`.
-4. `CHECKER` approves or rejects it. Maker and checker cannot be the same user.
-5. `ADMIN` or `EXECUTOR` moves an approved request into the on-chain pending queue.
-6. `ADMIN` or `EXECUTOR` records the final execution result as `EXECUTED` or `FAILED`.
-7. Audit logs are written for each important transition and business action.
+4. `MAKER` can cancel a `PENDING_APPROVAL` request before it has been initiated on chain.
+5. If the request has already been initiated on chain but is still pending checker action, `MAKER` can cancel it with a maker wallet signature.
+6. `CHECKER` approves or rejects it. Maker and checker cannot be the same user.
+7. `ADMIN` or `EXECUTOR` moves an approved request into the on-chain pending queue.
+8. `ADMIN` or `EXECUTOR` records the final execution result as `EXECUTED` or `FAILED`.
+9. Audit logs are written for each important transition and business action.
 
 ## Status Flow
 
 - `DRAFT -> PENDING_APPROVAL`
+- `PENDING_APPROVAL -> CANCELLED`
 - `PENDING_APPROVAL -> APPROVED`
 - `PENDING_APPROVAL -> REJECTED`
 - `APPROVED -> READY_FOR_EXECUTION`
@@ -250,6 +253,9 @@ Example defaults from `.env.example`:
 - `GET /api/token-requests/:id`
 - `PATCH /api/token-requests/:id`
 - `POST /api/token-requests/:id/submit`
+- `POST /api/token-requests/:id/cancel`
+- `GET /api/token-requests/:id/prepare/maker-cancel`
+- `POST /api/token-requests/:id/record-cancellation`
 - `POST /api/token-requests/:id/approve`
 - `POST /api/token-requests/:id/reject`
 - `POST /api/token-requests/:id/mark-ready`

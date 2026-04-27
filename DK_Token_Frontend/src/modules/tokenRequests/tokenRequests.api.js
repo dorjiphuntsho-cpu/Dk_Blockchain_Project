@@ -18,6 +18,8 @@ export const tokenRequestsApi = {
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.update(id, payload, actor()) : (await axiosClient.patch(`/token-requests/${id}`, payload)).data),
   submit: async (id) =>
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.submit(id, actor()) : (await axiosClient.post(`/token-requests/${id}/submit`)).data),
+  cancel: async (id) =>
+    (ENABLE_MOCK_API ? mockAdapter.tokenRequests.cancel(id, actor()) : (await axiosClient.post(`/token-requests/${id}/cancel`)).data),
   approve: async (id, payload) =>
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.approve(id, payload, actor()) : (await axiosClient.post(`/token-requests/${id}/approve`, payload)).data),
   reject: async (id, payload) =>
@@ -38,6 +40,12 @@ export const tokenRequestsApi = {
     (ENABLE_MOCK_API
       ? mockAdapter.tokenRequests.prepareBurnRequest(id, actor())
       : (await axiosClient.get(`/token-requests/${id}/prepare/burn-request`)).data),
+  prepareMakerCancellation: async (id, makerWalletAddress) =>
+    (ENABLE_MOCK_API
+      ? mockAdapter.tokenRequests.prepareMakerCancellation(id, actor())
+      : (await axiosClient.get(`/token-requests/${id}/prepare/maker-cancel`, {
+        params: makerWalletAddress ? { makerWalletAddress } : undefined,
+      })).data),
   prepareCheckerApproval: async (id, checkerWalletAddress) =>
     (ENABLE_MOCK_API
       ? mockAdapter.tokenRequests.prepareCheckerApproval(id, actor())
@@ -52,6 +60,8 @@ export const tokenRequestsApi = {
       })).data),
   recordInitiation: async (id, payload) =>
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.recordInitiation(id, payload, actor()) : (await axiosClient.post(`/token-requests/${id}/record-initiation`, payload)).data),
+  recordCancellation: async (id, payload) =>
+    (ENABLE_MOCK_API ? mockAdapter.tokenRequests.recordCancellation(id, payload, actor()) : (await axiosClient.post(`/token-requests/${id}/record-cancellation`, payload)).data),
   execute: async (id) =>
     (ENABLE_MOCK_API ? mockAdapter.tokenRequests.execute(id, actor()) : (await axiosClient.post(`/token-requests/${id}/execute`)).data),
   recordExecution: async (id, payload) =>

@@ -51,7 +51,9 @@ function PendingApprovalsPage() {
   }
 
   useEffect(() => {
-    load();
+    (async () => {
+      await load();
+    })();
   }, []);
 
   const columns = useMemo(() => [

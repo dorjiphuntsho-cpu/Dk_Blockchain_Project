@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { FormProvider, useForm } from 'react-hook-form';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 
@@ -37,7 +37,7 @@ function WalletDetailsPage() {
     resolver: zodResolver(walletSchema),
   });
 
-  async function loadWallet() {
+  const loadWallet = useCallback(async () => {
     setLoading(true);
     setBalanceError('');
 
@@ -76,19 +76,21 @@ function WalletDetailsPage() {
         setBalances([]);
         setBalanceError(loadError.message || 'Unable to load token balances.');
       }
-    } catch (loadError) {
-      throw loadError;
     } finally {
       setLoading(false);
     }
-  }
+  }, [id, methods]);
 
   useEffect(() => {
-    loadWallet().catch((error) => {
-      enqueueSnackbar(getErrorMessage(error, 'Unable to load wallet details.'), { variant: 'error' });
-      setLoading(false);
-    });
-  }, [enqueueSnackbar, id]);
+    (async () => {
+      try {
+        await loadWallet();
+      } catch (error) {
+        enqueueSnackbar(getErrorMessage(error, 'Unable to load wallet details.'), { variant: 'error' });
+        setLoading(false);
+      }
+    })();
+  }, [enqueueSnackbar, loadWallet]);
 
   const handleSubmit = methods.handleSubmit(async (values) => {
     if (submitting) {
@@ -117,8 +119,8 @@ function WalletDetailsPage() {
   return (
     <div className="space-y-6">
       <PageHeader subtitle="Review wallet status and update wallet details." title="Wallet Details" />
-      <section className="max-w-2xl">
-        <Card className="rounded-2xl bg-zinc-900/80">
+      <section className="max-w-3xl">
+        <Card className="min-w-0 rounded-2xl bg-zinc-900/80">
           <div className="space-y-6">
             <div>
               <h2 className="text-base font-semibold text-white">Wallet settings</h2>
@@ -137,8 +139,9 @@ function WalletDetailsPage() {
                 <option value={false}>No</option>
                 <option value={true}>Yes</option>
               </FormTextField>
-              <div className="flex justify-end gap-3 border-t border-white/10 pt-6">
+              <div className="flex flex-col gap-3 border-t border-white/10 pt-6 sm:flex-row sm:justify-end">
                 <Button
+                  className="w-full sm:w-auto"
                   disabled={submitting}
                   onClick={async () => {
                     try {
@@ -160,7 +163,7 @@ function WalletDetailsPage() {
                 >
                   {submitting ? 'Saving...' : 'Deactivate'}
                 </Button>
-                <Button disabled={submitting} type="submit" variant="primary">
+                <Button className="w-full sm:w-auto" disabled={submitting} type="submit" variant="primary">
                   {submitting ? 'Saving...' : 'Save Changes'}
                 </Button>
               </div>
@@ -169,7 +172,7 @@ function WalletDetailsPage() {
           </div>
         </Card>
       </section>
-      <Card>
+      <Card className="min-w-0">
           <div className="space-y-4">
             <div>
             <h2 className="text-base font-semibold text-white">Token Balances</h2>

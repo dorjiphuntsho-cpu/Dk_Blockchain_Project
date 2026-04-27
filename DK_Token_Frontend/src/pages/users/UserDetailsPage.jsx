@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 
@@ -23,17 +23,19 @@ function UserDetailsPage() {
   const [savingUserStatus, setSavingUserStatus] = useState(false);
   const [savingRoles, setSavingRoles] = useState(false);
 
-  async function loadUser() {
+  const loadUser = useCallback(async () => {
     setLoading(true);
     const response = await usersApi.getById(id);
     setUser(response.data);
     setSelectedRoles(ROLE_OPTIONS.filter((option) => response.data.roles.includes(option.value)));
     setLoading(false);
-  }
+  }, [id]);
 
   useEffect(() => {
-    loadUser();
-  }, [id]);
+    (async () => {
+      await loadUser();
+    })();
+  }, [loadUser]);
 
   if (loading) {
     return <LoadingScreen message="Loading user details..." />;
@@ -43,17 +45,17 @@ function UserDetailsPage() {
     <div className="space-y-6">
       <PageHeader subtitle="View profile, roles, linked wallets, and current status." title={user.fullName} />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-xl">
+      <div className="grid gap-6 xl:grid-cols-2">
+        <div className="min-w-0 rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-xl">
           <div className="space-y-4">
             <div className="space-y-1">
               <h2 className="text-base font-semibold text-white">Profile</h2>
               <p className="text-sm text-zinc-400">Status, identity, and role assignments for this account.</p>
             </div>
             <dl className="space-y-3 text-sm">
-              <div>
+              <div className="min-w-0">
                 <dt className="text-zinc-500">Email</dt>
-                <dd className="text-zinc-200">{user.email}</dd>
+                <dd className="break-all text-zinc-200">{user.email}</dd>
               </div>
               <div>
                 <dt className="text-zinc-500">Status</dt>
@@ -69,9 +71,10 @@ function UserDetailsPage() {
                 <Badge key={role} tone="blue">{role}</Badge>
               ))}
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={() => setRoleDialogOpen(true)} variant="outline">Assign Roles</Button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <Button className="w-full sm:w-auto" onClick={() => setRoleDialogOpen(true)} variant="outline">Assign Roles</Button>
               <Button
+                className="w-full sm:w-auto"
                 disabled={savingUserStatus}
                 onClick={async () => {
                   try {
@@ -93,7 +96,7 @@ function UserDetailsPage() {
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           <div>
             <h2 className="text-base font-semibold text-white">Linked Wallets</h2>
             <p className="text-sm text-zinc-400">Wallet records currently associated with this user.</p>
@@ -114,8 +117,9 @@ function UserDetailsPage() {
       <AppDialog
         actions={(
           <>
-            <Button onClick={() => setRoleDialogOpen(false)} variant="outline">Cancel</Button>
+            <Button className="w-full sm:w-auto" onClick={() => setRoleDialogOpen(false)} variant="outline">Cancel</Button>
             <Button
+              className="w-full sm:w-auto"
               disabled={savingRoles}
               onClick={async () => {
                 try {

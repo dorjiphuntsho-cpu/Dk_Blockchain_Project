@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 
@@ -34,7 +34,7 @@ function UsersPage() {
   const [statusChanging, setStatusChanging] = useState(false);
   const [rolesSaving, setRolesSaving] = useState(false);
 
-  async function loadUsers() {
+  const loadUsers = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -46,11 +46,13 @@ function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [filters, paginationQuery]);
 
   useEffect(() => {
-    loadUsers();
-  }, [filters, paginationQuery.page, paginationQuery.limit]);
+    (async () => {
+      await loadUsers();
+    })();
+  }, [loadUsers]);
 
   const columns = useMemo(
     () => [

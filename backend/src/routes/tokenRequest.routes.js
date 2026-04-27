@@ -10,8 +10,10 @@ const {
   listTokenRequestsQuerySchema,
   tokenRequestIdParamSchema,
   checkerPreparationQuerySchema,
+  makerPreparationQuerySchema,
   updateTokenRequestSchema,
   recordInitiationSchema,
+  recordCancellationSchema,
   recordExecutionSchema,
 } = require('../validators/tokenRequest.validation');
 
@@ -45,6 +47,12 @@ router.post(
   asyncHandler(tokenRequestController.submitTokenRequest),
 );
 router.post(
+  '/:id/cancel',
+  authorize(ROLE_NAMES.MAKER),
+  validate(tokenRequestIdParamSchema),
+  asyncHandler(tokenRequestController.cancelTokenRequest),
+);
+router.post(
   '/:id/mark-ready',
   authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.EXECUTOR),
   validate(tokenRequestIdParamSchema),
@@ -75,6 +83,12 @@ router.get(
   asyncHandler(tokenRequestController.prepareBurnRequest),
 );
 router.get(
+  '/:id/prepare/maker-cancel',
+  authorize(ROLE_NAMES.MAKER),
+  validate(makerPreparationQuerySchema),
+  asyncHandler(tokenRequestController.prepareMakerCancellation),
+);
+router.get(
   '/:id/prepare/checker-approval',
   authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.CHECKER),
   validate(checkerPreparationQuerySchema),
@@ -91,6 +105,12 @@ router.post(
   authorize(ROLE_NAMES.MAKER),
   validate(recordInitiationSchema),
   asyncHandler(tokenRequestController.recordInitiation),
+);
+router.post(
+  '/:id/record-cancellation',
+  authorize(ROLE_NAMES.MAKER),
+  validate(recordCancellationSchema),
+  asyncHandler(tokenRequestController.recordCancellation),
 );
 router.post(
   '/:id/execute',

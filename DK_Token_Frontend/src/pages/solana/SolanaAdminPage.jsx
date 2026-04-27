@@ -93,7 +93,9 @@ function SolanaAdminPage() {
   };
 
   useEffect(() => {
-    loadStatus();
+    (async () => {
+      await loadStatus();
+    })();
   }, []);
 
   const checkerRows = useMemo(

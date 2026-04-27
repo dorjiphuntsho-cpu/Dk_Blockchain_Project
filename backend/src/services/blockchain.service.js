@@ -2,7 +2,7 @@ const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 const { requestPayloadInclude } = require('../models/tokenRequest.model');
 const solanaService = require('./solana.service');
-const { EXECUTION_MODES, TOKEN_REQUEST_TYPES } = require('../utils/enums');
+const { EXECUTION_MODES, TOKEN_REQUEST_STATUSES, TOKEN_REQUEST_TYPES } = require('../utils/enums');
 const { TOKEN_PROGRAM_ID } = require('@solana/spl-token');
 
 async function getRequestForExecution(requestId) {
@@ -173,6 +173,37 @@ async function prepareCheckerRejectionPayload(requestId, checkerWalletAddress = 
   };
 }
 
+async function prepareMakerCancellationPayload(requestId, makerWalletAddress = null) {
+  const tokenRequest = await getRequestForExecution(requestId);
+  const executionContext = solanaService.getExecutionContext(tokenRequest);
+  const adminKeypair = solanaService.getAdminKeypair();
+  const makerProgram = solanaService.getProgram(adminKeypair);
+  const makerSignerAddress = makerWalletAddress
+    || tokenRequest.makerWalletAddress
+    || tokenRequest.sourceWallet?.walletAddress
+    || null;
+
+  const cancelInstruction = await makerProgram.methods
+    .cancelRequest()
+    .accounts({
+      request: tokenRequest.onChainRequestAddress,
+      config: executionContext.configAddress,
+      maker: makerSignerAddress,
+    })
+    .instruction();
+
+  return {
+    ...executionContext,
+    operation: 'CANCEL',
+    requestId: tokenRequest.id,
+    signerRole: 'MAKER',
+    requiresBrowserWallet: true,
+    expectedMakerWalletAddress: makerSignerAddress,
+    onChainRequestAddress: tokenRequest.onChainRequestAddress || null,
+    cancelInstruction: serializeTransactionInstruction(cancelInstruction),
+  };
+}
+
 async function prepareMintExecutionPayload(requestId) {
   return prepareMintRequestPayload(requestId);
 }
@@ -254,6 +285,30 @@ async function recordTransactionResult(
   });
 }
 
+async function recordCancellationResult(
+  requestId,
+  makerWalletAddress,
+  txSignature,
+  explorerUrl,
+  tx = prisma,
+) {
+  return tx.tokenRequest.update({
+    where: { id: requestId },
+    data: {
+      checkerUserId: null,
+      rejectionReason: null,
+      approvedAt: null,
+      rejectedAt: null,
+      status: TOKEN_REQUEST_STATUSES.CANCELLED,
+      makerWalletAddress,
+      txSignature: txSignature || null,
+      explorerUrl: explorerUrl || null,
+      executionError: null,
+    },
+    include: requestPayloadInclude,
+  });
+}
+
 async function executeReadyRequest(requestId) {
   const tokenRequest = await getRequestForExecution(requestId);
   return solanaService.executeOnChainRequest(tokenRequest);
@@ -271,6 +326,8 @@ module.exports = {
   prepareBurnRequestPayload,
   prepareCheckerApprovalPayload,
   prepareCheckerRejectionPayload,
+  prepareMakerCancellationPayload,
   recordInitiationResult,
+  recordCancellationResult,
   recordTransactionResult,
 };

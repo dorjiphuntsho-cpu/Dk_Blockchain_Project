@@ -946,6 +946,7 @@ module.exports = {
   fetchTokenRequestAccount,
   getConfigStatus,
   getAdminKeypair,
+  getMakerKeypair,
   getCheckerKeypair,
   getExecutionContext,
   getProgram,

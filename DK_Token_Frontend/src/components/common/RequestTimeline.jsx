@@ -19,7 +19,7 @@ function RequestTimeline({ items = [], request }) {
             <p className="text-sm text-zinc-400">
               {item.timestamp ? formatDateTime(item.timestamp) : item.completed ? 'Completed' : 'Pending'}
             </p>
-            {request?.status === item.key || (item.key === 'FINAL_DECISION' && [REQUEST_STATUSES.APPROVED, REQUEST_STATUSES.REJECTED].includes(request?.status)) ? (
+            {request?.status === item.key || (item.key === 'FINAL_DECISION' && [REQUEST_STATUSES.APPROVED, REQUEST_STATUSES.REJECTED, REQUEST_STATUSES.CANCELLED].includes(request?.status)) ? (
               <StatusChip value={request.status} />
             ) : null}
           </div>

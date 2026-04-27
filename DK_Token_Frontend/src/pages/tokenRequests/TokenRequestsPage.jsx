@@ -13,6 +13,11 @@ import usePagination from '../../hooks/usePagination';
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
 import { usersApi } from '../../modules/users/users.api';
 import { REQUEST_STATUS_OPTIONS, REQUEST_TYPE_OPTIONS } from '../../utils/constants';
+import {
+  dropdownListboxButtonClass,
+  dropdownListboxOptionClass,
+  dropdownListboxOptionsClass,
+} from '../../utils/dropdownStyles';
 import { formatDateTime } from '../../utils/date';
 import { formatAmount, truncateMiddle } from '../../utils/format';
 
@@ -25,7 +30,7 @@ function FilterSelect({ label, value, options, onChange }) {
 
       <Listbox value={value} onChange={onChange}>
         <div className="relative">
-          <ListboxButton className="relative w-full cursor-default rounded-lg bg-white/5 py-2.5 pl-3 pr-10 text-left text-sm text-white ring-1 ring-inset ring-white/10 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/20">
+          <ListboxButton className={dropdownListboxButtonClass}>
             <span className="block truncate">{selected?.label || 'All'}</span>
             <ChevronDownIcon className="absolute right-3 top-1/2 size-4 -translate-y-1/2 fill-white/50" />
           </ListboxButton>
@@ -33,13 +38,13 @@ function FilterSelect({ label, value, options, onChange }) {
           <ListboxOptions
             transition
             anchor="bottom start"
-            className="z-50 mt-2 w-[var(--button-width)] origin-top rounded-xl border border-white/5 bg-zinc-900 p-1 text-sm text-white shadow-xl transition duration-100 ease-out focus:outline-none data-closed:scale-95 data-closed:opacity-0"
+            className={`${dropdownListboxOptionsClass} w-[var(--button-width)] origin-top`}
           >
             {options.map((option) => (
               <ListboxOption
                 key={option.value}
                 value={option.value}
-                className="cursor-default rounded-lg px-3 py-1.5 text-zinc-300 data-focus:bg-white/10 data-focus:text-white"
+                className={dropdownListboxOptionClass}
               >
                 {option.label}
               </ListboxOption>
@@ -91,7 +96,7 @@ function TokenRequestsPage() {
     }
 
     load();
-  }, [filters, paginationQuery.page, paginationQuery.limit]);
+  }, [filters, paginationQuery]);
 
   const makerOptions = useMemo(
     () => [

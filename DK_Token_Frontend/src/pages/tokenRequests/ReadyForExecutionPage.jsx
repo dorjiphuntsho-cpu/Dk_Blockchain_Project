@@ -40,20 +40,24 @@ function ReadyForExecutionPage() {
   }
 
   useEffect(() => {
-    load();
+    (async () => {
+      await load();
+    })();
   }, []);
 
   useEffect(() => {
-    if (!selectedRequest || !ON_CHAIN_PENDING_STATUSES.includes(selectedRequest.status)) {
-      setSelectedExecutionPayload(null);
-      setSelectedExecutionPayloadError('');
-      setSelectedExecutionPayloadLoading(false);
-      return;
-    }
-
     let cancelled = false;
 
-    async function loadExecutionPayload() {
+    async function syncExecutionPayload() {
+      if (!selectedRequest || !ON_CHAIN_PENDING_STATUSES.includes(selectedRequest.status)) {
+        if (!cancelled) {
+          setSelectedExecutionPayload(null);
+          setSelectedExecutionPayloadError('');
+          setSelectedExecutionPayloadLoading(false);
+        }
+        return;
+      }
+
       try {
         setSelectedExecutionPayloadLoading(true);
         setSelectedExecutionPayloadError('');
@@ -73,7 +77,7 @@ function ReadyForExecutionPage() {
       }
     }
 
-    loadExecutionPayload();
+    syncExecutionPayload();
 
     return () => {
       cancelled = true;

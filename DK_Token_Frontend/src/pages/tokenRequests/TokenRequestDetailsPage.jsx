@@ -1,6 +1,6 @@
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import { XMarkIcon } from '@heroicons/react/16/solid';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 import {
@@ -23,6 +23,7 @@ import {
   buildCheckerApprovalTransaction,
   buildCheckerRejectionTransaction,
   buildExplorerTransactionUrl,
+  buildMakerCancellationTransaction,
   buildMakerInitiationTransaction,
   signAndSendMakerTransaction,
   signAndSendWalletTransaction,
@@ -41,6 +42,7 @@ import { getErrorMessage } from '../../utils/error';
 import { formatAmount, truncateMiddle } from '../../utils/format';
 import {
   canApproveWalletExecution,
+  canCancelPendingRequest,
   canEditDraftRequest,
   canExecuteRequest,
   canInitiateWalletExecution,
@@ -57,7 +59,7 @@ function InfoAlert({ tone = 'info', children }) {
   };
 
   return (
-    <div className={`rounded-xl border px-4 py-3 text-sm ${tones[tone] || tones.info}`}>
+    <div className={`min-w-0 break-all rounded-xl border px-4 py-3 text-sm ${tones[tone] || tones.info}`}>
       {children}
     </div>
   );
@@ -65,9 +67,9 @@ function InfoAlert({ tone = 'info', children }) {
 
 function Field({ label, children }) {
   return (
-    <div>
+    <div className="min-w-0">
       <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</dt>
-      <dd className="mt-1 break-words text-sm text-zinc-100">{children || '-'}</dd>
+      <dd className="mt-1 min-w-0 break-all text-sm text-zinc-100">{children || '-'}</dd>
     </div>
   );
 }
@@ -82,7 +84,7 @@ function ActionButton({ children, tone = 'secondary', ...props }) {
   return (
     <button
       type="button"
-      className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${styles[tone]}`}
+      className={`w-full rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${styles[tone]}`}
       {...props}
     >
       {children}
@@ -110,11 +112,12 @@ function TokenRequestDetailsPage() {
   const [walletInitiating, setWalletInitiating] = useState(false);
   const [recoveringInitiation, setRecoveringInitiation] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectSubmitting, setRejectSubmitting] = useState(false);
   const [formState, setFormState] = useState({ rejectionReason: '' });
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     try {
       setError('');
       const response = await tokenRequestsApi.getById(id);
@@ -122,7 +125,7 @@ function TokenRequestDetailsPage() {
     } catch (loadError) {
       setError(loadError.message || 'Unable to refresh request details.');
     }
-  };
+  }, [id]);
 
   useEffect(() => {
     async function load() {
@@ -138,20 +141,22 @@ function TokenRequestDetailsPage() {
       }
     }
 
-    load();
+    void load();
   }, [id]);
 
   useEffect(() => {
-    if (!request || !ON_CHAIN_PENDING_STATUSES.includes(request.status)) {
-      setExecutionPayload(null);
-      setExecutionPayloadError('');
-      setExecutionPayloadLoading(false);
-      return;
-    }
-
     let cancelled = false;
 
     async function loadExecutionPayload() {
+      if (!request || !ON_CHAIN_PENDING_STATUSES.includes(request.status)) {
+        if (!cancelled) {
+          setExecutionPayload(null);
+          setExecutionPayloadError('');
+          setExecutionPayloadLoading(false);
+        }
+        return;
+      }
+
       try {
         setExecutionPayloadLoading(true);
         setExecutionPayloadError('');
@@ -167,7 +172,7 @@ function TokenRequestDetailsPage() {
       }
     }
 
-    loadExecutionPayload();
+    void loadExecutionPayload();
 
     return () => {
       cancelled = true;
@@ -198,8 +203,8 @@ function TokenRequestDetailsPage() {
       }
     }
 
-    recoverInitiation();
-  }, [enqueueSnackbar, recoveringInitiation, request]);
+    void recoverInitiation();
+  }, [enqueueSnackbar, recoveringInitiation, reload, request]);
 
   const timeline = useMemo(() => getStatusTimeline(request || {}), [request]);
 
@@ -224,6 +229,7 @@ function TokenRequestDetailsPage() {
     return (
       normalized.includes('alreadyprocessed') ||
       normalized.includes('request already processed') ||
+      normalized.includes('already cancelled on chain') ||
       normalized.includes('already been processed') ||
       normalized.includes('error code: 6000') ||
       normalized.includes('custom program error: 0x1770')
@@ -300,7 +306,7 @@ function TokenRequestDetailsPage() {
     <div className="space-y-6">
       <PageHeader subtitle="Review request details, history, and next actions." title={request.id} />
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         {canEditDraftRequest(user, request) && (
           <ActionButton onClick={() => navigate('/token-requests/new', { state: { request } })}>
             Edit draft
@@ -321,6 +327,71 @@ function TokenRequestDetailsPage() {
             }}
           >
             Submit
+          </ActionButton>
+        )}
+
+        {canCancelPendingRequest(user, request) && (
+          <ActionButton
+            tone="danger"
+            disabled={cancelSubmitting}
+            onClick={async () => {
+              try {
+                setCancelSubmitting(true);
+                if (request.onChainRequestAddress) {
+                  if (!walletConnected || !connectedWalletAddress) {
+                    throw new Error('Connect the maker wallet before cancelling this on-chain request.');
+                  }
+                  if (!walletProvider) throw new Error('Wallet provider is not available.');
+
+                  const preparedResponse = await tokenRequestsApi.prepareMakerCancellation(
+                    request.id,
+                    connectedWalletAddress,
+                  );
+                  const cancellationPayload = preparedResponse.data;
+                  const txSignature = cancellationPayload.cancelInstruction
+                    ? await (async () => {
+                      const builtTransaction = buildMakerCancellationTransaction({
+                        executionPayload: cancellationPayload,
+                        makerWalletAddress: connectedWalletAddress,
+                      });
+
+                      return signAndSendWalletTransaction({
+                        connection: builtTransaction.connection,
+                        provider: walletProvider,
+                        transaction: builtTransaction.transaction,
+                      });
+                    })()
+                    : `mock-cancel-${Date.now()}`;
+
+                  await tokenRequestsApi.recordCancellation(request.id, {
+                    makerWalletAddress: connectedWalletAddress,
+                    txSignature,
+                    explorerUrl: buildExplorerTransactionUrl(txSignature, cancellationPayload.rpcUrl),
+                  });
+                } else {
+                  await tokenRequestsApi.cancel(request.id);
+                }
+
+                enqueueSnackbar('Request cancelled', { variant: 'success' });
+                await reload();
+              } catch (cancelError) {
+                const message = getErrorMessage(cancelError, 'Unable to cancel request');
+                if (isAlreadyProcessedMessage(message) || /current status is cancelled/i.test(message)) {
+                  enqueueSnackbar('This request is already cancelled on chain.', { variant: 'warning' });
+                  await reload();
+                } else {
+                  enqueueSnackbar(message, { variant: 'error' });
+                }
+              } finally {
+                setCancelSubmitting(false);
+              }
+            }}
+          >
+            {cancelSubmitting
+              ? 'Cancelling...'
+              : request.onChainRequestAddress
+                ? 'Cancel Request'
+                : 'Cancel request'}
           </ActionButton>
         )}
 
@@ -498,9 +569,9 @@ function TokenRequestDetailsPage() {
         )}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-6">
-          <section className="rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-xl">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0 space-y-6">
+          <section className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-xl">
             <div className="mb-6 flex flex-wrap gap-2">
               <StatusChip kind="type" value={request.requestType} />
               <StatusChip value={request.status} />
@@ -510,7 +581,7 @@ function TokenRequestDetailsPage() {
 
             <dl className="mt-5 grid gap-5 sm:grid-cols-2">
               <Field label="Token mint address">
-                <span className="font-mono">{truncateMiddle(request.tokenMintAddress, 10, 8)}</span>
+                <span className="break-all font-mono">{truncateMiddle(request.tokenMintAddress, 10, 8)}</span>
               </Field>
               <Field label="Amount">{formatAmount(request.amount)}</Field>
               <Field label="Source wallet">{request.sourceWallet?.label || '-'}</Field>
@@ -519,10 +590,10 @@ function TokenRequestDetailsPage() {
               <Field label="Checker">{request.checkerUser?.fullName || '-'}</Field>
               <Field label="Execution mode">{request.executionMode || EXECUTION_MODES.SERVER_MANAGED}</Field>
               <Field label="Maker wallet address">
-                <span className="font-mono">{request.makerWalletAddress || request.sourceWallet?.walletAddress || '-'}</span>
+                <span className="break-all font-mono">{request.makerWalletAddress || request.sourceWallet?.walletAddress || '-'}</span>
               </Field>
               <Field label="On-chain request">
-                <span className="font-mono">{request.onChainRequestAddress || '-'}</span>
+                <span className="break-all font-mono">{request.onChainRequestAddress || '-'}</span>
               </Field>
               <Field label="Maker initiated">{formatDateTime(request.makerInitiatedAt)}</Field>
             </dl>
@@ -579,7 +650,7 @@ function TokenRequestDetailsPage() {
               )}
             </div>
 
-            <div className="mt-5 flex flex-wrap gap-3">
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               {request.initiationExplorerUrl && (
                 <a
                   href={request.initiationExplorerUrl}
@@ -622,7 +693,7 @@ function TokenRequestDetailsPage() {
           </section>
         </div>
 
-        <aside className="space-y-6">
+        <aside className="min-w-0 space-y-6">
           <section className="rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-xl">
             <h2 className="mb-4 text-base font-semibold text-white">Request timeline</h2>
             <RequestTimeline items={timeline} request={request} />
@@ -670,7 +741,7 @@ function TokenRequestDetailsPage() {
               />
             </div>
 
-            <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+            <div className="mt-6 flex flex-col gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
               <ActionButton
                 disabled={rejectSubmitting}
                 onClick={() => {

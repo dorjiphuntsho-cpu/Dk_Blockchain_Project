@@ -90,31 +90,31 @@ function WalletConnectCard({ executionPayload = null, requestStatus = null }) {
             <p>
               Cluster: {cluster}
             </p>
-            <p>
+            <p className="break-all">
               RPC: {executionPayload.rpcUrl || rpcUrl}
             </p>
             <p>
               Signer Support: {supportsSignTransaction ? 'Transaction signing available' : 'Read-only or unsupported wallet'}
             </p>
             {expectedWalletAddress ? (
-              <p>
+              <p className="break-all">
                 Expected Maker Wallet: {expectedWalletAddress}
               </p>
             ) : null}
           </div>
         ) : null}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-zinc-400">
+          <p className="min-w-0 text-sm text-zinc-400">
             {connected
               ? 'The wallet connection is now shared across the app, so request pages can validate signer readiness without reconnect prompts.'
               : 'Connect once here and the request pages will reuse that wallet state.'}
           </p>
           {connected ? (
-            <Button disabled={disconnecting} onClick={disconnect} size="sm" variant="outline">
+            <Button className="w-full sm:w-auto" disabled={disconnecting} onClick={disconnect} size="sm" variant="outline">
               {disconnecting ? 'Disconnecting...' : 'Disconnect Wallet'}
             </Button>
           ) : (
-            <Button disabled={!available || connecting} onClick={connect} size="sm" variant="secondary">
+            <Button className="w-full sm:w-auto" disabled={!available || connecting} onClick={connect} size="sm" variant="secondary">
               {connecting ? 'Connecting...' : 'Connect Wallet'}
             </Button>
           )}

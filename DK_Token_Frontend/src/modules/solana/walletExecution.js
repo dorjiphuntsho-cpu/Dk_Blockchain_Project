@@ -5,6 +5,7 @@ import {
   createAssociatedTokenAccountIdempotentInstruction,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
+import { Buffer } from 'buffer';
 import bs58 from 'bs58';
 import { getSolanaErrorMessage, logSolanaError } from '../../utils/solanaError';
 
@@ -58,14 +59,6 @@ function buildRequestInstructionData(operation, amount) {
   return concatBytes(discriminator, encodeU64(amount));
 }
 
-function buildCreateTokenMintInstructionData(decimals) {
-  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 9) {
-    throw new Error('Decimals must be an integer between 0 and 9.');
-  }
-
-  return concatBytes(CREATE_TOKEN_MINT_DISCRIMINATOR, Uint8Array.from([decimals]));
-}
-
 function encodeUtf8String(value) {
   const encoded = new TextEncoder().encode(value);
   const length = new Uint8Array(4);
@@ -113,20 +106,6 @@ function requirePayloadField(payload, fieldName) {
   }
 
   return payload[fieldName];
-}
-
-function buildSimulationErrorMessage(simulation, fallbackMessage) {
-  const messages = [];
-
-  if (simulation?.value?.err) {
-    messages.push(`Simulation failed: ${JSON.stringify(simulation.value.err)}`);
-  }
-
-  if (Array.isArray(simulation?.value?.logs) && simulation.value.logs.length) {
-    messages.push(`Logs: ${simulation.value.logs.join(' | ')}`);
-  }
-
-  return messages.length ? messages.join(' ') : fallbackMessage;
 }
 
 function decodeBase64ToUint8Array(value) {
@@ -427,7 +406,6 @@ export async function signAndSendMakerTransaction({ connection, provider, reques
 
 export async function buildCheckerApprovalTransaction({
   executionPayload,
-  checkerWalletAddress,
   sourceWalletAddress: sourceWalletAddressOverride = null,
   destinationWalletAddress: destinationWalletAddressOverride = null,
   sourceTokenAccountAddress: sourceTokenAccountAddressOverride = null,
@@ -440,7 +418,6 @@ export async function buildCheckerApprovalTransaction({
 
   const connection = new Connection(requirePayloadField(executionPayload, 'rpcUrl'), 'confirmed');
   const transaction = new Transaction();
-  const checkerPublicKey = new PublicKey(checkerWalletAddress);
   const mintPublicKey = new PublicKey(requirePayloadField(executionPayload, 'tokenMintAddress'));
   const sourceWalletAddress = sourceWalletAddressOverride
     || executionPayload.sourceWalletAddress
@@ -458,17 +435,6 @@ export async function buildCheckerApprovalTransaction({
     || executionPayload.destinationTokenAccountAddress
     || executionPayload.destinationTokenAccount
     || (destinationWalletAddress ? getAssociatedTokenAddressSync(mintPublicKey, new PublicKey(destinationWalletAddress)).toBase58() : null);
-  const sourceTokenAccountPublicKey = sourceTokenAccountAddress
-    ? new PublicKey(sourceTokenAccountAddress)
-    : null;
-  const destinationTokenAccountPublicKey = destinationTokenAccountAddress
-    ? new PublicKey(destinationTokenAccountAddress)
-    : null;
-
-  const derivedDestinationAta = destinationWalletAddress
-    ? getAssociatedTokenAddressSync(mintPublicKey, new PublicKey(destinationWalletAddress))
-    : null;
-
   if (executionPayload.approvalInstruction) {
     transaction.add(deserializeTransactionInstruction(executionPayload.approvalInstruction));
   } else {
@@ -480,6 +446,34 @@ export async function buildCheckerApprovalTransaction({
     transaction,
     destinationTokenAccountAddress,
     sourceTokenAccountAddress,
+  };
+}
+
+export function buildMakerCancellationTransaction({ executionPayload, makerWalletAddress }) {
+  const onChainRequestAddress = executionPayload?.walletInitiation?.onChainRequestAddress || executionPayload?.onChainRequestAddress;
+  if (!onChainRequestAddress) {
+    throw new Error('An on-chain request address is required before maker wallet cancellation can run.');
+  }
+
+  const expectedMakerWalletAddress = executionPayload?.expectedMakerWalletAddress
+    || executionPayload?.walletInitiation?.expectedMakerWalletAddress
+    || null;
+
+  if (expectedMakerWalletAddress && expectedMakerWalletAddress !== makerWalletAddress) {
+    throw new Error(`Connected wallet must match the expected maker wallet ${expectedMakerWalletAddress}.`);
+  }
+
+  if (!executionPayload?.cancelInstruction) {
+    throw new Error('Maker cancellation instruction is missing from the backend payload.');
+  }
+
+  const connection = new Connection(requirePayloadField(executionPayload, 'rpcUrl'), 'confirmed');
+  const transaction = new Transaction();
+  transaction.add(deserializeTransactionInstruction(executionPayload.cancelInstruction));
+
+  return {
+    connection,
+    transaction,
   };
 }
 

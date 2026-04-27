@@ -16,6 +16,7 @@ const listStatusEnum = z.enum([
   'PENDING_APPROVAL',
   'APPROVED',
   'REJECTED',
+  'CANCELLED',
   'READY_FOR_EXECUTION',
   'ON_CHAIN_PENDING',
   'EXECUTED',
@@ -94,6 +95,16 @@ const checkerPreparationQuerySchema = z.object({
   }),
 });
 
+const makerPreparationQuerySchema = z.object({
+  body: z.object({}).optional(),
+  params: z.object({
+    id: uuidSchema,
+  }),
+  query: z.object({
+    makerWalletAddress: walletAddressSchema.optional(),
+  }),
+});
+
 const recordInitiationSchema = z.object({
   body: z.object({
     makerWalletAddress: walletAddressSchema,
@@ -122,12 +133,26 @@ const recordExecutionSchema = z.object({
   query: z.object({}).optional(),
 });
 
+const recordCancellationSchema = z.object({
+  body: z.object({
+    makerWalletAddress: walletAddressSchema,
+    txSignature: z.string().trim().min(1, 'txSignature is required'),
+    explorerUrl: z.string().trim().url('explorerUrl must be a valid URL').optional(),
+  }),
+  params: z.object({
+    id: uuidSchema,
+  }),
+  query: z.object({}).optional(),
+});
+
 module.exports = {
   createTokenRequestSchema,
   updateTokenRequestSchema,
   listTokenRequestsQuerySchema,
   tokenRequestIdParamSchema,
   checkerPreparationQuerySchema,
+  makerPreparationQuerySchema,
   recordInitiationSchema,
   recordExecutionSchema,
+  recordCancellationSchema,
 };

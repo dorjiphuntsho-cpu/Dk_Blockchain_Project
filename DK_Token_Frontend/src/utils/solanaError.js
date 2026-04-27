@@ -45,6 +45,5 @@ export async function getSolanaErrorMessage(error, fallbackMessage = 'Transactio
 export function logSolanaError(error, context = 'Solana transaction failed') {
   // Keep the logging centralized so browser-side failures can be correlated in devtools.
   // The backend logs capture API-side failures separately.
-  // eslint-disable-next-line no-console
   console.error(context, error);
 }

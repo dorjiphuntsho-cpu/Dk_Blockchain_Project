@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import Alert from '../../components/ui/Alert';
 import AppTable from '../../components/common/AppTable';
@@ -25,7 +25,7 @@ function ManagedTokensPage() {
     [tokens],
   );
 
-  async function loadTokens() {
+  const loadTokens = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -40,11 +40,13 @@ function ManagedTokensPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [filters, paginationQuery]);
 
   useEffect(() => {
-    loadTokens();
-  }, [filters, paginationQuery.page, paginationQuery.limit]);
+    (async () => {
+      await loadTokens();
+    })();
+  }, [loadTokens]);
 
   const columns = useMemo(() => [
     {

@@ -17,8 +17,8 @@ export function getStatusTimeline(request) {
     {
       key: 'FINAL_DECISION',
       label: 'Checker Decision',
-      completed: [REQUEST_STATUSES.APPROVED, REQUEST_STATUSES.REJECTED].includes(request?.status),
-      timestamp: request?.approvedAt || request?.rejectedAt || null,
+      completed: [REQUEST_STATUSES.APPROVED, REQUEST_STATUSES.REJECTED, REQUEST_STATUSES.CANCELLED].includes(request?.status),
+      timestamp: request?.approvedAt || request?.rejectedAt || (request?.status === REQUEST_STATUSES.CANCELLED ? request?.updatedAt || null : null),
     },
   ];
 }
@@ -34,6 +34,10 @@ export function getNextActorMessage(request, executionPayload = null) {
 
   if (request.status === REQUEST_STATUSES.REJECTED) {
     return 'Rejected';
+  }
+
+  if (request.status === REQUEST_STATUSES.CANCELLED) {
+    return 'Cancelled';
   }
 
   if (request.status === REQUEST_STATUSES.PENDING_APPROVAL) {

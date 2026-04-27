@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 
@@ -31,7 +31,7 @@ function WalletsPage() {
   const [selectedWallet, setSelectedWallet] = useState(null);
   const [statusChanging, setStatusChanging] = useState(false);
 
-  async function loadWallets() {
+  const loadWallets = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -48,11 +48,13 @@ function WalletsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [filters, paginationQuery]);
 
   useEffect(() => {
-    loadWallets();
-  }, [filters, paginationQuery.page, paginationQuery.limit]);
+    (async () => {
+      await loadWallets();
+    })();
+  }, [loadWallets]);
 
   const columns = useMemo(() => [
     {

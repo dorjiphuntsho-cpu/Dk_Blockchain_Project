@@ -1041,6 +1041,33 @@ export const mockAdapter = {
 
         return createDetailResponse('Token request submitted successfully', serializeTokenRequest(db, request));
       }),
+    cancel: async (id, actorUser) =>
+      perform(() => {
+        const db = getDb();
+        const actor = getActor(actorUser);
+        const request = db.tokenRequests.find((item) => item.id === id);
+
+        if (!request || request.makerUserId !== actor.id || request.status !== REQUEST_STATUSES.PENDING_APPROVAL) {
+          throw new Error('Only pending approval requests owned by the maker can be cancelled');
+        }
+
+        if (request.onChainRequestAddress) {
+          throw new Error('Requests already initiated on chain cannot be cancelled from the portal');
+        }
+
+        request.status = REQUEST_STATUSES.CANCELLED;
+        request.updatedAt = new Date().toISOString();
+        addAuditLog(db, {
+          actorUserId: actor.id,
+          entityType: ENTITY_TYPES.TOKEN_REQUEST,
+          entityId: id,
+          action: AUDIT_ACTIONS.CANCEL,
+          metadata: { previousStatus: REQUEST_STATUSES.PENDING_APPROVAL, newStatus: REQUEST_STATUSES.CANCELLED },
+        });
+        setDb(db);
+
+        return createDetailResponse('Token request cancelled successfully', serializeTokenRequest(db, request));
+      }),
     approve: async (id, payload, actorUser) =>
       perform(() => {
         const db = getDb();
@@ -1184,6 +1211,21 @@ export const mockAdapter = {
 
         return createDetailResponse('Burn request payload prepared successfully', buildMockExecutionPayload(db, request));
       }),
+    prepareMakerCancellation: async (id) =>
+      perform(() => {
+        const db = getDb();
+        const request = db.tokenRequests.find((item) => item.id === id);
+
+        if (!request) {
+          throw new Error('Token request not found');
+        }
+
+        if (request.status !== REQUEST_STATUSES.PENDING_APPROVAL || !request.onChainRequestAddress) {
+          throw new Error('Only on-chain pending approval requests can prepare maker cancellation');
+        }
+
+        return createDetailResponse('Maker cancellation payload prepared successfully', buildMockExecutionPayload(db, request));
+      }),
     prepareCheckerApproval: async (id) =>
       perform(() => {
         const db = getDb();
@@ -1260,6 +1302,38 @@ export const mockAdapter = {
         setDb(db);
 
         return createDetailResponse('Wallet initiation recorded successfully', serializeTokenRequest(db, request));
+      }),
+    recordCancellation: async (id, payload, actorUser) =>
+      perform(() => {
+        const db = getDb();
+        const actor = getActor(actorUser);
+        const request = db.tokenRequests.find((item) => item.id === id);
+
+        if (!request || request.makerUserId !== actor.id || request.status !== REQUEST_STATUSES.PENDING_APPROVAL || !request.onChainRequestAddress) {
+          throw new Error('Only the maker can record wallet cancellation for on-chain pending approval requests');
+        }
+
+        request.status = REQUEST_STATUSES.CANCELLED;
+        request.makerWalletAddress = payload.makerWalletAddress;
+        request.txSignature = payload.txSignature || null;
+        request.explorerUrl = payload.explorerUrl || null;
+        request.updatedAt = new Date().toISOString();
+
+        addAuditLog(db, {
+          actorUserId: actor.id,
+          entityType: ENTITY_TYPES.TOKEN_REQUEST,
+          entityId: id,
+          action: AUDIT_ACTIONS.CANCEL,
+          metadata: {
+            previousStatus: REQUEST_STATUSES.PENDING_APPROVAL,
+            newStatus: REQUEST_STATUSES.CANCELLED,
+            txSignature: payload.txSignature || null,
+            explorerUrl: payload.explorerUrl || null,
+          },
+        });
+        setDb(db);
+
+        return createDetailResponse('Wallet cancellation recorded successfully', serializeTokenRequest(db, request));
       }),
     execute: async (id, actorUser) =>
       perform(() => {

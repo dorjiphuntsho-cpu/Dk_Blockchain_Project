@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import AppDrawer from '../../components/common/AppDrawer';
 import AppTable from '../../components/common/AppTable';
@@ -24,7 +24,7 @@ function AuditLogsPage() {
   const [loading, setLoading] = useState(true);
   const [selectedLog, setSelectedLog] = useState(null);
 
-  async function loadLogs() {
+  const loadLogs = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -36,11 +36,13 @@ function AuditLogsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [filters, paginationQuery]);
 
   useEffect(() => {
-    loadLogs();
-  }, [filters, paginationQuery.page, paginationQuery.limit]);
+    (async () => {
+      await loadLogs();
+    })();
+  }, [loadLogs]);
 
   const columns = useMemo(() => [
     { key: 'actorUser', label: 'Actor', render: (row) => row.actorUser?.fullName || 'System' },

@@ -28,20 +28,20 @@ function DashboardSkeleton() {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <div className="h-4 w-24 animate-pulse rounded bg-zinc-900-200" />
-        <div className="h-8 w-48 animate-pulse rounded bg-zinc-900-200" />
-        <div className="h-4 w-80 animate-pulse rounded bg-zinc-900-200" />
+        <div className="h-4 w-24 animate-pulse rounded bg-white/10" />
+        <div className="h-8 w-48 animate-pulse rounded bg-white/10" />
+        <div className="h-4 w-80 animate-pulse rounded bg-white/10" />
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
-          <div className="h-28 animate-pulse rounded-lg border border-slate-200 bg-zinc-900-100" key={index} />
+          <div className="h-28 animate-pulse rounded-lg border border-white/10 bg-zinc-900" key={index} />
         ))}
       </div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-        <div className="h-80 animate-pulse rounded-lg border border-slate-200 bg-zinc-900-100" />
+        <div className="h-80 animate-pulse rounded-lg border border-white/10 bg-zinc-900" />
         <div className="space-y-4">
-          <div className="h-48 animate-pulse rounded-lg border border-slate-200 bg-zinc-900-100" />
-          <div className="h-48 animate-pulse rounded-lg border border-slate-200 bg-zinc-900-100" />
+          <div className="h-48 animate-pulse rounded-lg border border-white/10 bg-zinc-900" />
+          <div className="h-48 animate-pulse rounded-lg border border-white/10 bg-zinc-900" />
         </div>
       </div>
     </div>
@@ -245,7 +245,7 @@ function DashboardPage() {
     }
 
     return overview?.recentRequests || [];
-  }, [dashboardRole, overview, state.reviewed, state.readyQueue, state.approvedQueue]);
+  }, [dashboardRole, overview, state.reviewed, state.readyQueue]);
 
   if (error) {
     return <ErrorState description={error} onAction={() => window.location.reload()} />;

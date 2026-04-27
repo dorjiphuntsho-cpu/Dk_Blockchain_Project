@@ -4,6 +4,11 @@ import { Fragment } from 'react';
 import { Controller, useFormContext } from 'react-hook-form';
 
 import { cn } from '../../utils/cn';
+import {
+  dropdownListboxButtonClass,
+  dropdownListboxOptionClass,
+  dropdownListboxOptionsClass,
+} from '../../utils/dropdownStyles';
 
 function FormAutocomplete({
   name,
@@ -30,10 +35,10 @@ function FormAutocomplete({
             <div className="relative">
               <Listbox.Button
                 className={cn(
-                  'flex min-h-10 w-full items-center justify-between rounded-lg border bg-zinc-950 px-3 py-2 text-left text-sm transition focus:outline-none focus:ring-2',
+                  `flex min-h-10 items-center justify-between ${dropdownListboxButtonClass}`,
                   fieldState.error
-                    ? 'border-rose-500/40 focus:border-rose-400 focus:ring-rose-500/20'
-                    : 'border-white/10 focus:border-white/15 focus:ring-white/20',
+                    ? 'ring-rose-500/20'
+                    : '',
                 )}
               >
                 <span className="block min-w-0 flex-1 truncate text-zinc-100">
@@ -54,7 +59,7 @@ function FormAutocomplete({
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Listbox.Options className="absolute z-20 mt-2 max-h-64 w-full overflow-auto rounded-xl border border-white/10 bg-zinc-900/95 p-1 text-sm text-zinc-200 shadow-xl backdrop-blur focus:outline-none">
+                <Listbox.Options className={dropdownListboxOptionsClass}>
                   {options.map((option) => {
                     const selected = multiple
                       ? (field.value || []).some((value) => isOptionEqualToValue(option, value))
@@ -63,8 +68,8 @@ function FormAutocomplete({
                     return (
                       <Listbox.Option
                         className={({ active }) => cn(
-                          'group flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-sm',
-                          active ? 'bg-zinc-900/10 text-white' : 'text-zinc-300',
+                          `group flex cursor-pointer items-center justify-between ${dropdownListboxOptionClass}`,
+                          active ? '' : '',
                         )}
                         key={option.value || getOptionLabel(option)}
                         value={option}

@@ -48,6 +48,15 @@ async function submitTokenRequest(req, res) {
   });
 }
 
+async function cancelTokenRequest(req, res) {
+  const tokenRequest = await tokenRequestService.cancelTokenRequest(req.params.id, req.user.id);
+
+  return successResponse(res, {
+    message: 'Token request cancelled successfully',
+    data: tokenRequest,
+  });
+}
+
 async function markReadyForExecution(req, res) {
   const tokenRequest = await tokenRequestService.markReadyForExecution(req.params.id, req.user.id);
   const executionPayload = await tokenRequestService.prepareExecution(req.params.id, req.user);
@@ -97,6 +106,19 @@ async function prepareBurnRequest(req, res) {
   });
 }
 
+async function prepareMakerCancellation(req, res) {
+  const executionPayload = await tokenRequestService.prepareMakerCancellation(
+    req.params.id,
+    req.user,
+    req.validated.query?.makerWalletAddress,
+  );
+
+  return successResponse(res, {
+    message: 'Maker cancellation payload prepared successfully',
+    data: executionPayload,
+  });
+}
+
 async function prepareCheckerApproval(req, res) {
   const executionPayload = await tokenRequestService.prepareCheckerApproval(
     req.params.id,
@@ -132,6 +154,15 @@ async function recordInitiation(req, res) {
   });
 }
 
+async function recordCancellation(req, res) {
+  const tokenRequest = await tokenRequestService.recordCancellation(req.params.id, req.validated.body, req.user.id);
+
+  return successResponse(res, {
+    message: 'Wallet cancellation recorded successfully',
+    data: tokenRequest,
+  });
+}
+
 async function recordExecution(req, res) {
   const tokenRequest = await tokenRequestService.recordExecution(req.params.id, req.validated.body, req.user.id);
 
@@ -156,14 +187,17 @@ module.exports = {
   getTokenRequestById,
   updateTokenRequest,
   submitTokenRequest,
+  cancelTokenRequest,
   markReadyForExecution,
   prepareExecution,
   prepareMintRequest,
   prepareTransferRequest,
   prepareBurnRequest,
+  prepareMakerCancellation,
   prepareCheckerApproval,
   prepareCheckerRejection,
   recordInitiation,
+  recordCancellation,
   recordExecution,
   executeReadyRequest,
 };
