@@ -206,6 +206,7 @@ async function fetchTokenRequestAccount(requestAddress, keypair = getAdminKeypai
 
   return {
     address: publicKey.toBase58(),
+    config: account.config?.toBase58?.() || null,
     maker: account.maker?.toBase58?.() || null,
     checker: account.checker?.toBase58?.() || null,
     mint: account.mint?.toBase58?.() || null,
@@ -370,6 +371,144 @@ function canServerManagedCreateRequest(tokenRequest) {
   }
 
   return expectedMakerWalletAddress === makerKeypair.publicKey.toBase58();
+}
+
+function getExpectedRequestAccounts(tokenRequest) {
+  const mintAddress = parsePublicKey(tokenRequest.tokenMintAddress, 'tokenMintAddress');
+
+  return {
+    sourceTokenAccount:
+      resolveSourceTokenAccountAddress(tokenRequest, mintAddress)?.toBase58() || null,
+    destinationTokenAccount:
+      resolveDestinationTokenAccountAddress(tokenRequest, mintAddress)?.toBase58() || null,
+  };
+}
+
+async function validateRecordedOnChainRequest(tokenRequest, payload = {}, options = {}) {
+  const onChainRequestAddress = payload.onChainRequestAddress || tokenRequest.onChainRequestAddress;
+
+  if (!onChainRequestAddress) {
+    throw new ApiError(400, 'onChainRequestAddress is required');
+  }
+
+  const onChainRequest = await fetchTokenRequestAccount(onChainRequestAddress);
+  if (!onChainRequest) {
+    throw new ApiError(404, 'On-chain request not found');
+  }
+
+  if (options.requirePendingStatus && onChainRequest.status !== 'PENDING') {
+    throw new ApiError(
+      409,
+      `On-chain request status must be PENDING before recording initiation. Current status is ${onChainRequest.status || 'UNKNOWN'}.`,
+    );
+  }
+
+  const configAddress = requireConfigAddress().toBase58();
+  if (onChainRequest.config !== configAddress) {
+    throw new ApiError(
+      409,
+      `Recorded on-chain request belongs to config ${onChainRequest.config}, expected ${configAddress}.`,
+    );
+  }
+
+  if (onChainRequest.requestType !== tokenRequest.requestType) {
+    throw new ApiError(
+      409,
+      `Recorded on-chain request type ${onChainRequest.requestType} does not match ${tokenRequest.requestType}.`,
+    );
+  }
+
+  if (onChainRequest.mint !== tokenRequest.tokenMintAddress) {
+    throw new ApiError(
+      409,
+      `Recorded on-chain mint ${onChainRequest.mint} does not match ${tokenRequest.tokenMintAddress}.`,
+    );
+  }
+
+  const expectedAmount = toRawAmount(tokenRequest.amount);
+  if (onChainRequest.amount !== expectedAmount) {
+    throw new ApiError(
+      409,
+      `Recorded on-chain amount ${onChainRequest.amount} does not match ${expectedAmount}.`,
+    );
+  }
+
+  if (payload.makerWalletAddress && onChainRequest.maker !== payload.makerWalletAddress) {
+    throw new ApiError(
+      409,
+      `Recorded on-chain maker ${onChainRequest.maker} does not match ${payload.makerWalletAddress}.`,
+    );
+  }
+
+  const expectedAccounts = getExpectedRequestAccounts(tokenRequest);
+  if (expectedAccounts.sourceTokenAccount !== onChainRequest.sourceTokenAccount) {
+    throw new ApiError(
+      409,
+      `Recorded source token account ${onChainRequest.sourceTokenAccount} does not match ${expectedAccounts.sourceTokenAccount}.`,
+    );
+  }
+
+  if (expectedAccounts.destinationTokenAccount !== onChainRequest.destinationTokenAccount) {
+    throw new ApiError(
+      409,
+      `Recorded destination token account ${onChainRequest.destinationTokenAccount} does not match ${expectedAccounts.destinationTokenAccount}.`,
+    );
+  }
+
+  if (
+    payload.sourceTokenAccountAddress
+    && payload.sourceTokenAccountAddress !== onChainRequest.sourceTokenAccount
+  ) {
+    throw new ApiError(
+      409,
+      `Submitted source token account ${payload.sourceTokenAccountAddress} does not match the on-chain request.`,
+    );
+  }
+
+  if (
+    payload.destinationTokenAccountAddress
+    && payload.destinationTokenAccountAddress !== onChainRequest.destinationTokenAccount
+  ) {
+    throw new ApiError(
+      409,
+      `Submitted destination token account ${payload.destinationTokenAccountAddress} does not match the on-chain request.`,
+    );
+  }
+
+  return onChainRequest;
+}
+
+async function verifyConfirmedTransaction(signature, requiredAddresses = []) {
+  const transaction = await getConnection().getParsedTransaction(
+    signature,
+    {
+      commitment: env.SOLANA_COMMITMENT,
+      maxSupportedTransactionVersion: 0,
+    },
+  );
+
+  if (!transaction) {
+    throw new ApiError(409, `Transaction ${signature} is not confirmed on the configured RPC.`);
+  }
+
+  if (transaction.meta?.err) {
+    throw new ApiError(409, `Transaction ${signature} failed on chain and cannot be recorded as successful.`);
+  }
+
+  const accountKeys = transaction.transaction.message.accountKeys.map((entry) => (
+    typeof entry === 'string' ? entry : entry.pubkey.toBase58()
+  ));
+
+  for (const requiredAddress of requiredAddresses.filter(Boolean)) {
+    if (!accountKeys.includes(requiredAddress)) {
+      throw new ApiError(
+        409,
+        `Transaction ${signature} does not reference required address ${requiredAddress}.`,
+      );
+    }
+  }
+
+  return transaction;
 }
 
 async function ensureDestinationAta(payerKeypair, mintAddress, ownerAddress) {
@@ -957,6 +1096,8 @@ module.exports = {
   getWalletTokenBalances,
   buildExplorerUrl,
   ensureManagedTokenMetadata,
+  validateRecordedOnChainRequest,
+  verifyConfirmedTransaction,
   supportsBrowserWalletExecution,
   removeChecker,
   setAdmin,

@@ -91,9 +91,19 @@ function assertReadyForExecution(tokenRequest) {
   }
 }
 
-function assertDraftForInitiation(tokenRequest) {
-  if (tokenRequest.status !== TOKEN_REQUEST_STATUSES.DRAFT) {
-    throw new ApiError(400, 'Only DRAFT requests can be prepared for maker wallet signing');
+function assertMakerInitiationState(tokenRequest) {
+  if (
+    tokenRequest.status !== TOKEN_REQUEST_STATUSES.DRAFT
+    && tokenRequest.status !== TOKEN_REQUEST_STATUSES.PENDING_APPROVAL
+  ) {
+    throw new ApiError(
+      400,
+      `Only DRAFT or PENDING_APPROVAL requests can be initiated on chain. Current status is ${tokenRequest.status}.`,
+    );
+  }
+
+  if (tokenRequest.onChainRequestAddress) {
+    throw new ApiError(409, 'This request is already linked to an on-chain request');
   }
 }
 
@@ -631,6 +641,10 @@ async function recordCancellation(id, payload, actorUserId) {
     );
   }
 
+  await solanaService.validateRecordedOnChainRequest(originalRequest, {
+    makerWalletAddress: payload.makerWalletAddress,
+  });
+
   const onChainRequest = await solanaService.fetchTokenRequestAccount(originalRequest.onChainRequestAddress);
   if (!onChainRequest) {
     throw new ApiError(404, 'On-chain request not found');
@@ -773,7 +787,7 @@ async function prepareExecution(id, actorUser) {
 
 async function prepareMintRequest(id, actorUser) {
   const existingRequest = await getTokenRequestOrThrow(id);
-  assertDraftForInitiation(existingRequest);
+  assertMakerInitiationState(existingRequest);
   assertMakerPreparationAccess(actorUser, existingRequest);
 
   if (existingRequest.requestType !== TOKEN_REQUEST_TYPES.MINT) {
@@ -793,7 +807,7 @@ async function prepareMintRequest(id, actorUser) {
 
 async function prepareTransferRequest(id, actorUser) {
   const existingRequest = await getTokenRequestOrThrow(id);
-  assertDraftForInitiation(existingRequest);
+  assertMakerInitiationState(existingRequest);
   assertMakerPreparationAccess(actorUser, existingRequest);
 
   if (existingRequest.requestType !== TOKEN_REQUEST_TYPES.TRANSFER) {
@@ -813,7 +827,7 @@ async function prepareTransferRequest(id, actorUser) {
 
 async function prepareBurnRequest(id, actorUser) {
   const existingRequest = await getTokenRequestOrThrow(id);
-  assertDraftForInitiation(existingRequest);
+  assertMakerInitiationState(existingRequest);
   assertMakerPreparationAccess(actorUser, existingRequest);
 
   if (existingRequest.requestType !== TOKEN_REQUEST_TYPES.BURN) {
@@ -890,9 +904,7 @@ async function recordInitiation(id, payload, actorUserId) {
     throw new ApiError(403, 'You can only record initiation for your own token requests');
   }
 
-  if (existingRequest.status !== TOKEN_REQUEST_STATUSES.DRAFT) {
-    throw new ApiError(400, 'Only DRAFT requests can record wallet initiation');
-  }
+  assertMakerInitiationState(existingRequest);
 
   // Phase A: All request types now support browser wallet initiation including MINT
   const expectedMakerWalletAddress = existingRequest.sourceWallet?.walletAddress || existingRequest.makerWalletAddress;
@@ -902,6 +914,10 @@ async function recordInitiation(id, payload, actorUserId) {
       `makerWalletAddress must match the expected wallet address ${expectedMakerWalletAddress}`,
     );
   }
+
+  await solanaService.validateRecordedOnChainRequest(existingRequest, payload, {
+    requirePendingStatus: true,
+  });
 
   const tokenRequest = await prisma.$transaction(async (tx) => {
     const updatedRequest = await blockchainService.recordInitiationResult(id, {
@@ -948,6 +964,25 @@ async function recordExecution(id, payload, actorUserId) {
 
   if (payload.status === TOKEN_REQUEST_STATUSES.FAILED && !payload.executionError) {
     throw new ApiError(400, 'executionError is required when status is FAILED');
+  }
+
+  if (payload.status === TOKEN_REQUEST_STATUSES.EXECUTED) {
+    if (!payload.txSignature) {
+      throw new ApiError(400, 'txSignature is required when status is EXECUTED');
+    }
+
+    const onChainRequest = await solanaService.validateRecordedOnChainRequest(existingRequest);
+    await solanaService.verifyConfirmedTransaction(
+      payload.txSignature,
+      [existingRequest.onChainRequestAddress, existingRequest.tokenMintAddress],
+    );
+
+    if (onChainRequest.status !== 'APPROVED') {
+      throw new ApiError(
+        409,
+        `On-chain request status is ${onChainRequest.status || 'UNKNOWN'}. It must be APPROVED before the request can be recorded as EXECUTED.`,
+      );
+    }
   }
 
   const tokenRequest = await prisma.$transaction(async (tx) => {

@@ -70,13 +70,14 @@ backend/
 
 1. `MAKER` creates a token request in `DRAFT`.
 2. `MAKER` can edit only their own `DRAFT` request.
-3. `MAKER` submits the request to move it to `PENDING_APPROVAL`.
-4. `MAKER` can cancel a `PENDING_APPROVAL` request before it has been initiated on chain.
-5. If the request has already been initiated on chain but is still pending checker action, `MAKER` can cancel it with a maker wallet signature.
-6. `CHECKER` approves or rejects it. Maker and checker cannot be the same user.
-7. `ADMIN` or `EXECUTOR` moves an approved request into the on-chain pending queue.
-8. `ADMIN` or `EXECUTOR` records the final execution result as `EXECUTED` or `FAILED`.
-9. Audit logs are written for each important transition and business action.
+3. `MAKER` can either submit the request to move it to `PENDING_APPROVAL`, or initiate the wallet-signed on-chain request directly from `DRAFT`.
+4. After wallet initiation is recorded, the backend validates that the on-chain request matches the portal request before linking them.
+5. `MAKER` can cancel a `PENDING_APPROVAL` request before it has been initiated on chain.
+6. If the request has already been initiated on chain but is still pending checker action, `MAKER` can cancel it with a maker wallet signature.
+7. `CHECKER` approves or rejects it. Maker and checker cannot be the same user.
+8. `ADMIN` or `EXECUTOR` moves an approved request into the on-chain pending queue.
+9. `ADMIN`, `CHECKER`, or `EXECUTOR` can record the final execution result, but successful execution recording now requires confirmed on-chain state and a confirmed transaction signature.
+10. Audit logs are written for each important transition and business action.
 
 ## Status Flow
 
@@ -260,6 +261,7 @@ Example defaults from `.env.example`:
 - `POST /api/token-requests/:id/reject`
 - `POST /api/token-requests/:id/mark-ready`
 - `POST /api/token-requests/:id/record-execution`
+  Successful execution recording requires a confirmed `txSignature` and matching on-chain request state.
 
 ### Audit Logs
 
@@ -362,6 +364,7 @@ Execution behavior:
 - `prepareMintExecutionPayload`, `prepareTransferExecutionPayload`, and `prepareBurnExecutionPayload` now return real local-validator execution context.
 - `POST /api/token-requests/:id/execute` executes an on-chain pending request and records the result automatically.
 - The backend uses configured server-managed maker and checker wallets for local execution.
+- Browser-signed checker approval and rejection payloads can be prepared without a backend checker private key as long as the checker wallet address is provided or already configured.
 
 Current limitation:
 

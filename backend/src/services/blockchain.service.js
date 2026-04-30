@@ -108,15 +108,20 @@ async function prepareCheckerApprovalPayload(requestId, checkerWalletAddress = n
   const tokenRequest = await getRequestForExecution(requestId);
   const executionContext = solanaService.getExecutionContext(tokenRequest);
   const configStatus = await solanaService.getConfigStatus();
-  const checkerKeypair = solanaService.getCheckerKeypair();
-  const checkerProgram = solanaService.getProgram(checkerKeypair);
-  const checkerSignerAddress = checkerWalletAddress || checkerKeypair.publicKey.toBase58();
+  const checkerSignerAddress = checkerWalletAddress || configStatus.configuredSigners.checker || null;
+  if (!checkerSignerAddress) {
+    throw new ApiError(
+      400,
+      'checkerWalletAddress is required when no default checker signer address is configured on the backend',
+    );
+  }
+  const instructionProgram = solanaService.getProgram(solanaService.getAdminKeypair());
   const sourceTokenAccount =
     tokenRequest.sourceTokenAccountAddress || executionContext.sourceTokenAccount || null;
   const destinationTokenAccount =
     tokenRequest.destinationTokenAccountAddress || executionContext.destinationTokenAccount || null;
 
-  const approvalInstruction = await checkerProgram.methods
+  const approvalInstruction = await instructionProgram.methods
     .approveRequest()
     .accounts({
       request: tokenRequest.onChainRequestAddress,
@@ -147,10 +152,15 @@ async function prepareCheckerRejectionPayload(requestId, checkerWalletAddress = 
   const tokenRequest = await getRequestForExecution(requestId);
   const executionContext = solanaService.getExecutionContext(tokenRequest);
   const configStatus = await solanaService.getConfigStatus();
-  const checkerKeypair = solanaService.getCheckerKeypair();
-  const checkerProgram = solanaService.getProgram(checkerKeypair);
-  const checkerSignerAddress = checkerWalletAddress || checkerKeypair.publicKey.toBase58();
-  const rejectionInstruction = await checkerProgram.methods
+  const checkerSignerAddress = checkerWalletAddress || configStatus.configuredSigners.checker || null;
+  if (!checkerSignerAddress) {
+    throw new ApiError(
+      400,
+      'checkerWalletAddress is required when no default checker signer address is configured on the backend',
+    );
+  }
+  const instructionProgram = solanaService.getProgram(solanaService.getAdminKeypair());
+  const rejectionInstruction = await instructionProgram.methods
     .rejectRequest()
     .accounts({
       request: tokenRequest.onChainRequestAddress,
@@ -176,14 +186,13 @@ async function prepareCheckerRejectionPayload(requestId, checkerWalletAddress = 
 async function prepareMakerCancellationPayload(requestId, makerWalletAddress = null) {
   const tokenRequest = await getRequestForExecution(requestId);
   const executionContext = solanaService.getExecutionContext(tokenRequest);
-  const adminKeypair = solanaService.getAdminKeypair();
-  const makerProgram = solanaService.getProgram(adminKeypair);
+  const instructionProgram = solanaService.getProgram(solanaService.getAdminKeypair());
   const makerSignerAddress = makerWalletAddress
     || tokenRequest.makerWalletAddress
     || tokenRequest.sourceWallet?.walletAddress
     || null;
 
-  const cancelInstruction = await makerProgram.methods
+  const cancelInstruction = await instructionProgram.methods
     .cancelRequest()
     .accounts({
       request: tokenRequest.onChainRequestAddress,
