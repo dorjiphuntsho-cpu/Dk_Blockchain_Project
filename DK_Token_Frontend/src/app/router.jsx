@@ -15,6 +15,8 @@ import WalletDetailsPage from '../pages/wallets/WalletDetailsPage';
 import MyWalletsPage from '../pages/wallets/MyWalletsPage';
 import BanksPage from '../pages/banks/BanksPage';
 import BankDetailsPage from '../pages/banks/BankDetailsPage';
+import ReservesPage from '../pages/reserves/ReservesPage';
+import ReserveDetailsPage from '../pages/reserves/ReserveDetailsPage';
 import SettlementsPage from '../pages/settlements/SettlementsPage';
 import SettlementCreatePage from '../pages/settlements/SettlementCreatePage';
 import SettlementDetailsPage from '../pages/settlements/SettlementDetailsPage';
@@ -65,6 +67,7 @@ const router = createBrowserRouter([
           {
             element: <RoleGuard roles={[ROLES.ADMIN, ROLES.MAKER, ROLES.CHECKER, ROLES.EXECUTOR]} />,
             children: [
+              { path: 'reserves', element: <ReservesPage /> },
               { path: 'settlements', element: <SettlementsPage /> },
             ],
           },
@@ -88,6 +91,10 @@ const router = createBrowserRouter([
           {
             path: 'token-requests/:id',
             element: <TokenRequestDetailsPage />,
+          },
+          {
+            path: 'reserves/:id',
+            element: <ReserveDetailsPage />,
           },
           {
             path: 'settlements/:id',

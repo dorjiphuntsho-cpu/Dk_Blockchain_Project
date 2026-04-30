@@ -272,6 +272,37 @@ model BipsTransactionLog {
   @@map("bips_transaction_logs")
 }
 
+model PaymentTransaction {
+  id                String   @id @default(uuid()) @db.Uuid
+  gatewayName       String
+  paymentReference  String   @unique
+  gatewayTransactionId String?
+  customerReference String?
+  payerName         String?
+  payerAccount      String?
+  amount            Decimal  @db.Decimal(30, 10)
+  currency          String   @default("BTN")
+  status            String
+  statusMessage     String?
+  rawCallbackPayload Json?
+  rawCallbackHeaders Json?
+  parsedPayload     Json?
+  rawStatusResponse Json?
+  parsedStatus      Json?
+  lastVerifiedAt    DateTime?
+  confirmedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([gatewayName])
+  @@index([status])
+  @@index([customerReference])
+  @@index([gatewayTransactionId])
+  @@index([confirmedAt])
+  @@index([createdAt])
+  @@map("payment_transactions")
+}
+
 model Role {
   id        String    @id @default(uuid()) @db.Uuid
   name      RoleName  @unique

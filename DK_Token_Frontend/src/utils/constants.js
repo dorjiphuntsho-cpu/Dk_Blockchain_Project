@@ -84,6 +84,7 @@ export const NAV_ITEMS = [
   { label: 'My Wallets', path: '/my-wallets', roles: Object.values(ROLES), section: 'Overview', icon: 'wallets' },
   { label: 'My Requests', path: '/my-requests', roles: [ROLES.MAKER], section: 'Operations', icon: 'myRequests' },
   { label: 'Pending Approvals', path: '/pending-approvals', roles: [ROLES.CHECKER], section: 'Operations', icon: 'approvals' },
+  { label: 'Reserves', path: '/reserves', roles: [ROLES.ADMIN, ROLES.MAKER, ROLES.CHECKER, ROLES.EXECUTOR], section: 'Operations', icon: 'request' },
   { label: 'Settlements', path: '/settlements', roles: [ROLES.ADMIN, ROLES.MAKER, ROLES.CHECKER, ROLES.EXECUTOR], section: 'Operations', icon: 'request' },
   { label: 'Solana Admin', path: '/solana-admin', roles: [ROLES.ADMIN], section: 'Admin', icon: 'solana' },
   { label: 'Banks', path: '/banks', roles: [ROLES.ADMIN], section: 'Admin', icon: 'wallets' },
@@ -93,7 +94,7 @@ export const NAV_ITEMS = [
   { label: 'Audit Logs', path: '/audit-logs', roles: [ROLES.ADMIN], section: 'Logs', icon: 'logs' },
 ];
 
-export const NAV_PREFIX_MATCHES = ['/users/', '/wallets/', '/banks/', '/token-requests/', '/settlements/'];
+export const NAV_PREFIX_MATCHES = ['/users/', '/wallets/', '/banks/', '/token-requests/', '/reserves/', '/settlements/'];
 
 export const ROUTE_TITLES = {
   '/dashboard': 'Dashboard',
@@ -103,6 +104,7 @@ export const ROUTE_TITLES = {
   '/wallets': 'Wallets',
   '/wallets/new': 'Create Wallet',
   '/banks': 'Banks',
+  '/reserves': 'Reserves',
   '/token-requests': 'Token Requests',
   '/token-requests/new': 'Create Token Request',
   '/settlements': 'Settlements',
@@ -120,6 +122,8 @@ export const ENTITY_TYPES = {
   ROLE_ASSIGNMENT: 'ROLE_ASSIGNMENT',
   WALLET: 'WALLET',
   TOKEN_REQUEST: 'TOKEN_REQUEST',
+  RESERVE_LEDGER: 'RESERVE_LEDGER',
+  PAYMENT_TRANSACTION: 'PAYMENT_TRANSACTION',
   SETTLEMENT_REQUEST: 'SETTLEMENT_REQUEST',
 };
 
@@ -137,6 +141,7 @@ export const AUDIT_ACTIONS = {
   STATUS_CHANGE: 'STATUS_CHANGE',
   ASSIGN_ROLE: 'ASSIGN_ROLE',
   ROUTE_SETTLEMENT: 'ROUTE_SETTLEMENT',
+  SYNC_RESERVE: 'SYNC_RESERVE',
   BIPS_INQUIRY: 'BIPS_INQUIRY',
   BIPS_OUTGOING: 'BIPS_OUTGOING',
   BIPS_RECONCILE: 'BIPS_RECONCILE',

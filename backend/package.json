@@ -8,6 +8,7 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "bips:reconcile": "node scripts/reconcile-bips.js",
+    "payments:reconcile": "node scripts/reconcile-payments.js",
     "test:backend": "node tests/run-backend-tests.js",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",

@@ -9,6 +9,8 @@ import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import Textarea from '../../components/ui/Textarea';
 import { banksApi } from '../../modules/banks/banks.api';
+import { reservesApi } from '../../modules/reserves/reserves.api';
+import { formatReserveLabel } from '../../modules/reserves/reserves.schemas';
 import { managedTokensApi } from '../../modules/solana/managedTokens.api';
 import { settlementsApi } from '../../modules/settlements/settlements.api';
 import {
@@ -37,45 +39,44 @@ const initialForm = {
   sourceAccountNumber: '',
 };
 
-function formatReserveLedgerOption(ledger) {
-  const referenceType = ledger.referenceType || 'Reserve';
-  const referenceId = ledger.referenceId || ledger.id;
-  const amount = ledger.availableAmount || ledger.amount || '0';
-  const currency = ledger.currency || 'BTN';
-
-  return `${referenceType} / ${referenceId} / Available ${amount} ${currency}`;
-}
-
 function SettlementCreatePage() {
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
   const [banks, setBanks] = useState([]);
   const [managedTokens, setManagedTokens] = useState([]);
+  const [reserves, setReserves] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState(initialForm);
 
   useEffect(() => {
-    async function loadBanks() {
+    async function loadBootstrapData() {
       try {
         setLoading(true);
         setError('');
-        const [banksResponse, tokensResponse] = await Promise.all([
+        const [banksResponse, tokensResponse, reservesResponse] = await Promise.all([
           banksApi.list({ limit: 100, isActive: true }),
           managedTokensApi.list({ page: 1, limit: 100 }),
+          reservesApi.list({
+            page: 1,
+            limit: 100,
+            status: 'APPROVED',
+            referenceType: 'PAYMENT_GATEWAY',
+          }),
         ]);
         const loadedBanks = banksResponse.data.items || [];
         setBanks(loadedBanks);
         setManagedTokens(tokensResponse.data.items || []);
+        setReserves(reservesResponse.data.items || []);
       } catch (loadError) {
-        setError(loadError.message || 'Unable to load banks.');
+        setError(loadError.message || 'Unable to load settlement setup data.');
       } finally {
         setLoading(false);
       }
     }
 
-    void loadBanks();
+    void loadBootstrapData();
   }, []);
 
   const sourceBank = useMemo(
@@ -91,14 +92,17 @@ function SettlementCreatePage() {
     [banks],
   );
   const availableReserveLedgers = useMemo(() => {
-    if (!sourceBank?.reserveLedgers) {
+    if (!sourceBank?.id) {
       return [];
     }
 
-    return sourceBank.reserveLedgers.filter((ledger) =>
-      ['APPROVED', 'LOCKED'].includes(ledger.status) && Number(ledger.availableAmount || 0) > 0,
+    return reserves.filter((reserve) =>
+      reserve.bankId === sourceBank.id
+      && reserve.referenceType === 'PAYMENT_GATEWAY'
+      && reserve.status === 'APPROVED'
+      && Number(reserve.availableAmount || 0) > 0,
     );
-  }, [sourceBank]);
+  }, [reserves, sourceBank]);
   const availableManagedTokens = useMemo(() => {
     const allManagedTokens = managedTokens.filter((token) => token.mintAddress);
 
@@ -147,6 +151,22 @@ function SettlementCreatePage() {
       }));
     }
   }, [form.requestType, form.sourceBankId, issuerBank]);
+
+  useEffect(() => {
+    if (
+      form.requestType === REQUEST_TYPES.RESERVE_MINT
+      || form.requestType === REQUEST_TYPES.REPLENISHMENT_MINT
+    ) {
+      const hasSelectedReserve = availableReserveLedgers.some((ledger) => ledger.id === form.reserveLedgerId);
+
+      if (!hasSelectedReserve && form.reserveLedgerId) {
+        setForm((current) => ({
+          ...current,
+          reserveLedgerId: '',
+        }));
+      }
+    }
+  }, [availableReserveLedgers, form.requestType, form.reserveLedgerId]);
 
   const submit = async () => {
     try {
@@ -271,7 +291,7 @@ function SettlementCreatePage() {
                   <option value="">Select approved reserve</option>
                   {availableReserveLedgers.map((ledger) => (
                     <option key={ledger.id} value={ledger.id}>
-                      {formatReserveLedgerOption(ledger)}
+                      {formatReserveLabel(ledger)}
                     </option>
                   ))}
                 </Select>
@@ -361,7 +381,7 @@ function SettlementCreatePage() {
                 <p>
                   Reserve source: {(() => {
                     const selectedReserve = availableReserveLedgers.find((ledger) => ledger.id === form.reserveLedgerId);
-                    return selectedReserve ? formatReserveLedgerOption(selectedReserve) : '-';
+                    return selectedReserve ? formatReserveLabel(selectedReserve) : '-';
                   })()}
                 </p>
                 <p>Mint target: {sourceBank?.name ? `${sourceBank.name} treasury token account` : '-'}</p>

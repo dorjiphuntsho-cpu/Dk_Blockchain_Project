@@ -45,6 +45,8 @@ const RESERVE_STATUSES = {
   CONSUMED: 'CONSUMED',
 };
 
+const PAYMENT_GATEWAY_REFERENCE_TYPE = 'PAYMENT_GATEWAY';
+
 async function createSettlementAuditLog({ actorUserId, entityId, action, metadata }, tx = prisma) {
   await auditLogService.createAuditLog(
     {
@@ -268,6 +270,12 @@ function requireIssuerBank(bank) {
   }
 }
 
+function requirePaymentBackedReserve(reserveLedger) {
+  if (reserveLedger.referenceType !== PAYMENT_GATEWAY_REFERENCE_TYPE) {
+    throw new ApiError(400, 'Reserve-backed minting currently supports only payment-backed DK reserves');
+  }
+}
+
 function ensureReserveAvailable(reserveLedger, requestedAmount) {
   if (![RESERVE_STATUSES.APPROVED, RESERVE_STATUSES.LOCKED].includes(reserveLedger.status)) {
     throw new ApiError(400, 'Reserve ledger must be approved before it can support settlement');
@@ -276,6 +284,41 @@ function ensureReserveAvailable(reserveLedger, requestedAmount) {
   if (numberValue(reserveLedger.availableAmount) < numberValue(requestedAmount)) {
     throw new ApiError(400, 'Reserve-backed capacity is insufficient for the requested amount');
   }
+}
+
+function getReserveStatusAfterLock(reserveLedger, amount) {
+  const nextLockedAmount = Number(reserveLedger.lockedAmount || 0) + Number(amount);
+
+  if (nextLockedAmount > 0) {
+    return RESERVE_STATUSES.LOCKED;
+  }
+
+  return RESERVE_STATUSES.APPROVED;
+}
+
+function getReserveStatusAfterConsume(reserveLedger, amount) {
+  const nextLockedAmount = Number(reserveLedger.lockedAmount || 0) - Number(amount);
+  const nextAvailableAmount = Number(reserveLedger.availableAmount || 0);
+
+  if (nextLockedAmount > 0) {
+    return RESERVE_STATUSES.LOCKED;
+  }
+
+  if (nextLockedAmount <= 0 && nextAvailableAmount <= 0) {
+    return RESERVE_STATUSES.CONSUMED;
+  }
+
+  return RESERVE_STATUSES.APPROVED;
+}
+
+function getReserveStatusAfterRelease(reserveLedger, amount) {
+  const nextLockedAmount = Number(reserveLedger.lockedAmount || 0) - Number(amount);
+
+  if (nextLockedAmount > 0) {
+    return RESERVE_STATUSES.LOCKED;
+  }
+
+  return RESERVE_STATUSES.APPROVED;
 }
 
 async function createMintSettlement({
@@ -291,6 +334,7 @@ async function createMintSettlement({
     throw new ApiError(400, 'Reserve ledger does not belong to the selected issuer bank');
   }
 
+  requirePaymentBackedReserve(reserveLedger);
   ensureReserveAvailable(reserveLedger, payload.amount);
 
   return prisma.$transaction(async (tx) => {
@@ -920,6 +964,11 @@ async function prepareMintSettlementRequest(id, actorUser, makerWalletAddress) {
   }
 
   const treasuryTokenAccount = await getTreasuryTokenAccountOrThrow(settlement);
+  if (settlement.reserveLedgerId) {
+    const reserveLedger = await getReserveLedgerOrThrow(settlement.reserveLedgerId);
+    requirePaymentBackedReserve(reserveLedger);
+    ensureReserveAvailable(reserveLedger, settlement.amount);
+  }
   const payload = solanaService.getMintSettlementExecutionContext(
     {
       ...settlement,
@@ -1241,6 +1290,7 @@ async function recordMintSettlementInitiation(id, payload, actorUserId) {
       });
 
       ensureReserveAvailable(reserveLedger, settlement.amount);
+      requirePaymentBackedReserve(reserveLedger);
 
       await tx.reserveLedger.update({
         where: { id: settlement.reserveLedgerId },
@@ -1251,7 +1301,7 @@ async function recordMintSettlementInitiation(id, payload, actorUserId) {
           lockedAmount: {
             increment: settlement.amount,
           },
-          status: RESERVE_STATUSES.LOCKED,
+          status: getReserveStatusAfterLock(reserveLedger, settlement.amount),
         },
       });
 
@@ -1486,6 +1536,10 @@ async function recordMintSettlementExecution(id, payload, actorUserId) {
   const requestShape = buildMintSettlementRequestShape(settlement, treasuryTokenAccount);
 
   if (payload.status === SETTLEMENT_STATUSES.SETTLED) {
+    if (settlement.reserveLedgerId) {
+      const reserveLedger = await getReserveLedgerOrThrow(settlement.reserveLedgerId);
+      requirePaymentBackedReserve(reserveLedger);
+    }
     const onChainRequest = await solanaService.validateRecordedOnChainRequest(requestShape);
     await solanaService.verifyConfirmedTransaction(
       payload.txSignature,
@@ -1506,14 +1560,8 @@ async function recordMintSettlementExecution(id, payload, actorUserId) {
         where: { id: settlement.reserveLedgerId },
       });
 
-      const nextLockedAmount = Number(reserveLedger.lockedAmount) - Number(settlement.amount);
-      const nextAvailableAmount = Number(reserveLedger.availableAmount);
-      let nextReserveStatus = RESERVE_STATUSES.APPROVED;
-      if (nextLockedAmount > 0) {
-        nextReserveStatus = RESERVE_STATUSES.LOCKED;
-      } else if (nextLockedAmount <= 0 && nextAvailableAmount <= 0) {
-        nextReserveStatus = RESERVE_STATUSES.CONSUMED;
-      }
+      requirePaymentBackedReserve(reserveLedger);
+      const nextReserveStatus = getReserveStatusAfterConsume(reserveLedger, settlement.amount);
 
       await tx.reserveLedger.update({
         where: { id: settlement.reserveLedgerId },
@@ -1541,6 +1589,12 @@ async function recordMintSettlementExecution(id, payload, actorUserId) {
     }
 
     if (payload.status === SETTLEMENT_STATUSES.FAILED && settlement.reserveLedgerId) {
+      const reserveLedger = await tx.reserveLedger.findUnique({
+        where: { id: settlement.reserveLedgerId },
+      });
+
+      requirePaymentBackedReserve(reserveLedger);
+
       await tx.reserveLedger.update({
         where: { id: settlement.reserveLedgerId },
         data: {
@@ -1550,7 +1604,7 @@ async function recordMintSettlementExecution(id, payload, actorUserId) {
           lockedAmount: {
             decrement: settlement.amount,
           },
-          status: RESERVE_STATUSES.APPROVED,
+          status: getReserveStatusAfterRelease(reserveLedger, settlement.amount),
         },
       });
     }

@@ -120,6 +120,27 @@ const envSchema = z.object({
 
     return String(value).toLowerCase() === 'true';
   }, z.boolean()),
+  PAYMENT_GATEWAY_NAME: z.string().min(1).default('DK_PAYMENT_GATEWAY'),
+  PAYMENT_GATEWAY_BASE_URL: optionalNonEmptyString,
+  PAYMENT_GATEWAY_STATUS_PATH: z.string().min(1).default('/api/payments/status'),
+  PAYMENT_GATEWAY_STATUS_REFERENCE_QUERY_PARAM: z.string().min(1).default('payment_reference'),
+  PAYMENT_GATEWAY_API_KEY: optionalNonEmptyString,
+  PAYMENT_GATEWAY_API_KEY_HEADER: z.string().min(1).default('x-api-key'),
+  PAYMENT_GATEWAY_WEBHOOK_SECRET: optionalNonEmptyString,
+  PAYMENT_GATEWAY_WEBHOOK_SECRET_HEADER: z.string().min(1).default('x-payment-gateway-secret'),
+  PAYMENT_GATEWAY_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+  PAYMENT_RECONCILE_BATCH_LIMIT: z.coerce.number().int().positive().max(100).default(20),
+  PAYMENT_RECONCILE_INCLUDE_TERMINAL_FAILURES: z.preprocess((value) => {
+    if (value === undefined) {
+      return false;
+    }
+
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    return String(value).toLowerCase() === 'true';
+  }, z.boolean()),
 });
 
 const parsed = envSchema.safeParse(process.env);

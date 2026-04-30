@@ -12,6 +12,8 @@ const solanaRoutes = require('./solana.routes');
 const managedTokenRoutes = require('./managedToken.routes');
 const bankRoutes = require('./bank.routes');
 const bipsRoutes = require('./bips.routes');
+const paymentsRoutes = require('./payments.routes');
+const reserveRoutes = require('./reserve.routes');
 const settlementRoutes = require('./settlement.routes');
 
 const router = express.Router();
@@ -25,6 +27,8 @@ router.use('/solana', solanaRoutes);
 router.use('/managed-tokens', managedTokenRoutes);
 router.use('/banks', bankRoutes);
 router.use('/bips', bipsRoutes);
+router.use('/payments', paymentsRoutes);
+router.use('/reserves', reserveRoutes);
 router.use('/settlements', settlementRoutes);
 router.use('/token-requests', tokenRequestRoutes);
 router.use('/token-requests', approvalRoutes);

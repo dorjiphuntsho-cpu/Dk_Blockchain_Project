@@ -1,9 +1,13 @@
 import { REQUEST_STATUSES, REQUEST_TYPES } from './constants';
 
 export const statusConfig = {
+  PENDING: { label: 'Pending', tone: 'warning' },
   [REQUEST_STATUSES.DRAFT]: { label: 'Draft', tone: 'neutral' },
   [REQUEST_STATUSES.PENDING_APPROVAL]: { label: 'Pending Approval', tone: 'warning' },
   [REQUEST_STATUSES.APPROVED]: { label: 'Approved', tone: 'primary' },
+  LOCKED: { label: 'Locked', tone: 'secondary' },
+  CONSUMED: { label: 'Consumed', tone: 'success' },
+  RELEASED: { label: 'Released', tone: 'neutral' },
   [REQUEST_STATUSES.INQUIRY_FAILED]: { label: 'Inquiry Failed', tone: 'error' },
   [REQUEST_STATUSES.REJECTED]: { label: 'Rejected', tone: 'rejected' },
   [REQUEST_STATUSES.READY_FOR_EXECUTION]: { label: 'In Progress', tone: 'secondary' },
