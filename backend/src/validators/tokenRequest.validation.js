@@ -11,6 +11,7 @@ const {
 } = require('../utils/validation');
 
 const requestTypeEnum = z.enum(['MINT', 'TRANSFER', 'BURN']);
+const createRequestTypeEnum = z.enum(['TRANSFER', 'BURN']);
 const listStatusEnum = z.enum([
   'DRAFT',
   'PENDING_APPROVAL',
@@ -24,7 +25,7 @@ const listStatusEnum = z.enum([
 ]);
 
 const baseRequestBody = {
-  requestType: requestTypeEnum,
+  requestType: createRequestTypeEnum,
   tokenMintAddress: tokenMintAddressSchema,
   amount: numericStringSchema,
   sourceWalletId: uuidSchema.nullable().optional(),
@@ -41,7 +42,7 @@ const createTokenRequestSchema = z.object({
 const updateTokenRequestSchema = z.object({
   body: z
     .object({
-      requestType: requestTypeEnum.optional(),
+      requestType: createRequestTypeEnum.optional(),
       tokenMintAddress: tokenMintAddressSchema.optional(),
       amount: numericStringSchema.optional(),
       sourceWalletId: uuidSchema.nullable().optional(),

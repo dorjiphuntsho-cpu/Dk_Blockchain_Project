@@ -1,8 +1,8 @@
-use anchor_lang::prelude::*;
-use anchor_spl::token::{Mint, TokenAccount};
 use crate::error::ErrorCode;
 use crate::state::config::Config;
 use crate::state::token_request::{RequestStatus, RequestType, TokenRequest};
+use anchor_lang::prelude::*;
+use anchor_spl::token::{Mint, TokenAccount};
 
 #[derive(Accounts)]
 pub struct CreateTransferRequest<'info> {
@@ -39,6 +39,18 @@ pub fn handler(ctx: Context<CreateTransferRequest>, amount: u64) -> Result<()> {
     require!(
         ctx.accounts.source_token_account.key() != ctx.accounts.destination_token_account.key(),
         ErrorCode::SameSourceAndDestination
+    );
+    require!(
+        ctx.accounts
+            .config
+            .has_treasury_account(&ctx.accounts.source_token_account.key()),
+        ErrorCode::UnapprovedTreasuryAccount
+    );
+    require!(
+        ctx.accounts
+            .config
+            .has_treasury_account(&ctx.accounts.destination_token_account.key()),
+        ErrorCode::UnapprovedTreasuryAccount
     );
 
     let request = &mut ctx.accounts.request;

@@ -1,7 +1,7 @@
-use anchor_lang::prelude::*;
 use crate::error::ErrorCode;
 use crate::state::config::Config;
 use crate::state::token_request::{RequestStatus, TokenRequest};
+use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
 pub struct CancelRequest<'info> {

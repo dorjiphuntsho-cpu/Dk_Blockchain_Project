@@ -1,8 +1,8 @@
-use anchor_lang::prelude::*;
-use anchor_spl::token::{Mint, TokenAccount};
 use crate::error::ErrorCode;
 use crate::state::config::Config;
 use crate::state::token_request::{RequestStatus, RequestType, TokenRequest};
+use anchor_lang::prelude::*;
+use anchor_spl::token::{Mint, TokenAccount};
 
 #[derive(Accounts)]
 pub struct CreateBurnRequest<'info> {
@@ -31,6 +31,12 @@ pub struct CreateBurnRequest<'info> {
 
 pub fn handler(ctx: Context<CreateBurnRequest>, amount: u64) -> Result<()> {
     require!(amount > 0, ErrorCode::InvalidAmount);
+    require!(
+        ctx.accounts
+            .config
+            .has_treasury_account(&ctx.accounts.source_token_account.key()),
+        ErrorCode::UnapprovedTreasuryAccount
+    );
 
     let request = &mut ctx.accounts.request;
 

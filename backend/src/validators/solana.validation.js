@@ -16,10 +16,26 @@ const addCheckerSchema = z.object({
   query: emptyObjectSchema,
 });
 
+const addTreasuryAccountSchema = z.object({
+  body: z.object({
+    treasuryAccountAddress: walletAddressSchema,
+  }),
+  params: emptyObjectSchema,
+  query: emptyObjectSchema,
+});
+
 const removeCheckerSchema = z.object({
   body: emptyObjectSchema,
   params: z.object({
     checkerAddress: walletAddressSchema,
+  }),
+  query: emptyObjectSchema,
+});
+
+const removeTreasuryAccountSchema = z.object({
+  body: emptyObjectSchema,
+  params: z.object({
+    treasuryAccountAddress: walletAddressSchema,
   }),
   query: emptyObjectSchema,
 });
@@ -68,9 +84,11 @@ const recordCreatedTokenMintSchema = z.object({
 
 module.exports = {
   addCheckerSchema,
+  addTreasuryAccountSchema,
   createTokenMintSchema,
   recordCreatedTokenMintSchema,
   removeCheckerSchema,
+  removeTreasuryAccountSchema,
   setAdminSchema,
   solanaConfigStatusSchema,
 };

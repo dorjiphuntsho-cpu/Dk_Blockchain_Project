@@ -22,18 +22,29 @@ pub mod dk_token {
         add_checker::handler(ctx, checker)
     }
 
+    pub fn add_treasury_account(
+        ctx: Context<AddTreasuryAccount>,
+        treasury_account: Pubkey,
+    ) -> Result<()> {
+        add_treasury_account::handler(ctx, treasury_account)
+    }
+
     pub fn remove_checker(ctx: Context<RemoveChecker>, checker: Pubkey) -> Result<()> {
         remove_checker::handler(ctx, checker)
+    }
+
+    pub fn remove_treasury_account(
+        ctx: Context<RemoveTreasuryAccount>,
+        treasury_account: Pubkey,
+    ) -> Result<()> {
+        remove_treasury_account::handler(ctx, treasury_account)
     }
 
     pub fn set_admin(ctx: Context<SetAdmin>, new_admin: Pubkey) -> Result<()> {
         set_admin::handler(ctx, new_admin)
     }
 
-    pub fn create_mint_request(
-        ctx: Context<CreateMintRequest>,
-        amount: u64,
-    ) -> Result<()> {
+    pub fn create_mint_request(ctx: Context<CreateMintRequest>, amount: u64) -> Result<()> {
         create_request::handler(ctx, amount)
     }
 
@@ -47,17 +58,11 @@ pub mod dk_token {
         create_token_mint::handler(ctx, decimals, name, symbol, uri)
     }
 
-    pub fn create_transfer_request(
-        ctx: Context<CreateTransferRequest>,
-        amount: u64,
-    ) -> Result<()> {
+    pub fn create_transfer_request(ctx: Context<CreateTransferRequest>, amount: u64) -> Result<()> {
         create_transfer_request::handler(ctx, amount)
     }
 
-    pub fn create_burn_request(
-        ctx: Context<CreateBurnRequest>,
-        amount: u64,
-    ) -> Result<()> {
+    pub fn create_burn_request(ctx: Context<CreateBurnRequest>, amount: u64) -> Result<()> {
         create_burn_request::handler(ctx, amount)
     }
 

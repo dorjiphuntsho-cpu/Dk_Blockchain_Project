@@ -43,9 +43,12 @@ function TokenRequestCreatePage() {
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submitLockRef = useRef(false);
+  const normalizedDraftRequestType = draftRequest?.requestType === REQUEST_TYPES.MINT
+    ? REQUEST_TYPES.TRANSFER
+    : draftRequest?.requestType;
   const methods = useForm({
     defaultValues: {
-      requestType: draftRequest?.requestType || REQUEST_TYPES.MINT,
+      requestType: normalizedDraftRequestType || REQUEST_TYPES.TRANSFER,
       tokenMintAddress: draftRequest?.tokenMintAddress || '',
       amount: draftRequest ? Number(draftRequest.amount) : '',
       sourceWalletId: draftRequest?.sourceWalletId || '',
@@ -125,7 +128,7 @@ function TokenRequestCreatePage() {
   }, [requestType, selectedSourceWallet]);
 
   const fieldVisibility = useMemo(() => ({
-    destination: requestType === REQUEST_TYPES.MINT || requestType === REQUEST_TYPES.TRANSFER,
+    destination: requestType === REQUEST_TYPES.TRANSFER,
   }), [requestType]);
 
   const availableManagedTokens = useMemo(() => {
@@ -269,11 +272,9 @@ function TokenRequestCreatePage() {
 
         const requestId = response.data.id;
         const requestTypeToPrepare = response.data.requestType;
-        const prepareResponse = requestTypeToPrepare === REQUEST_TYPES.MINT
-          ? await tokenRequestsApi.prepareMintRequest(requestId)
-          : requestTypeToPrepare === REQUEST_TYPES.TRANSFER
-            ? await tokenRequestsApi.prepareTransferRequest(requestId)
-            : await tokenRequestsApi.prepareBurnRequest(requestId);
+        const prepareResponse = requestTypeToPrepare === REQUEST_TYPES.TRANSFER
+          ? await tokenRequestsApi.prepareTransferRequest(requestId)
+          : await tokenRequestsApi.prepareBurnRequest(requestId);
 
         const executionPayload = prepareResponse.data;
         const builtTransaction = await buildMakerInitiationTransaction({
@@ -410,7 +411,7 @@ function TokenRequestCreatePage() {
                 disabled={!tokenOptions.length}
                 helperText={tokenOptions.length
                   ? [REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType)
-                    ? 'Only tokens currently held in your source wallet are shown.'
+                  ? 'Only tokens currently held in your source wallet are shown.'
                     : 'Select from token mints already created in the portal.'
                   : [REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN].includes(requestType)
                     ? 'No managed tokens with balance were found in your source wallet.'

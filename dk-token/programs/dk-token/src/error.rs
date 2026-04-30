@@ -67,4 +67,16 @@ pub enum ErrorCode {
 
     #[msg("Only the maker can cancel this request")]
     UnauthorizedMaker,
+
+    #[msg("Treasury account already exists")]
+    TreasuryAccountAlreadyExists,
+
+    #[msg("Treasury account not found")]
+    TreasuryAccountNotFound,
+
+    #[msg("Treasury account limit reached")]
+    TreasuryAccountLimitReached,
+
+    #[msg("Token account is not an approved treasury account")]
+    UnapprovedTreasuryAccount,
 }

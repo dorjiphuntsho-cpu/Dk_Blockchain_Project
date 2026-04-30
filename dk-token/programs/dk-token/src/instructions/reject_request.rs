@@ -1,7 +1,7 @@
-use anchor_lang::prelude::*;
 use crate::error::ErrorCode;
 use crate::state::config::Config;
 use crate::state::token_request::{RequestStatus, TokenRequest};
+use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
 pub struct RejectRequest<'info> {
@@ -26,10 +26,7 @@ pub fn handler(ctx: Context<RejectRequest>) -> Result<()> {
         ErrorCode::AlreadyProcessed
     );
 
-    require!(
-        config.has_checker(&checker),
-        ErrorCode::UnauthorizedChecker
-    );
+    require!(config.has_checker(&checker), ErrorCode::UnauthorizedChecker);
 
     require!(checker != request.maker, ErrorCode::SelfApprovalNotAllowed);
 

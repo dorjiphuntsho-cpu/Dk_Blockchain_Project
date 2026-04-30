@@ -153,6 +153,7 @@ function DashboardPage() {
   }, [dashboardRole, user?.id]);
 
   const overview = state.overview;
+  const settlementSummary = overview?.settlementSummary || null;
 
   const pageCopy = useMemo(() => {
     switch (dashboardRole) {
@@ -235,6 +236,22 @@ function DashboardPage() {
     }
   }, [dashboardRole, overview, state.draftCount, state.rejectedCount, state.reviewedCount]);
 
+  const settlementMetrics = useMemo(() => {
+    if (!(dashboardRole === ROLES.ADMIN || dashboardRole === ROLES.EXECUTOR) || !settlementSummary) {
+      return [];
+    }
+
+    return [
+      metric('settlements-total', 'Total settlements', settlementSummary.totalSettlements ?? 0, 'Across reserve mint, BTN transfer, and BIPS fallback', <DocumentChartBarIcon className="size-4" />, 'primary.main'),
+      metric('settlements-mints', 'Reserve mint', settlementSummary.reserveMintCount ?? 0, 'Issuer-backed mint and replenishment activity', <CheckCircleIcon className="size-4" />, 'success.main'),
+      metric('settlements-transfer', 'BTN transfer', settlementSummary.btnTransferCount ?? 0, 'Treasury-to-treasury direct settlement', <InboxStackIcon className="size-4" />, 'secondary.main'),
+      metric('settlements-fiat', 'Fiat fallback', settlementSummary.fiatFallbackCount ?? 0, 'BIPS-routed transfer and redemption volume', <ClockIcon className="size-4" />, 'warning.main'),
+      metric('settlements-pending', 'Pending reconciliation', settlementSummary.pendingReconciliationCount ?? 0, 'Still waiting on final BIPS confirmation', <ClockIcon className="size-4" />, 'warning.main'),
+      metric('settlements-manual', 'Manual review', settlementSummary.manualReviewCount ?? 0, 'Need operator intervention', <ExclamationCircleIcon className="size-4" />, 'warning.main'),
+      metric('settlements-failed', 'Failed settlements', settlementSummary.failedSettlementCount ?? 0, 'Closed with failure state', <XCircleIcon className="size-4" />, 'error.main'),
+    ];
+  }, [dashboardRole, settlementSummary]);
+
   const recentRows = useMemo(() => {
     if (dashboardRole === ROLES.CHECKER) {
       return state.reviewed.length ? state.reviewed : (overview?.pendingApprovals || []);
@@ -263,6 +280,12 @@ function DashboardPage() {
         <DashboardMetricGrid items={metrics} />
       </PageSection>
 
+      {settlementMetrics.length ? (
+        <PageSection title="Settlement Metrics" subtitle="Operational view of reserve issuance and fiat fallback progression.">
+          <DashboardMetricGrid items={settlementMetrics} />
+        </PageSection>
+      ) : null}
+
       <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
         <div className="min-w-0">
           <PageSection subtitle={pageCopy.recentSubtitle} title={pageCopy.recentTitle}>
@@ -282,6 +305,15 @@ function DashboardPage() {
                   onSelect={(row) => navigate(`/token-requests/${row.id}`)}
                   subtitle="Requests still settling wallet submission, approval capture, or backend reconciliation."
                   title="In Progress"
+                />
+                <RequestListPanel
+                  actionLabel="View settlements"
+                  actionTo="/settlements"
+                  emptyText="No fiat fallback settlements are waiting for reconciliation."
+                  items={overview?.pendingSettlementReconciliation || []}
+                  onSelect={(row) => navigate(`/settlements/${row.id}`)}
+                  subtitle="BIPS-routed settlements still pending final confirmation or manual review."
+                  title="Settlement Reconciliation"
                 />
                 <AuditActivityPanel items={state.auditTrail} />
               </>
@@ -339,6 +371,15 @@ function DashboardPage() {
                   onSelect={(row) => navigate(`/token-requests/${row.id}`)}
                   subtitle="Requests still waiting on wallet capture or backend reconciliation."
                   title="In Progress"
+                />
+                <RequestListPanel
+                  actionLabel="View settlements"
+                  actionTo="/settlements"
+                  emptyText="No BIPS settlements are waiting for reconciliation."
+                  items={overview?.pendingSettlementReconciliation || []}
+                  onSelect={(row) => navigate(`/settlements/${row.id}`)}
+                  subtitle="Fiat fallback settlements still awaiting downstream confirmation."
+                  title="Settlement Queue"
                 />
                 <WalletConnectCard />
               </>

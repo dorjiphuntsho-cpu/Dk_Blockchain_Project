@@ -97,6 +97,29 @@ const envSchema = z.object({
 
     return normalized;
   }, z.enum(['strict', 'warn', 'disabled'])),
+  BIPS_BASE_URL: z.string().url().optional(),
+  BIPS_TIMEOUT_MS: z.coerce.number().int().positive().default(45000),
+  BIPS_API_USER_ID: optionalNonEmptyString,
+  BIPS_API_PASSWORD: optionalNonEmptyString,
+  BIPS_CLIENT_ID: optionalNonEmptyString,
+  BIPS_CHANNEL_TYPE: optionalNonEmptyString,
+  BIPS_ACCINQ_API_KEY: optionalNonEmptyString,
+  BIPS_IMPSCR_API_KEY: optionalNonEmptyString,
+  BIPS_SOURCE_BANK_CODE: optionalNonEmptyString,
+  BIPS_SOURCE_BIN_NUMBER: optionalNonEmptyString,
+  BIPS_SOURCE_PAN_NUMBER: optionalNonEmptyString,
+  BIPS_RECONCILE_BATCH_LIMIT: z.coerce.number().int().positive().max(100).default(20),
+  BIPS_RECONCILE_INCLUDE_MANUAL_REVIEW: z.preprocess((value) => {
+    if (value === undefined) {
+      return false;
+    }
+
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    return String(value).toLowerCase() === 'true';
+  }, z.boolean()),
 });
 
 const parsed = envSchema.safeParse(process.env);

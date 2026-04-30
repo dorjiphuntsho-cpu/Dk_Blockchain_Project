@@ -10,6 +10,9 @@ const auditLogRoutes = require('./auditLog.routes');
 const dashboardRoutes = require('./dashboard.routes');
 const solanaRoutes = require('./solana.routes');
 const managedTokenRoutes = require('./managedToken.routes');
+const bankRoutes = require('./bank.routes');
+const bipsRoutes = require('./bips.routes');
+const settlementRoutes = require('./settlement.routes');
 
 const router = express.Router();
 
@@ -20,6 +23,9 @@ router.use('/wallets', walletRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/solana', solanaRoutes);
 router.use('/managed-tokens', managedTokenRoutes);
+router.use('/banks', bankRoutes);
+router.use('/bips', bipsRoutes);
+router.use('/settlements', settlementRoutes);
 router.use('/token-requests', tokenRequestRoutes);
 router.use('/token-requests', approvalRoutes);
 router.use('/audit-logs', auditLogRoutes);

@@ -21,11 +21,29 @@ async function addChecker(req, res) {
   });
 }
 
+async function addTreasuryAccount(req, res) {
+  const status = await solanaService.addTreasuryAccount(req.validated.body.treasuryAccountAddress);
+
+  return successResponse(res, {
+    message: 'Treasury account added successfully',
+    data: status,
+  });
+}
+
 async function removeChecker(req, res) {
   const status = await solanaService.removeChecker(req.validated.params.checkerAddress);
 
   return successResponse(res, {
     message: 'Checker removed successfully',
+    data: status,
+  });
+}
+
+async function removeTreasuryAccount(req, res) {
+  const status = await solanaService.removeTreasuryAccount(req.validated.params.treasuryAccountAddress);
+
+  return successResponse(res, {
+    message: 'Treasury account removed successfully',
     data: status,
   });
 }
@@ -63,12 +81,18 @@ async function recordCreatedTokenMint(req, res) {
     },
     req.user.id,
   );
+  const issuerProvisioning = await solanaService.autoProvisionIssuerTreasuryForMint(
+    persistedMint.mintAddress,
+  );
   const hydratedMint = await solanaService.hydrateManagedToken(persistedMint);
 
   return successResponse(res, {
     statusCode: 201,
     message: 'Managed token mint recorded successfully',
-    data: hydratedMint,
+    data: {
+      ...hydratedMint,
+      issuerProvisioning,
+    },
   });
 }
 
@@ -76,21 +100,29 @@ async function createTokenMint(req, res) {
   const mint = await solanaService.createTokenMint(req.validated.body);
   const mintWithAdmin = { ...mint, adminWalletAddress: req.validated.body.adminWalletAddress };
   const persistedMint = await managedTokenService.createManagedTokenRecord(mintWithAdmin, req.user.id);
+  const issuerProvisioning = await solanaService.autoProvisionIssuerTreasuryForMint(
+    persistedMint.mintAddress,
+  );
   const hydratedMint = await solanaService.hydrateManagedToken(persistedMint);
 
   return successResponse(res, {
     statusCode: 201,
     message: 'Managed token mint created successfully',
-    data: hydratedMint,
+    data: {
+      ...hydratedMint,
+      issuerProvisioning,
+    },
   });
 }
 
 module.exports = {
   addChecker,
+  addTreasuryAccount,
   createTokenMint,
   recordCreatedTokenMint,
   prepareMintCreation,
   getConfigStatus,
   removeChecker,
+  removeTreasuryAccount,
   setAdmin,
 };

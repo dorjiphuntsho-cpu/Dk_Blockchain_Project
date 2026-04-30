@@ -43,8 +43,17 @@ function getVisibleRequestWhere(user) {
 
 async function getDashboardOverview(user) {
   const visibleWhere = getVisibleRequestWhere(user);
+  const includeSettlementSummary = user.roles.includes(ROLE_NAMES.ADMIN) || user.roles.includes(ROLE_NAMES.EXECUTOR);
 
-  const [summaryCounts, recentRequests, pendingApprovals, auditTrail] = await Promise.all([
+  const [
+    summaryCounts,
+    recentRequests,
+    pendingApprovals,
+    auditTrail,
+    settlementCounts,
+    recentSettlements,
+    pendingSettlementReconciliation,
+  ] = await Promise.all([
     prisma.tokenRequest.groupBy({
       by: ['status'],
       where: visibleWhere,
@@ -88,6 +97,44 @@ async function getDashboardOverview(user) {
           },
         })
       : Promise.resolve([]),
+    includeSettlementSummary
+      ? prisma.settlementRequest.groupBy({
+          by: ['requestType', 'status', 'settlementMode'],
+          _count: {
+            _all: true,
+          },
+        })
+      : Promise.resolve([]),
+    includeSettlementSummary
+      ? prisma.settlementRequest.findMany({
+          include: {
+            sourceBank: true,
+            destinationBank: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 5,
+        })
+      : Promise.resolve([]),
+    includeSettlementSummary
+      ? prisma.settlementRequest.findMany({
+          where: {
+            status: {
+              in: ['BIPS_PENDING', 'MANUAL_REVIEW'],
+            },
+          },
+          include: {
+            sourceBank: true,
+            destinationBank: true,
+          },
+          orderBy: [
+            { executedAt: 'asc' },
+            { updatedAt: 'asc' },
+          ],
+          take: 5,
+        })
+      : Promise.resolve([]),
   ]);
 
   const countByStatus = Object.fromEntries(
@@ -96,6 +143,46 @@ async function getDashboardOverview(user) {
   const onChainPendingRequests =
     (countByStatus[TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION] || 0) +
     (countByStatus[TOKEN_REQUEST_STATUSES.ON_CHAIN_PENDING] || 0);
+  const settlementSummary = includeSettlementSummary
+    ? settlementCounts.reduce((summary, item) => {
+        const count = item._count._all;
+
+        if (item.requestType === 'RESERVE_MINT' || item.requestType === 'REPLENISHMENT_MINT') {
+          summary.reserveMintCount += count;
+        }
+
+        if (item.requestType === 'INTERBANK_TRANSFER' && item.settlementMode === 'ON_CHAIN_BTN') {
+          summary.btnTransferCount += count;
+        }
+
+        if (item.settlementMode === 'BIPS_FIAT') {
+          summary.fiatFallbackCount += count;
+        }
+
+        if (item.status === 'BIPS_PENDING') {
+          summary.pendingReconciliationCount += count;
+        }
+
+        if (item.status === 'MANUAL_REVIEW') {
+          summary.manualReviewCount += count;
+        }
+
+        if (item.status === 'FAILED') {
+          summary.failedSettlementCount += count;
+        }
+
+        summary.totalSettlements += count;
+        return summary;
+      }, {
+        totalSettlements: 0,
+        reserveMintCount: 0,
+        btnTransferCount: 0,
+        fiatFallbackCount: 0,
+        pendingReconciliationCount: 0,
+        manualReviewCount: 0,
+        failedSettlementCount: 0,
+      })
+    : null;
 
   return {
     summary: {
@@ -107,8 +194,11 @@ async function getDashboardOverview(user) {
       executedRequests: countByStatus[TOKEN_REQUEST_STATUSES.EXECUTED] || 0,
       failedRequests: countByStatus[TOKEN_REQUEST_STATUSES.FAILED] || 0,
     },
+    settlementSummary,
     recentRequests,
+    recentSettlements,
     pendingApprovals,
+    pendingSettlementReconciliation,
     auditTrail,
   };
 }

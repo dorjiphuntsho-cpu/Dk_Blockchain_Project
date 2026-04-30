@@ -1,8 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_spl::metadata::{
-    create_metadata_accounts_v3,
-    mpl_token_metadata::types::DataV2,
-    CreateMetadataAccountsV3,
+    create_metadata_accounts_v3, mpl_token_metadata::types::DataV2, CreateMetadataAccountsV3,
     Metadata,
 };
 use anchor_spl::token::{Mint, Token};
@@ -59,11 +57,7 @@ pub fn handler(
     let config_key = ctx.accounts.config.key();
     let bump = ctx.bumps.token_authority;
 
-    let signer_seeds: &[&[u8]] = &[
-        b"token-authority",
-        config_key.as_ref(),
-        &[bump],
-    ];
+    let signer_seeds: &[&[u8]] = &[b"token-authority", config_key.as_ref(), &[bump]];
 
     let signer_seeds_binding = [signer_seeds];
 

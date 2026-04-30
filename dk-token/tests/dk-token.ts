@@ -21,12 +21,14 @@ describe("dk_token local test", () => {
   const maker = anchor.web3.Keypair.generate();
   const checker = anchor.web3.Keypair.generate();
   const recipient = anchor.web3.Keypair.generate();
+  const outsider = anchor.web3.Keypair.generate();
   const config = anchor.web3.Keypair.generate();
   const mintKeypair = anchor.web3.Keypair.generate();
 
   let mint: anchor.web3.PublicKey;
   let makerTokenAccount: anchor.web3.PublicKey;
   let recipientTokenAccount: anchor.web3.PublicKey;
+  let outsiderTokenAccount: anchor.web3.PublicKey;
   let tokenAuthority: anchor.web3.PublicKey;
 
   async function airdrop(publicKey: anchor.web3.PublicKey) {
@@ -41,6 +43,7 @@ describe("dk_token local test", () => {
     await airdrop(maker.publicKey);
     await airdrop(checker.publicKey);
     await airdrop(recipient.publicKey);
+    await airdrop(outsider.publicKey);
 
     await program.methods
       .initialize()
@@ -98,6 +101,31 @@ describe("dk_token local test", () => {
         recipient.publicKey,
       )
     ).address;
+
+    outsiderTokenAccount = (
+      await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        payer,
+        mint,
+        outsider.publicKey,
+      )
+    ).address;
+
+    await program.methods
+      .addTreasuryAccount(makerTokenAccount)
+      .accounts({
+        config: config.publicKey,
+        admin,
+      })
+      .rpc();
+
+    await program.methods
+      .addTreasuryAccount(recipientTokenAccount)
+      .accounts({
+        config: config.publicKey,
+        admin,
+      })
+      .rpc();
   });
 
   it("creates a managed token mint controlled by the program authority", async () => {
@@ -158,6 +186,26 @@ describe("dk_token local test", () => {
     assert.isTrue(
       configAfterRemoval.checkers.some(
         (existingChecker) => existingChecker.toBase58() === checker.publicKey.toBase58(),
+      ),
+    );
+  });
+
+  it("registers only approved treasury token accounts for bank-style settlement", async () => {
+    const configAccount = await program.account.config.fetch(config.publicKey);
+
+    assert.isTrue(
+      configAccount.treasuryAccounts.some(
+        (treasuryAccount) => treasuryAccount.toBase58() === makerTokenAccount.toBase58(),
+      ),
+    );
+    assert.isTrue(
+      configAccount.treasuryAccounts.some(
+        (treasuryAccount) => treasuryAccount.toBase58() === recipientTokenAccount.toBase58(),
+      ),
+    );
+    assert.isFalse(
+      configAccount.treasuryAccounts.some(
+        (treasuryAccount) => treasuryAccount.toBase58() === outsiderTokenAccount.toBase58(),
       ),
     );
   });
@@ -381,5 +429,30 @@ describe("dk_token local test", () => {
     assert.property(storedRequest.status as object, "approved");
     assert.equal(makerAccount.amount.toString(), "700");
     assert.equal(mintAccount.supply.toString(), "1100");
+  });
+
+  it("rejects mint requests to unapproved token accounts", async () => {
+    const rejectedRequest = anchor.web3.Keypair.generate();
+
+    try {
+      await program.methods
+        .createMintRequest(new anchor.BN(10))
+        .accounts({
+          request: rejectedRequest.publicKey,
+          config: config.publicKey,
+          mint,
+          destinationTokenAccount: outsiderTokenAccount,
+          maker: outsider.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([outsider, rejectedRequest])
+        .rpc();
+
+      assert.fail("Expected treasury enforcement to reject the mint request");
+    } catch (error: any) {
+      const logs = error?.logs || [];
+      const message = [error?.message, ...logs].join(" ");
+      assert.include(message, "UnapprovedTreasuryAccount");
+    }
   });
 });

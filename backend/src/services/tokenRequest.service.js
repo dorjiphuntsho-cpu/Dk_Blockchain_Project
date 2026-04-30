@@ -150,6 +150,13 @@ async function ensureWalletState(walletId, fieldName, tx = prisma) {
 
 async function validateTokenRequestPayload(payload, tx = prisma) {
   if (payload.requestType === TOKEN_REQUEST_TYPES.MINT) {
+    throw new ApiError(
+      400,
+      'Mint token requests have been retired. Use the reserve mint settlement flow instead.',
+    );
+  }
+
+  if (payload.requestType === TOKEN_REQUEST_TYPES.MINT) {
     if (!payload.destinationWalletId) {
       throw new ApiError(400, 'destinationWalletId is required for MINT requests');
     }

@@ -7,9 +7,11 @@ const { ROLE_NAMES } = require('../utils/enums');
 const solanaController = require('../controllers/solana.controller');
 const {
   addCheckerSchema,
+  addTreasuryAccountSchema,
   createTokenMintSchema,
   recordCreatedTokenMintSchema,
   removeCheckerSchema,
+  removeTreasuryAccountSchema,
   setAdminSchema,
   solanaConfigStatusSchema,
 } = require('../validators/solana.validation');
@@ -24,7 +26,9 @@ router.get('/prepare/mint-creation', validate(solanaConfigStatusSchema), asyncHa
 router.post('/token-mints/record', validate(recordCreatedTokenMintSchema), asyncHandler(solanaController.recordCreatedTokenMint));
 router.post('/token-mints', validate(createTokenMintSchema), asyncHandler(solanaController.createTokenMint));
 router.post('/checkers', validate(addCheckerSchema), asyncHandler(solanaController.addChecker));
+router.post('/treasury-accounts', validate(addTreasuryAccountSchema), asyncHandler(solanaController.addTreasuryAccount));
 router.delete('/checkers/:checkerAddress', validate(removeCheckerSchema), asyncHandler(solanaController.removeChecker));
+router.delete('/treasury-accounts/:treasuryAccountAddress', validate(removeTreasuryAccountSchema), asyncHandler(solanaController.removeTreasuryAccount));
 router.post('/admin', validate(setAdminSchema), asyncHandler(solanaController.setAdmin));
 
 module.exports = router;

@@ -1,9 +1,9 @@
-use anchor_lang::prelude::*;
-use anchor_lang::solana_program::program_option::COption;
-use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer};
 use crate::error::ErrorCode;
 use crate::state::config::Config;
 use crate::state::token_request::{RequestStatus, RequestType, TokenRequest};
+use anchor_lang::prelude::*;
+use anchor_lang::solana_program::program_option::COption;
+use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer};
 
 #[derive(Accounts)]
 pub struct ApproveRequest<'info> {
@@ -65,10 +65,7 @@ pub fn handler(ctx: Context<ApproveRequest>) -> Result<()> {
         ErrorCode::AlreadyProcessed
     );
 
-    require!(
-        config.has_checker(&checker),
-        ErrorCode::UnauthorizedChecker
-    );
+    require!(config.has_checker(&checker), ErrorCode::UnauthorizedChecker);
 
     require!(checker != request.maker, ErrorCode::SelfApprovalNotAllowed);
 
@@ -92,6 +89,10 @@ pub fn handler(ctx: Context<ApproveRequest>) -> Result<()> {
             require!(
                 request.destination_token_account == Some(destination_token_account.key()),
                 ErrorCode::InvalidDestinationAccount
+            );
+            require!(
+                config.has_treasury_account(&destination_token_account.key()),
+                ErrorCode::UnapprovedTreasuryAccount
             );
             require!(
                 destination_token_account.mint == ctx.accounts.mint.key(),
@@ -136,6 +137,11 @@ pub fn handler(ctx: Context<ApproveRequest>) -> Result<()> {
                 ErrorCode::InvalidDestinationAccount
             );
             require!(
+                config.has_treasury_account(&source_token_account.key())
+                    && config.has_treasury_account(&destination_token_account.key()),
+                ErrorCode::UnapprovedTreasuryAccount
+            );
+            require!(
                 source_token_account.mint == ctx.accounts.mint.key()
                     && destination_token_account.mint == ctx.accounts.mint.key(),
                 ErrorCode::InvalidMint
@@ -170,6 +176,10 @@ pub fn handler(ctx: Context<ApproveRequest>) -> Result<()> {
             require!(
                 request.destination_token_account.is_none(),
                 ErrorCode::InvalidRequestType
+            );
+            require!(
+                config.has_treasury_account(&source_token_account.key()),
+                ErrorCode::UnapprovedTreasuryAccount
             );
             require!(
                 source_token_account.mint == ctx.accounts.mint.key(),

@@ -404,3 +404,7 @@ backend bootstrap and status validation
 frontend and end-to-end smoke tests
 docs/runbook cleanup
 If you want, I’ll start Phase 4 with step 1 and 2: create the devnet config files and align the Anchor deployment config
+
+
+deployment script
+anchor deploy --provider.cluster devnet --provider.wallet /mnt/c/Users/itand/.config/solana/admin-devnet.json

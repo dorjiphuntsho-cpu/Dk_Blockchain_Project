@@ -1,6 +1,6 @@
-use anchor_lang::prelude::*;
 use crate::error::ErrorCode;
 use crate::state::config::Config;
+use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
 pub struct AddChecker<'info> {

@@ -15,16 +15,19 @@ const {
 const {
   TOKEN_PROGRAM_ID,
   approve: approveDelegate,
+  getAccount,
   getAssociatedTokenAddressSync,
   getMint,
   getOrCreateAssociatedTokenAccount,
 } = require('@solana/spl-token');
 const env = require('../config/env');
+const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 const { EXECUTION_MODES, TOKEN_REQUEST_TYPES } = require('../utils/enums');
 
 const projectRoot = path.resolve(__dirname, '../../..');
 const METADATA_PROGRAM_ID = 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s';
+const DK_BANK_CODE = '1060';
 
 let cachedIdl;
 let cachedProgramId;
@@ -526,6 +529,219 @@ function getOwnerAta(mintAddress, ownerAddress) {
   return getAssociatedTokenAddressSync(mintAddress, ownerAddress);
 }
 
+async function autoProvisionIssuerTreasuryForMint(mintAddress) {
+  const issuerBank = await prisma.bank.findFirst({
+    where: {
+      OR: [
+        { isIssuer: true },
+        { code: DK_BANK_CODE },
+      ],
+      isActive: true,
+    },
+    orderBy: [
+      { isIssuer: 'desc' },
+      { createdAt: 'asc' },
+    ],
+  });
+
+  if (!issuerBank) {
+    return {
+      bankId: null,
+      bankName: null,
+      synced: false,
+      treasuryAccountRegisteredOnChain: false,
+      reason: 'No active issuer bank is configured for automatic treasury provisioning.',
+    };
+  }
+
+  if (!issuerBank.treasuryWalletAddress) {
+    return {
+      bankId: issuerBank.id,
+      bankName: issuerBank.name,
+      synced: false,
+      treasuryAccountRegisteredOnChain: false,
+      reason: `Issuer bank ${issuerBank.name} does not have a bank treasury owner wallet configured.`,
+    };
+  }
+
+  const adminKeypair = getAdminKeypair();
+  const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+  const treasuryWalletPublicKey = parsePublicKey(
+    issuerBank.treasuryWalletAddress,
+    'issuer treasuryWalletAddress',
+  );
+
+  const tokenAccountPublicKey = await ensureDestinationAta(
+    adminKeypair,
+    mintPublicKey,
+    treasuryWalletPublicKey,
+  );
+  const tokenAccountAddress = tokenAccountPublicKey.toBase58();
+
+  const bankTokenAccount = await prisma.$transaction(async (tx) => {
+    await tx.bankTokenAccount.updateMany({
+      where: {
+        bankId: issuerBank.id,
+        mintAddress,
+        NOT: {
+          tokenAccountAddress,
+        },
+      },
+      data: {
+        isPrimary: false,
+      },
+    });
+
+    return tx.bankTokenAccount.upsert({
+      where: {
+        bankId_mintAddress: {
+          bankId: issuerBank.id,
+          mintAddress,
+        },
+      },
+      update: {
+        treasuryWalletAddress: issuerBank.treasuryWalletAddress,
+        tokenAccountAddress,
+        isPrimary: true,
+        isActive: true,
+      },
+      create: {
+        bankId: issuerBank.id,
+        mintAddress,
+        treasuryWalletAddress: issuerBank.treasuryWalletAddress,
+        tokenAccountAddress,
+        isPrimary: true,
+        isActive: true,
+        remarks: 'Auto-provisioned during managed token mint creation.',
+      },
+    });
+  });
+
+  let treasuryAccountRegisteredOnChain = false;
+  let onChainRegistrationError = null;
+
+  try {
+    const status = await getConfigStatus();
+    if ((status.onChain?.treasuryAccounts || []).includes(tokenAccountAddress)) {
+      treasuryAccountRegisteredOnChain = true;
+    } else {
+      await addTreasuryAccount(tokenAccountAddress);
+      treasuryAccountRegisteredOnChain = true;
+    }
+  } catch (error) {
+    onChainRegistrationError = error instanceof Error ? error.message : 'Unknown on-chain registry error';
+  }
+
+  return {
+    bankId: issuerBank.id,
+    bankName: issuerBank.name,
+    treasuryWalletAddress: issuerBank.treasuryWalletAddress,
+    tokenAccountAddress,
+    mintAddress,
+    bankTokenAccountId: bankTokenAccount.id,
+    synced: true,
+    treasuryAccountRegisteredOnChain,
+    reason: onChainRegistrationError,
+  };
+}
+
+async function resolveBankTreasuryTokenAccount(bankId, mintAddress) {
+  const bankTokenAccount = await prisma.bankTokenAccount.findFirst({
+    where: {
+      bankId,
+      mintAddress,
+      isActive: true,
+    },
+    orderBy: [
+      { isPrimary: 'desc' },
+      { createdAt: 'asc' },
+    ],
+  });
+
+  if (!bankTokenAccount) {
+    throw new ApiError(404, `No active bank token account found for bank ${bankId} and mint ${mintAddress}`);
+  }
+
+  return bankTokenAccount;
+}
+
+async function mintToBankTreasury({ bankId, mintAddress, amount }) {
+  const makerKeypair = getOptionalMakerKeypair();
+  const checkerKeypair = getOptionalCheckerKeypair();
+
+  if (!makerKeypair) {
+    throw new ApiError(
+      500,
+      'SOLANA_MAKER_KEYPAIR_PATH must be configured for backend-managed reserve mint execution',
+    );
+  }
+
+  if (!checkerKeypair) {
+    throw new ApiError(
+      500,
+      'SOLANA_CHECKER_KEYPAIR_PATH must be configured for backend-managed reserve mint execution',
+    );
+  }
+
+  const treasuryTokenAccount = await resolveBankTreasuryTokenAccount(bankId, mintAddress);
+  const configAddress = requireConfigAddress();
+  const tokenAuthority = getTokenAuthority(configAddress);
+  const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+  const destinationTokenAccount = parsePublicKey(
+    treasuryTokenAccount.tokenAccountAddress,
+    'tokenAccountAddress',
+  );
+  const requestKeypair = Keypair.generate();
+  const makerProgram = getProgram(makerKeypair);
+  const checkerProgram = getProgram(checkerKeypair);
+
+  await assertCheckerConfigured(configAddress, checkerKeypair);
+
+  const rawAmount = toAnchorAmount(amount);
+
+  const createSignature = await makerProgram.methods
+    .createMintRequest(rawAmount)
+    .accounts({
+      request: requestKeypair.publicKey,
+      config: configAddress,
+      mint: mintPublicKey,
+      destinationTokenAccount,
+      maker: makerKeypair.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([makerKeypair, requestKeypair])
+    .rpc();
+
+  const approveSignature = await checkerProgram.methods
+    .approveRequest()
+    .accounts({
+      request: requestKeypair.publicKey,
+      config: configAddress,
+      mint: mintPublicKey,
+      sourceTokenAccount: null,
+      destinationTokenAccount,
+      tokenAuthority,
+      checker: checkerKeypair.publicKey,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .signers([checkerKeypair])
+    .rpc();
+
+  return {
+    bankId,
+    mintAddress,
+    amount: toRawAmount(amount),
+    onChainRequestAddress: requestKeypair.publicKey.toBase58(),
+    createSignature,
+    approveSignature,
+    txSignature: approveSignature,
+    explorerUrl: buildExplorerUrl(approveSignature),
+    tokenAuthority: tokenAuthority.toBase58(),
+    destinationTokenAccount: destinationTokenAccount.toBase58(),
+    treasuryWalletAddress: treasuryTokenAccount.treasuryWalletAddress,
+  };
+}
+
 async function assertCheckerConfigured(configAddress, checkerKeypair) {
   const checkerProgram = getProgram(checkerKeypair);
   const config = await checkerProgram.account.config.fetch(configAddress);
@@ -638,10 +854,37 @@ async function getConfigStatus() {
 
   const onChainAdmin = config.admin.toBase58();
   const onChainCheckers = config.checkers.map((checker) => checker.toBase58());
+  const onChainTreasuryAccounts = (config.treasuryAccounts || []).map((treasuryAccount) => treasuryAccount.toBase58());
+  const onChainTreasuryAccountDetails = await Promise.all(
+    onChainTreasuryAccounts.map(async (treasuryAccountAddress) => {
+      try {
+        const tokenAccount = await getAccount(
+          getConnection(),
+          parsePublicKey(treasuryAccountAddress, 'treasuryAccountAddress'),
+          env.SOLANA_COMMITMENT,
+        );
+
+        return {
+          tokenAccountAddress: treasuryAccountAddress,
+          ownerAddress: tokenAccount.owner.toBase58(),
+          mintAddress: tokenAccount.mint.toBase58(),
+        };
+      } catch (error) {
+        return {
+          tokenAccountAddress: treasuryAccountAddress,
+          ownerAddress: null,
+          mintAddress: null,
+          error: error instanceof Error ? error.message : 'Unable to inspect treasury token account',
+        };
+      }
+    }),
+  );
 
   status.onChain = {
     admin: onChainAdmin,
     checkers: onChainCheckers,
+    treasuryAccounts: onChainTreasuryAccounts,
+    treasuryAccountDetails: onChainTreasuryAccountDetails,
   };
   status.adminSignerMatchesOnChain = onChainAdmin === configuredSigners.admin;
   status.checkerSignerConfiguredOnChain = configuredSigners.checker
@@ -670,6 +913,12 @@ async function getConfigStatus() {
   if (!configuredSigners.checker) {
     status.warnings.push(
       'No backend checker signer is configured. Checker approval will use the browser wallet flow for normal operations.',
+    );
+  }
+
+  if (!onChainTreasuryAccounts.length) {
+    status.warnings.push(
+      'No treasury token accounts are registered on chain. Treasury-restricted mint, transfer, and burn requests will fail until treasury token accounts are registered.',
     );
   }
 
@@ -717,12 +966,44 @@ async function addChecker(checkerAddress) {
   return getConfigStatus();
 }
 
+async function addTreasuryAccount(treasuryAccountAddress) {
+  const treasuryAccountPublicKey = parsePublicKey(treasuryAccountAddress, 'treasuryAccountAddress');
+  const { adminKeypair, adminProgram, configAddress } = await requireAdminManagedConfig();
+
+  await adminProgram.methods
+    .addTreasuryAccount(treasuryAccountPublicKey)
+    .accounts({
+      config: configAddress,
+      admin: adminKeypair.publicKey,
+    })
+    .signers([adminKeypair])
+    .rpc();
+
+  return getConfigStatus();
+}
+
 async function removeChecker(checkerAddress) {
   const checkerPublicKey = parsePublicKey(checkerAddress, 'checkerAddress');
   const { adminKeypair, adminProgram, configAddress } = await requireAdminManagedConfig();
 
   await adminProgram.methods
     .removeChecker(checkerPublicKey)
+    .accounts({
+      config: configAddress,
+      admin: adminKeypair.publicKey,
+    })
+    .signers([adminKeypair])
+    .rpc();
+
+  return getConfigStatus();
+}
+
+async function removeTreasuryAccount(treasuryAccountAddress) {
+  const treasuryAccountPublicKey = parsePublicKey(treasuryAccountAddress, 'treasuryAccountAddress');
+  const { adminKeypair, adminProgram, configAddress } = await requireAdminManagedConfig();
+
+  await adminProgram.methods
+    .removeTreasuryAccount(treasuryAccountPublicKey)
     .accounts({
       config: configAddress,
       admin: adminKeypair.publicKey,
@@ -1052,6 +1333,233 @@ function getExecutionContext(tokenRequest) {
   return payload;
 }
 
+function getMintSettlementExecutionContext(settlement, destinationWalletAddress, destinationTokenAccountAddress) {
+  const configAddress = requireConfigAddress();
+  const tokenAuthority = getTokenAuthority(configAddress);
+  const mintAddress = parsePublicKey(settlement.tokenMintAddress, 'tokenMintAddress');
+
+  return {
+    integrationReady: true,
+    executionBoundaryVersion: 1,
+    executionMode: EXECUTION_MODES.BROWSER_WALLET,
+    runtimeMode: 'browser-wallet',
+    rpcUrl: env.SOLANA_RPC_URL,
+    programId: getProgramId().toBase58(),
+    configAddress: configAddress.toBase58(),
+    tokenAuthority: tokenAuthority.toBase58(),
+    tokenMintAddress: mintAddress.toBase58(),
+    amount: toRawAmount(settlement.amount),
+    serverManagedCreateSupported: false,
+    walletInitiation: {
+      supported: true,
+      recorded: Boolean(settlement.onChainRequestAddress && settlement.initiationTxSignature),
+      expectedMakerWalletAddress: settlement.makerWalletAddress || null,
+      makerWalletAddress: settlement.makerWalletAddress || null,
+      onChainRequestAddress: settlement.onChainRequestAddress || null,
+      initiationTxSignature: settlement.initiationTxSignature || null,
+      initiationExplorerUrl: settlement.initiationExplorerUrl || null,
+      makerInitiatedAt: settlement.makerInitiatedAt || null,
+    },
+    destinationWalletAddress,
+    destinationTokenAccount: destinationTokenAccountAddress || null,
+    destinationTokenAccountAddress: destinationTokenAccountAddress || null,
+  };
+}
+
+function getTransferSettlementExecutionContext(
+  settlement,
+  sourceWalletAddress,
+  sourceTokenAccountAddress,
+  destinationWalletAddress,
+  destinationTokenAccountAddress,
+) {
+  const configAddress = requireConfigAddress();
+  const tokenAuthority = getTokenAuthority(configAddress);
+  const mintAddress = parsePublicKey(settlement.tokenMintAddress, 'tokenMintAddress');
+
+  return {
+    integrationReady: true,
+    executionBoundaryVersion: 1,
+    executionMode: EXECUTION_MODES.BROWSER_WALLET,
+    runtimeMode: 'browser-wallet',
+    rpcUrl: env.SOLANA_RPC_URL,
+    programId: getProgramId().toBase58(),
+    configAddress: configAddress.toBase58(),
+    tokenAuthority: tokenAuthority.toBase58(),
+    tokenMintAddress: mintAddress.toBase58(),
+    amount: toRawAmount(settlement.amount),
+    serverManagedCreateSupported: false,
+    walletInitiation: {
+      supported: true,
+      recorded: Boolean(settlement.onChainRequestAddress && settlement.initiationTxSignature),
+      expectedMakerWalletAddress: settlement.makerWalletAddress || sourceWalletAddress || null,
+      makerWalletAddress: settlement.makerWalletAddress || null,
+      onChainRequestAddress: settlement.onChainRequestAddress || null,
+      initiationTxSignature: settlement.initiationTxSignature || null,
+      initiationExplorerUrl: settlement.initiationExplorerUrl || null,
+      makerInitiatedAt: settlement.makerInitiatedAt || null,
+    },
+    sourceWalletAddress,
+    sourceTokenAccount: sourceTokenAccountAddress || null,
+    sourceTokenAccountAddress: sourceTokenAccountAddress || null,
+    destinationWalletAddress,
+    destinationTokenAccount: destinationTokenAccountAddress || null,
+    destinationTokenAccountAddress: destinationTokenAccountAddress || null,
+  };
+}
+
+function getBurnSettlementExecutionContext(
+  settlement,
+  sourceWalletAddress,
+  sourceTokenAccountAddress,
+) {
+  const configAddress = requireConfigAddress();
+  const tokenAuthority = getTokenAuthority(configAddress);
+  const mintAddress = parsePublicKey(settlement.tokenMintAddress, 'tokenMintAddress');
+
+  return {
+    integrationReady: true,
+    executionBoundaryVersion: 1,
+    executionMode: EXECUTION_MODES.BROWSER_WALLET,
+    runtimeMode: 'browser-wallet',
+    rpcUrl: env.SOLANA_RPC_URL,
+    programId: getProgramId().toBase58(),
+    configAddress: configAddress.toBase58(),
+    tokenAuthority: tokenAuthority.toBase58(),
+    tokenMintAddress: mintAddress.toBase58(),
+    amount: toRawAmount(settlement.amount),
+    serverManagedCreateSupported: false,
+    walletInitiation: {
+      supported: true,
+      recorded: Boolean(settlement.onChainRequestAddress && settlement.initiationTxSignature),
+      expectedMakerWalletAddress: settlement.makerWalletAddress || sourceWalletAddress || null,
+      makerWalletAddress: settlement.makerWalletAddress || null,
+      onChainRequestAddress: settlement.onChainRequestAddress || null,
+      initiationTxSignature: settlement.initiationTxSignature || null,
+      initiationExplorerUrl: settlement.initiationExplorerUrl || null,
+      makerInitiatedAt: settlement.makerInitiatedAt || null,
+    },
+    sourceWalletAddress,
+    sourceTokenAccount: sourceTokenAccountAddress || null,
+    sourceTokenAccountAddress: sourceTokenAccountAddress || null,
+  };
+}
+
+async function prepareSettlementMintApprovalInstruction({
+  onChainRequestAddress,
+  tokenMintAddress,
+  destinationTokenAccountAddress,
+  checkerWalletAddress,
+}) {
+  const configAddress = requireConfigAddress();
+  const tokenAuthority = getTokenAuthority(configAddress);
+  const instructionProgram = getProgram(getAdminKeypair());
+  const approvalInstruction = await instructionProgram.methods
+    .approveRequest()
+    .accounts({
+      request: onChainRequestAddress,
+      config: configAddress,
+      mint: tokenMintAddress,
+      sourceTokenAccount: null,
+      destinationTokenAccount: destinationTokenAccountAddress,
+      tokenAuthority,
+      checker: checkerWalletAddress,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .instruction();
+
+  return {
+    configAddress: configAddress.toBase58(),
+    tokenAuthority: tokenAuthority.toBase58(),
+    approvalInstruction: {
+      programId: approvalInstruction.programId.toBase58(),
+      keys: approvalInstruction.keys.map((meta) => ({
+        pubkey: meta.pubkey.toBase58(),
+        isSigner: meta.isSigner,
+        isWritable: meta.isWritable,
+      })),
+      data: Buffer.from(approvalInstruction.data).toString('base64'),
+    },
+  };
+}
+
+async function prepareSettlementTransferApprovalInstruction({
+  onChainRequestAddress,
+  tokenMintAddress,
+  sourceTokenAccountAddress,
+  destinationTokenAccountAddress,
+  checkerWalletAddress,
+}) {
+  const configAddress = requireConfigAddress();
+  const tokenAuthority = getTokenAuthority(configAddress);
+  const instructionProgram = getProgram(getAdminKeypair());
+  const approvalInstruction = await instructionProgram.methods
+    .approveRequest()
+    .accounts({
+      request: onChainRequestAddress,
+      config: configAddress,
+      mint: tokenMintAddress,
+      sourceTokenAccount: sourceTokenAccountAddress,
+      destinationTokenAccount: destinationTokenAccountAddress,
+      tokenAuthority,
+      checker: checkerWalletAddress,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .instruction();
+
+  return {
+    configAddress: configAddress.toBase58(),
+    tokenAuthority: tokenAuthority.toBase58(),
+    approvalInstruction: {
+      programId: approvalInstruction.programId.toBase58(),
+      keys: approvalInstruction.keys.map((meta) => ({
+        pubkey: meta.pubkey.toBase58(),
+        isSigner: meta.isSigner,
+        isWritable: meta.isWritable,
+      })),
+      data: Buffer.from(approvalInstruction.data).toString('base64'),
+    },
+  };
+}
+
+async function prepareSettlementBurnApprovalInstruction({
+  onChainRequestAddress,
+  tokenMintAddress,
+  sourceTokenAccountAddress,
+  checkerWalletAddress,
+}) {
+  const configAddress = requireConfigAddress();
+  const tokenAuthority = getTokenAuthority(configAddress);
+  const instructionProgram = getProgram(getAdminKeypair());
+  const approvalInstruction = await instructionProgram.methods
+    .approveRequest()
+    .accounts({
+      request: onChainRequestAddress,
+      config: configAddress,
+      mint: tokenMintAddress,
+      sourceTokenAccount: sourceTokenAccountAddress,
+      destinationTokenAccount: null,
+      tokenAuthority,
+      checker: checkerWalletAddress,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .instruction();
+
+  return {
+    configAddress: configAddress.toBase58(),
+    tokenAuthority: tokenAuthority.toBase58(),
+    approvalInstruction: {
+      programId: approvalInstruction.programId.toBase58(),
+      keys: approvalInstruction.keys.map((meta) => ({
+        pubkey: meta.pubkey.toBase58(),
+        isSigner: meta.isSigner,
+        isWritable: meta.isWritable,
+      })),
+      data: Buffer.from(approvalInstruction.data).toString('base64'),
+    },
+  };
+}
+
 async function getWalletTokenBalances(ownerAddress) {
   const ownerPublicKey = parsePublicKey(ownerAddress, 'walletAddress');
   const response = await getConnection().getParsedTokenAccountsByOwner(
@@ -1079,6 +1587,8 @@ async function getWalletTokenBalances(ownerAddress) {
 
 module.exports = {
   addChecker,
+  addTreasuryAccount,
+  autoProvisionIssuerTreasuryForMint,
   bootstrapOnChainConfig,
   createTokenMint,
   executeOnChainRequest,
@@ -1095,10 +1605,19 @@ module.exports = {
   hydrateManagedToken,
   getWalletTokenBalances,
   buildExplorerUrl,
+  resolveBankTreasuryTokenAccount,
+  mintToBankTreasury,
   ensureManagedTokenMetadata,
   validateRecordedOnChainRequest,
   verifyConfirmedTransaction,
   supportsBrowserWalletExecution,
+  getMintSettlementExecutionContext,
+  getTransferSettlementExecutionContext,
+  getBurnSettlementExecutionContext,
+  prepareSettlementMintApprovalInstruction,
+  prepareSettlementTransferApprovalInstruction,
+  prepareSettlementBurnApprovalInstruction,
   removeChecker,
+  removeTreasuryAccount,
   setAdmin,
 };

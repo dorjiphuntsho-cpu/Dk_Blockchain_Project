@@ -4,7 +4,7 @@ import { REQUEST_TYPES, REQUEST_STATUSES } from '../../utils/constants';
 
 export const tokenRequestSchema = z
   .object({
-    requestType: z.enum([REQUEST_TYPES.MINT, REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN]),
+    requestType: z.enum([REQUEST_TYPES.TRANSFER, REQUEST_TYPES.BURN]),
     tokenMintAddress: z.string().trim().min(32, 'Token mint address is required').max(64, 'Token mint address is too long'),
     amount: z.coerce.number().positive('Amount must be greater than zero'),
     sourceWalletId: z.preprocess((value) => value || null, z.string().nullable()),
@@ -12,14 +12,6 @@ export const tokenRequestSchema = z
     remarks: z.string().trim().optional().or(z.literal('')),
   })
   .superRefine((value, ctx) => {
-    if (value.requestType === REQUEST_TYPES.MINT && !value.destinationWalletId) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['destinationWalletId'],
-        message: 'Destination wallet is required for mint requests',
-      });
-    }
-
     if (value.requestType === REQUEST_TYPES.TRANSFER) {
       if (!value.sourceWalletId) {
         ctx.addIssue({

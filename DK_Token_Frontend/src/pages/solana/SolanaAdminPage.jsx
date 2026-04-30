@@ -10,6 +10,7 @@ import Alert from '../../components/ui/Alert';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
+import { banksApi } from '../../modules/banks/banks.api';
 import useSolanaWallet from '../../hooks/useSolanaWallet';
 import { solanaAdminApi } from '../../modules/solana/solana.api';
 import {
@@ -43,7 +44,7 @@ function Field({ label, description, children }) {
 
 function SectionCard({ children, description, title }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-xl">
+    <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-xl">
       <div className="mb-5 space-y-1">
         <h2 className="text-base font-semibold text-white">{title}</h2>
         {description ? <p className="text-sm text-zinc-400">{description}</p> : null}
@@ -66,25 +67,34 @@ function SolanaAdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [checkerAddress, setCheckerAddress] = useState('');
+  const [treasuryAccountAddress, setTreasuryAccountAddress] = useState('');
   const [newAdminAddress, setNewAdminAddress] = useState('');
   const [mintDecimals, setMintDecimals] = useState('0');
   const [mintName, setMintName] = useState('');
   const [mintSymbol, setMintSymbol] = useState('');
   const [mintUri, setMintUri] = useState('');
   const [latestMint, setLatestMint] = useState(null);
+  const [banks, setBanks] = useState([]);
   const [submitting, setSubmitting] = useState({
     createMint: false,
     addChecker: false,
+    addTreasury: false,
     setAdmin: false,
     removingChecker: '',
+    removingTreasury: '',
+    syncingTreasury: '',
   });
 
   const loadStatus = async () => {
     try {
       setLoading(true);
       setError('');
-      const response = await solanaAdminApi.getConfigStatus();
-      setStatus(response.data);
+      const [statusResponse, banksResponse] = await Promise.all([
+        solanaAdminApi.getConfigStatus(),
+        banksApi.list({ limit: 100, isActive: true }),
+      ]);
+      setStatus(statusResponse.data);
+      setBanks(banksResponse.data.items || []);
     } catch (loadError) {
       setError(loadError.message || 'Unable to load Solana admin status.');
     } finally {
@@ -108,6 +118,34 @@ function SolanaAdminPage() {
     [status],
   );
 
+  const treasuryRows = useMemo(
+    () => (status?.onChain?.treasuryAccounts || []).map((address) => ({
+      id: address,
+      address,
+      linkedBank: banks.find((bank) =>
+        (bank.tokenAccounts || []).some((tokenAccount) => tokenAccount.tokenAccountAddress === address),
+      ) || null,
+    })),
+    [banks, status],
+  );
+
+  const bankTreasuryRows = useMemo(
+    () => banks.flatMap((bank) =>
+      (bank.tokenAccounts || []).map((tokenAccount) => ({
+        id: tokenAccount.id,
+        bank,
+        tokenAccount,
+        isRegisteredOnChain: (status?.onChain?.treasuryAccounts || []).includes(tokenAccount.tokenAccountAddress),
+      })),
+    ),
+    [banks, status],
+  );
+
+  const issuerBank = useMemo(
+    () => banks.find((bank) => bank.isIssuer) || null,
+    [banks],
+  );
+
   const adminWalletMismatch = Boolean(
     walletConnected
       && connectedWalletAddress
@@ -115,12 +153,15 @@ function SolanaAdminPage() {
       && connectedWalletAddress !== status.configuredSigners.admin,
   );
 
+  const issuerTreasuryWalletConfigured = Boolean(issuerBank?.treasuryWalletAddress);
+
   const canCreateMint = Boolean(
     !submitting.createMint
       && mintName.trim()
       && mintSymbol.trim()
       && mintUri.trim()
       && walletConnected
+      && issuerTreasuryWalletConfigured
       && !adminWalletMismatch,
   );
 
@@ -135,6 +176,20 @@ function SolanaAdminPage() {
       enqueueSnackbar(getErrorMessage(actionError, 'Unable to add checker'), { variant: 'error' });
     } finally {
       setSubmitting((current) => ({ ...current, addChecker: false }));
+    }
+  };
+
+  const handleAddTreasuryAccount = async (address = treasuryAccountAddress.trim()) => {
+    try {
+      setSubmitting((current) => ({ ...current, addTreasury: true, syncingTreasury: address }));
+      const response = await solanaAdminApi.addTreasuryAccount(address);
+      setStatus(response.data);
+      setTreasuryAccountAddress('');
+      enqueueSnackbar('Treasury account added on chain', { variant: 'success' });
+    } catch (actionError) {
+      enqueueSnackbar(getErrorMessage(actionError, 'Unable to add treasury account'), { variant: 'error' });
+    } finally {
+      setSubmitting((current) => ({ ...current, addTreasury: false, syncingTreasury: '' }));
     }
   };
 
@@ -202,7 +257,7 @@ function SolanaAdminPage() {
 
       <TabGroup>
         <TabList className="flex flex-wrap gap-2 border-b border-white/10 pb-3">
-          {['Overview', 'Checkers', 'Create Mint', 'Authority'].map((label) => (
+          {['Overview', 'Checkers', 'Treasury', 'Create Mint', 'Authority'].map((label) => (
             <Tab
               className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-400 outline-none transition data-[selected]:bg-white/10 data-[selected]:text-white hover:text-white"
               key={label}
@@ -365,10 +420,159 @@ function SolanaAdminPage() {
 
           <TabPanel className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
             <SectionCard
-              description="Mints created here are placed under program-controlled authority so supply increases flow through the approval gate."
+              description="Approved treasury token accounts are enforced on chain for mint, transfer, and burn requests."
+              title="Registered Treasury Token Accounts"
+            >
+              <div className="mb-4 rounded-xl border border-white/10 bg-zinc-950/60 p-4">
+                <p className="text-sm text-zinc-300">
+                  This list contains treasury token accounts, not owner wallets. These are the token-holding accounts that must be approved on chain for mint, transfer, and burn.
+                </p>
+              </div>
+              <AppTable
+                columns={[
+                  {
+                    key: 'address',
+                    label: 'Token Account',
+                    render: (row) => (
+                      <div className="space-y-2 py-1">
+                        <p className="font-mono text-sm text-zinc-200">{truncateMiddle(row.address, 12, 10)}</p>
+                        {row.linkedBank ? <Badge tone="blue">{row.linkedBank.name}</Badge> : <Badge tone="slate">Unlinked</Badge>}
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'actions',
+                    label: 'Actions',
+                    align: 'right',
+                    disableRowClick: true,
+                    render: (row) => (
+                      <Button
+                        disabled={submitting.removingTreasury === row.address}
+                        onClick={async () => {
+                          try {
+                            setSubmitting((current) => ({ ...current, removingTreasury: row.address }));
+                            const response = await solanaAdminApi.removeTreasuryAccount(row.address);
+                            setStatus(response.data);
+                            enqueueSnackbar('Treasury account removed from on-chain registry', { variant: 'success' });
+                          } catch (actionError) {
+                            enqueueSnackbar(getErrorMessage(actionError, 'Unable to remove treasury account'), { variant: 'error' });
+                          } finally {
+                            setSubmitting((current) => ({ ...current, removingTreasury: '' }));
+                          }
+                        }}
+                        size="sm"
+                        variant="danger"
+                      >
+                        Remove
+                      </Button>
+                    ),
+                  },
+                ]}
+                emptyDescription="No treasury token accounts are registered on chain yet."
+                emptyTitle="No treasury token accounts"
+                pagination={null}
+                rows={treasuryRows}
+              />
+            </SectionCard>
+
+            <div className="space-y-6">
+              <SectionCard
+                description="Register a treasury token account directly by address."
+                title="Register Treasury Token Account"
+              >
+                <div className="space-y-4">
+                  <Field label="Treasury token account address">
+                    <Input
+                      className="font-mono"
+                      onChange={(event) => setTreasuryAccountAddress(event.target.value)}
+                      placeholder="Treasury token account / associated token account address"
+                      value={treasuryAccountAddress}
+                    />
+                  </Field>
+                  <Button
+                    disabled={!treasuryAccountAddress.trim() || submitting.addTreasury}
+                    onClick={() => handleAddTreasuryAccount()}
+                    variant="secondary"
+                  >
+                    {submitting.addTreasury ? 'Adding...' : 'Add treasury token account'}
+                  </Button>
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                description="Bank treasury token accounts from the backend can be synced into the on-chain treasury token-account registry."
+                title="Sync Bank Treasury Accounts"
+              >
+                <AppTable
+                  columns={[
+                    {
+                      key: 'bank',
+                      label: 'Bank',
+                      render: (row) => row.bank.name,
+                    },
+                    {
+                      key: 'mint',
+                      label: 'Mint',
+                      render: (row) => <span className="font-mono text-sm text-zinc-300">{truncateMiddle(row.tokenAccount.mintAddress, 10, 8)}</span>,
+                    },
+                    {
+                      key: 'tokenAccount',
+                      label: 'Token Account',
+                      render: (row) => <span className="font-mono text-sm text-zinc-300">{truncateMiddle(row.tokenAccount.tokenAccountAddress, 12, 10)}</span>,
+                    },
+                    {
+                      key: 'status',
+                      label: 'On-chain',
+                      render: (row) => (
+                        <Badge tone={row.isRegisteredOnChain ? 'emerald' : 'amber'}>
+                          {row.isRegisteredOnChain ? 'Registered' : 'Missing'}
+                        </Badge>
+                      ),
+                    },
+                    {
+                      key: 'actions',
+                      label: 'Actions',
+                      align: 'right',
+                      disableRowClick: true,
+                      render: (row) => (
+                        <Button
+                          disabled={row.isRegisteredOnChain || submitting.syncingTreasury === row.tokenAccount.tokenAccountAddress}
+                          onClick={() => handleAddTreasuryAccount(row.tokenAccount.tokenAccountAddress)}
+                          size="sm"
+                          variant="secondary"
+                        >
+                          Register
+                        </Button>
+                      ),
+                    },
+                  ]}
+                  emptyDescription="No bank treasury token accounts were found in the backend."
+                  emptyTitle="No bank token accounts"
+                  minWidth={860}
+                  pagination={null}
+                  rows={bankTreasuryRows}
+                />
+              </SectionCard>
+            </div>
+          </TabPanel>
+
+          <TabPanel className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+            <SectionCard
+              description="Mints created here are placed under program-controlled authority so supply increases flow through the approval gate. DK Bank treasury token-account provisioning runs automatically after mint creation."
               title="Create Managed Token Mint"
             >
               <div className="space-y-6">
+                {!issuerBank ? (
+                  <Alert tone="warning">No issuer bank is configured. Mark DK Bank as issuer before creating a mint.</Alert>
+                ) : !issuerTreasuryWalletConfigured ? (
+                  <Alert tone="warning">
+                    {issuerBank.name} is marked as issuer, but its bank treasury owner wallet is missing in Banks. Save that once and mint provisioning becomes automatic.
+                  </Alert>
+                ) : (
+                  <Alert tone="info">
+                    This mint will auto-link to {issuerBank.name} bank treasury owner wallet {truncateMiddle(issuerBank.treasuryWalletAddress, 10, 8)}.
+                  </Alert>
+                )}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Token name">
                     <Input onChange={(event) => setMintName(event.target.value)} placeholder="e.g. Solana USD" value={mintName} />
@@ -445,6 +649,7 @@ function SolanaAdminPage() {
                         });
 
                         setLatestMint(recordResponse.data);
+                        await loadStatus();
                         setMintName('');
                         setMintSymbol('');
                         setMintUri('');
@@ -477,6 +682,18 @@ function SolanaAdminPage() {
                   </div>
                   <p className="break-all font-mono text-sm text-zinc-300">{latestMint.mintAddress}</p>
                   <p className="text-sm text-zinc-400">Supply {latestMint.supply} • {latestMint.decimals} decimals</p>
+                  {latestMint.issuerProvisioning?.synced ? (
+                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+                      <p>Issuer treasury token account synced to {latestMint.issuerProvisioning.bankName}.</p>
+                      <p className="mt-1 break-all font-mono text-xs text-emerald-200">
+                        {latestMint.issuerProvisioning.tokenAccountAddress}
+                      </p>
+                    </div>
+                  ) : latestMint.issuerProvisioning?.reason ? (
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100">
+                      {latestMint.issuerProvisioning.reason}
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <p className="text-sm text-zinc-400">No mint created in this session yet.</p>

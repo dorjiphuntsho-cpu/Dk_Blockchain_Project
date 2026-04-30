@@ -9,6 +9,68 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 const roleNames = ['ADMIN', 'MAKER', 'CHECKER', 'EXECUTOR'];
+const bankSeeds = [
+  {
+    name: 'DK Bank',
+    code: '1060',
+    binNumber: '667707',
+    panNumber: '94009405',
+    supportsBtn: true,
+    supportsBipsSettlement: true,
+    isIssuer: true,
+    isActive: true,
+  },
+  {
+    name: 'Bank of Bhutan',
+    code: '1010',
+    binNumber: '502237',
+    panNumber: '94009400',
+    supportsBtn: false,
+    supportsBipsSettlement: true,
+    isIssuer: false,
+    isActive: true,
+  },
+  {
+    name: 'Bhutan National Bank',
+    code: '1020',
+    binNumber: '639545',
+    panNumber: '94009401',
+    supportsBtn: false,
+    supportsBipsSettlement: true,
+    isIssuer: false,
+    isActive: true,
+  },
+  {
+    name: 'Druk PNB Bank',
+    code: '1030',
+    binNumber: '502942',
+    panNumber: '94009402',
+    supportsBtn: false,
+    supportsBipsSettlement: true,
+    isIssuer: false,
+    isActive: true,
+  },
+  {
+    name: 'T-Bank',
+    code: '1040',
+    binNumber: '636243',
+    panNumber: '94009403',
+    supportsBtn: false,
+    supportsBipsSettlement: true,
+    isIssuer: false,
+    isActive: true,
+  },
+  {
+    name: 'Bhutan Development Bank Limited',
+    code: '1050',
+    binNumber: '637053',
+    panNumber: '94009404',
+    supportsBtn: false,
+    supportsBipsSettlement: true,
+    isIssuer: false,
+    isActive: true,
+  },
+];
 
 const userSeeds = [
   {
@@ -87,6 +149,22 @@ async function main() {
         },
       });
     }
+  }
+
+  for (const bankSeed of bankSeeds) {
+    await prisma.bank.upsert({
+      where: { code: bankSeed.code },
+      update: {
+        name: bankSeed.name,
+        binNumber: bankSeed.binNumber,
+        panNumber: bankSeed.panNumber,
+        supportsBtn: bankSeed.supportsBtn,
+        supportsBipsSettlement: bankSeed.supportsBipsSettlement,
+        isIssuer: bankSeed.isIssuer,
+        isActive: bankSeed.isActive,
+      },
+      create: bankSeed,
+    });
   }
 
   console.log('Seed completed successfully.');

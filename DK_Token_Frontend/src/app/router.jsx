@@ -13,6 +13,11 @@ import WalletsPage from '../pages/wallets/WalletsPage';
 import WalletCreatePage from '../pages/wallets/WalletCreatePage';
 import WalletDetailsPage from '../pages/wallets/WalletDetailsPage';
 import MyWalletsPage from '../pages/wallets/MyWalletsPage';
+import BanksPage from '../pages/banks/BanksPage';
+import BankDetailsPage from '../pages/banks/BankDetailsPage';
+import SettlementsPage from '../pages/settlements/SettlementsPage';
+import SettlementCreatePage from '../pages/settlements/SettlementCreatePage';
+import SettlementDetailsPage from '../pages/settlements/SettlementDetailsPage';
 import TokenRequestsPage from '../pages/tokenRequests/TokenRequestsPage';
 import TokenRequestCreatePage from '../pages/tokenRequests/TokenRequestCreatePage';
 import TokenRequestDetailsPage from '../pages/tokenRequests/TokenRequestDetailsPage';
@@ -49,10 +54,18 @@ const router = createBrowserRouter([
               { path: 'wallets', element: <WalletsPage /> },
               { path: 'wallets/new', element: <WalletCreatePage /> },
               { path: 'wallets/:id', element: <WalletDetailsPage /> },
+              { path: 'banks', element: <BanksPage /> },
+              { path: 'banks/:id', element: <BankDetailsPage /> },
               { path: 'solana-admin', element: <SolanaAdminPage /> },
               { path: 'managed-tokens', element: <ManagedTokensPage /> },
               { path: 'token-requests', element: <TokenRequestsPage /> },
               { path: 'audit-logs', element: <AuditLogsPage /> },
+            ],
+          },
+          {
+            element: <RoleGuard roles={[ROLES.ADMIN, ROLES.MAKER, ROLES.CHECKER, ROLES.EXECUTOR]} />,
+            children: [
+              { path: 'settlements', element: <SettlementsPage /> },
             ],
           },
           {
@@ -63,12 +76,22 @@ const router = createBrowserRouter([
             ],
           },
           {
+            element: <RoleGuard roles={[ROLES.ADMIN, ROLES.MAKER]} />,
+            children: [
+              { path: 'settlements/new', element: <SettlementCreatePage /> },
+            ],
+          },
+          {
             element: <RoleGuard roles={[ROLES.CHECKER]} />,
             children: [{ path: 'pending-approvals', element: <PendingApprovalsPage /> }],
           },
           {
             path: 'token-requests/:id',
             element: <TokenRequestDetailsPage />,
+          },
+          {
+            path: 'settlements/:id',
+            element: <SettlementDetailsPage />,
           },
         ],
       },

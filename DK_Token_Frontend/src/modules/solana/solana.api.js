@@ -19,10 +19,18 @@ export const solanaAdminApi = {
     (ENABLE_MOCK_API
       ? mockAdapter.solanaAdmin.addChecker(checkerAddress)
       : (await axiosClient.post('/solana/checkers', { checkerAddress })).data),
+  addTreasuryAccount: async (treasuryAccountAddress) =>
+    (ENABLE_MOCK_API
+      ? mockAdapter.solanaAdmin.addTreasuryAccount(treasuryAccountAddress)
+      : (await axiosClient.post('/solana/treasury-accounts', { treasuryAccountAddress })).data),
   removeChecker: async (checkerAddress) =>
     (ENABLE_MOCK_API
       ? mockAdapter.solanaAdmin.removeChecker(checkerAddress)
       : (await axiosClient.delete(`/solana/checkers/${checkerAddress}`)).data),
+  removeTreasuryAccount: async (treasuryAccountAddress) =>
+    (ENABLE_MOCK_API
+      ? mockAdapter.solanaAdmin.removeTreasuryAccount(treasuryAccountAddress)
+      : (await axiosClient.delete(`/solana/treasury-accounts/${treasuryAccountAddress}`)).data),
   setAdmin: async (newAdminAddress) =>
     (ENABLE_MOCK_API
       ? mockAdapter.solanaAdmin.setAdmin(newAdminAddress)

@@ -27,6 +27,7 @@ enum TokenRequestStatus {
   REJECTED
   CANCELLED
   READY_FOR_EXECUTION
+  ON_CHAIN_PENDING
   EXECUTED
   FAILED
 }
@@ -39,6 +40,47 @@ enum ExecutionMode {
 enum ApprovalAction {
   APPROVED
   REJECTED
+}
+
+enum SettlementRequestType {
+  RESERVE_MINT
+  REPLENISHMENT_MINT
+  INTERBANK_TRANSFER
+  REDEMPTION
+}
+
+enum SettlementMode {
+  ON_CHAIN_BTN
+  BIPS_FIAT
+}
+
+enum SettlementStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  INQUIRY_PENDING
+  INQUIRY_FAILED
+  READY_FOR_EXECUTION
+  BIPS_PENDING
+  SETTLED
+  FAILED
+  MANUAL_REVIEW
+  CANCELLED
+}
+
+enum ReserveStatus {
+  PENDING
+  APPROVED
+  LOCKED
+  CONSUMED
+  RELEASED
+  REJECTED
+}
+
+enum BankAccountType {
+  RESERVE
+  BIPS_SETTLEMENT
+  OTHER
 }
 
 model User {
@@ -58,6 +100,176 @@ model User {
   createdManagedTokens ManagedToken[] @relation("ManagedTokenCreator")
 
   @@map("users")
+}
+
+model Bank {
+  id                 String             @id @default(uuid()) @db.Uuid
+  name               String
+  code               String             @unique
+  binNumber          String?
+  panNumber          String?
+  treasuryWalletAddress String?
+  supportsBtn        Boolean            @default(false)
+  supportsBipsSettlement Boolean        @default(true)
+  isIssuer           Boolean            @default(false)
+  isActive           Boolean            @default(true)
+  accounts           BankAccount[]
+  tokenAccounts      BankTokenAccount[]
+  reserveLedgers     ReserveLedger[]
+  sourceSettlements  SettlementRequest[] @relation("SourceBankSettlements")
+  destinationSettlements SettlementRequest[] @relation("DestinationBankSettlements")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([isIssuer])
+  @@index([supportsBtn])
+  @@index([isActive])
+  @@index([treasuryWalletAddress])
+  @@map("banks")
+}
+
+model BankAccount {
+  id            String          @id @default(uuid()) @db.Uuid
+  bankId         String          @db.Uuid
+  accountType    BankAccountType
+  accountName    String
+  accountNumber  String
+  currency       String          @default("BTN")
+  isPrimary      Boolean         @default(false)
+  isActive       Boolean         @default(true)
+  remarks        String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  bank           Bank            @relation(fields: [bankId], references: [id], onDelete: Cascade)
+
+  @@unique([bankId, accountType, accountNumber])
+  @@index([bankId, accountType])
+  @@map("bank_accounts")
+}
+
+model BankTokenAccount {
+  id                   String    @id @default(uuid()) @db.Uuid
+  bankId               String    @db.Uuid
+  mintAddress          String
+  treasuryWalletAddress String
+  tokenAccountAddress  String    @unique
+  isPrimary            Boolean   @default(true)
+  isActive             Boolean   @default(true)
+  remarks              String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  bank                 Bank      @relation(fields: [bankId], references: [id], onDelete: Cascade)
+
+  @@unique([bankId, mintAddress])
+  @@index([bankId])
+  @@index([mintAddress])
+  @@index([treasuryWalletAddress])
+  @@map("bank_token_accounts")
+}
+
+model ReserveLedger {
+  id                  String         @id @default(uuid()) @db.Uuid
+  bankId              String         @db.Uuid
+  referenceType       String
+  referenceId         String
+  currency            String         @default("BTN")
+  amount              Decimal        @db.Decimal(30, 10)
+  availableAmount     Decimal        @db.Decimal(30, 10)
+  lockedAmount        Decimal        @default(0) @db.Decimal(30, 10)
+  consumedAmount      Decimal        @default(0) @db.Decimal(30, 10)
+  status              ReserveStatus  @default(PENDING)
+  remarks             String?
+  approvedByUserId    String?        @db.Uuid
+  approvedAt          DateTime?
+  consumedAt          DateTime?
+  releasedAt          DateTime?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  bank                Bank           @relation(fields: [bankId], references: [id], onDelete: Cascade)
+
+  @@unique([bankId, referenceType, referenceId])
+  @@index([bankId])
+  @@index([status])
+  @@index([approvedByUserId])
+  @@map("reserve_ledgers")
+}
+
+model SettlementRequest {
+  id                         String                @id @default(uuid()) @db.Uuid
+  requestType                SettlementRequestType
+  settlementMode             SettlementMode?
+  status                     SettlementStatus      @default(DRAFT)
+  sourceBankId               String?               @db.Uuid
+  destinationBankId          String?               @db.Uuid
+  reserveLedgerId            String?               @db.Uuid
+  tokenMintAddress           String?
+  amount                     Decimal               @db.Decimal(30, 10)
+  requestId                  String?
+  beneficiaryAccountName     String?
+  beneficiaryAccountNumber   String?
+  beneficiaryBankCode        String?
+  sourceAccountName          String?
+  sourceAccountNumber        String?
+  transferPurpose            String?
+  makerWalletAddress         String?
+  sourceTokenAccountAddress  String?
+  destinationTokenAccountAddress String?
+  onChainRequestAddress      String?
+  initiationTxSignature      String?
+  initiationExplorerUrl      String?
+  makerInitiatedAt           DateTime?
+  referenceNumber            String?
+  bipsTransactionId          String?
+  inquiryResponseCode        String?
+  inquiryResponseMessage     String?
+  txSignature                String?
+  explorerUrl                String?
+  executionError             String?
+  manualReviewReason         String?
+  approvedAt                 DateTime?
+  executedAt                 DateTime?
+  settledAt                  DateTime?
+  createdAt                  DateTime              @default(now())
+  updatedAt                  DateTime              @updatedAt
+  sourceBank                 Bank?                 @relation("SourceBankSettlements", fields: [sourceBankId], references: [id], onDelete: Restrict)
+  destinationBank            Bank?                 @relation("DestinationBankSettlements", fields: [destinationBankId], references: [id], onDelete: Restrict)
+
+  @@unique([requestType, requestId])
+  @@index([status])
+  @@index([settlementMode])
+  @@index([sourceBankId])
+  @@index([destinationBankId])
+  @@index([reserveLedgerId])
+  @@index([requestId])
+  @@index([referenceNumber])
+  @@index([bipsTransactionId])
+  @@index([createdAt])
+  @@map("settlement_requests")
+}
+
+model BipsTransactionLog {
+  id                String   @id @default(uuid()) @db.Uuid
+  settlementRequestId String? @db.Uuid
+  requestType       String
+  requestId         String?
+  referenceNumber   String?
+  transactionId     String?
+  rawRequest        Json?
+  parsedRequest     Json?
+  rawResponse       Json?
+  parsedResponse    Json?
+  responseStatus    String?
+  responseMessage   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([settlementRequestId])
+  @@index([requestType])
+  @@index([requestId])
+  @@index([referenceNumber])
+  @@index([transactionId])
+  @@index([createdAt])
+  @@map("bips_transaction_logs")
 }
 
 model Role {

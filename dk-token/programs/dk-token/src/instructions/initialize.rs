@@ -1,5 +1,5 @@
-use anchor_lang::prelude::*;
 use crate::state::config::Config;
+use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
 pub struct Initialize<'info> {
@@ -20,5 +20,6 @@ pub fn handler(ctx: Context<Initialize>) -> Result<()> {
     let config = &mut ctx.accounts.config;
     config.admin = ctx.accounts.admin.key();
     config.checkers = vec![ctx.accounts.admin.key()];
+    config.treasury_accounts = Vec::new();
     Ok(())
 }
