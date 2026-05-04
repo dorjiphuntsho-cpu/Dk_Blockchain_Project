@@ -8,6 +8,7 @@ const paymentsController = require('../controllers/payments.controller');
 const {
   customerBuyBtnSchema,
   customerSellBtnSchema,
+  customerTransferBtnSchema,
   customerPaymentReferenceParamSchema,
   paymentGatewayAccountAuthSchema,
   paymentCallbackSchema,
@@ -94,6 +95,12 @@ router.post(
   '/customer/sell-btn',
   validate(customerSellBtnSchema),
   asyncHandler(paymentsController.initiateCustomerSellBtn),
+);
+
+router.post(
+  '/customer/transfer-btn',
+  validate(customerTransferBtnSchema),
+  asyncHandler(paymentsController.initiateCustomerTransferBtn),
 );
 
 router.get(

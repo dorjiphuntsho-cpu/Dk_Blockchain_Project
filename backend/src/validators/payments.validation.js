@@ -191,6 +191,15 @@ const customerSellBtnSchema = z.object({
   query: z.object({}).optional(),
 });
 
+const customerTransferBtnSchema = z.object({
+  body: z.object({
+    amount: numericStringSchema,
+    recipientCid: requiredTrimmedString,
+  }),
+  params: z.object({}).optional(),
+  query: z.object({}).optional(),
+});
+
 const customerPaymentReferenceParamSchema = z.object({
   body: z.object({}).optional(),
   params: z.object({
@@ -202,6 +211,7 @@ const customerPaymentReferenceParamSchema = z.object({
 module.exports = {
   customerBuyBtnSchema,
   customerSellBtnSchema,
+  customerTransferBtnSchema,
   customerPaymentReferenceParamSchema,
   paymentGatewayAccountAuthSchema,
   paymentGatewaySignedRequestSchema,

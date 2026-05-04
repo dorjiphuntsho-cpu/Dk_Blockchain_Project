@@ -22,6 +22,7 @@ const paymentGatewayTokenCache = new Map();
 const CUSTOMER_BTN_PAYMENT_PREFIXES = {
   BUY: 'BTNBUY',
   SELL: 'BTNSELL',
+  TRANSFER: 'BTNTRANSFER',
 };
 
 function getFirstNonEmptyValue(source, keys) {
@@ -68,6 +69,10 @@ function buildCustomerBuyReference(userId) {
 
 function buildCustomerSellReference(userId) {
   return `BTN_SELL:${userId}:${generateGatewayRequestId()}`;
+}
+
+function buildCustomerTransferReference(userId) {
+  return `BTN_TRANSFER:${userId}:${generateGatewayRequestId()}`;
 }
 
 function normalizePositiveAmount(value, fieldName) {
@@ -233,6 +238,40 @@ async function getCustomerSellContext(userId) {
     reserveAccount,
     managedToken,
     walletBtnBalance,
+  };
+}
+
+async function getCustomerTransferContext(userId, recipientCid) {
+  const senderContext = await getCustomerSellContext(userId);
+  const recipientUser = await prisma.user.findUnique({
+    where: {
+      cid: String(recipientCid || '').trim(),
+    },
+    include: {
+      wallets: {
+        where: {
+          isActive: true,
+        },
+        orderBy: [
+          { isPrimary: 'desc' },
+          { createdAt: 'asc' },
+        ],
+      },
+    },
+  });
+
+  if (!recipientUser || !recipientUser.isActive) {
+    throw new ApiError(404, 'Recipient customer not found');
+  }
+
+  if (recipientUser.id === senderContext.user.id) {
+    throw new ApiError(400, 'Recipient customer must be different from the sender');
+  }
+
+  return {
+    ...senderContext,
+    recipientUser,
+    recipientPrimaryWallet: recipientUser.wallets[0] || null,
   };
 }
 
@@ -715,8 +754,15 @@ function isCustomerSellTransaction(paymentTransaction) {
     && String(paymentTransaction?.customerReference || '').startsWith('BTN_SELL:');
 }
 
+function isCustomerTransferTransaction(paymentTransaction) {
+  return paymentTransaction?.parsedPayload?.initiatedBy === 'CUSTOMER_PORTAL'
+    && String(paymentTransaction?.customerReference || '').startsWith('BTN_TRANSFER:');
+}
+
 function isCustomerPortalTransaction(paymentTransaction) {
-  return isCustomerBuyTransaction(paymentTransaction) || isCustomerSellTransaction(paymentTransaction);
+  return isCustomerBuyTransaction(paymentTransaction)
+    || isCustomerSellTransaction(paymentTransaction)
+    || isCustomerTransferTransaction(paymentTransaction);
 }
 
 async function updateCustomerPortalFulfillment(paymentReference, fulfillmentPatch = {}) {
@@ -875,24 +921,128 @@ async function fulfillCustomerSellTransaction(paymentTransaction) {
   }
 
   await updateCustomerPortalFulfillment(paymentTransaction.paymentReference, {
-    status: 'TOKEN_RETURN_REQUIRED',
+    status: 'TOKEN_RETURN_PENDING',
     updatedAt: new Date().toISOString(),
-    statusMessage: 'Fiat payout confirmed. Customer BTN return to the DK distribution wallet is now required.',
-    transfer: {
-      mode: 'CUSTOMER_WALLET_RETURN_REQUIRED',
+    statusMessage: 'Fiat payout confirmed. BTN return from the customer wallet is in progress.',
+  });
+
+  try {
+    const transferResult = await solanaService.transferFromCustomerWalletToDistribution({
+      bankId: paymentTransaction.parsedPayload?.issuerBankId,
       mintAddress,
       amount: tokenAmount,
       sourceWalletAddress,
-      distributionWalletAddress,
-      distributionTokenAccountAddress,
-    },
+    });
+
+    await updateCustomerPortalFulfillment(paymentTransaction.paymentReference, {
+      status: 'COMPLETED',
+      updatedAt: new Date().toISOString(),
+      transfer: transferResult,
+      statusMessage: 'Fiat payout confirmed and BTN returned automatically to the DK distribution wallet.',
+    });
+
+    return {
+      delivered: true,
+      transfer: transferResult,
+    };
+  } catch (error) {
+    await updateCustomerPortalFulfillment(paymentTransaction.paymentReference, {
+      status: 'DELEGATION_REQUIRED',
+      updatedAt: new Date().toISOString(),
+      error: error.message,
+      statusMessage: 'Fiat payout confirmed, but automatic BTN return is not enabled yet. Customer sell delegation is required.',
+      transfer: {
+        mode: 'CUSTOMER_WALLET_DELEGATION_REQUIRED',
+        mintAddress,
+        amount: tokenAmount,
+        sourceWalletAddress,
+        distributionWalletAddress,
+        distributionTokenAccountAddress,
+      },
+    });
+
+    return {
+      delivered: false,
+      pending: true,
+      reason: 'Customer wallet delegation is required for automatic sell execution.',
+    };
+  }
+}
+
+async function fulfillCustomerTransferFiatFallback(paymentTransaction) {
+  if (!isCustomerTransferTransaction(paymentTransaction)) {
+    return null;
+  }
+
+  if (paymentTransaction.parsedPayload?.transferMode !== 'FIAT_FALLBACK') {
+    return null;
+  }
+
+  if (!isSuccessfulPaymentStatus(paymentTransaction.status)) {
+    return {
+      delivered: false,
+      pending: true,
+      reason: 'Waiting for successful fiat payout confirmation before returning BTN to distribution.',
+    };
+  }
+
+  const fulfillment = paymentTransaction.parsedPayload?.fulfillment || {};
+  if (fulfillment.status === 'COMPLETED') {
+    return {
+      delivered: true,
+      skipped: true,
+      transfer: fulfillment.transfer || null,
+    };
+  }
+
+  const tokenAmount = paymentTransaction.parsedPayload?.tokenAmount;
+  const sourceWalletAddress = paymentTransaction.parsedPayload?.sourceWalletAddress;
+  const mintAddress = paymentTransaction.parsedPayload?.mintAddress;
+  const issuerBankId = paymentTransaction.parsedPayload?.issuerBankId;
+
+  if (!tokenAmount || !sourceWalletAddress || !mintAddress || !issuerBankId) {
+    throw new ApiError(500, 'Customer transfer payout record is missing token-return metadata');
+  }
+
+  await updateCustomerPortalFulfillment(paymentTransaction.paymentReference, {
+    status: 'TOKEN_RETURN_PENDING',
+    updatedAt: new Date().toISOString(),
+    statusMessage: 'Fiat payout confirmed. BTN return from the sender wallet is in progress.',
   });
 
-  return {
-    delivered: false,
-    pending: true,
-    reason: 'Customer wallet must return BTN to the DK distribution wallet.',
-  };
+  try {
+    const transferResult = await solanaService.transferFromCustomerWalletToDistribution({
+      bankId: issuerBankId,
+      mintAddress,
+      amount: tokenAmount,
+      sourceWalletAddress,
+    });
+
+    await updateCustomerPortalFulfillment(paymentTransaction.paymentReference, {
+      status: 'COMPLETED',
+      updatedAt: new Date().toISOString(),
+      transfer: transferResult,
+      statusMessage: 'Fiat payout confirmed and BTN returned automatically to the DK distribution wallet.',
+    });
+
+    return {
+      delivered: true,
+      transfer: transferResult,
+    };
+  } catch (error) {
+    await updateCustomerPortalFulfillment(paymentTransaction.paymentReference, {
+      status: 'DELEGATION_REQUIRED',
+      updatedAt: new Date().toISOString(),
+      error: error.message,
+      statusMessage: 'Fiat payout confirmed, but automatic BTN return is not enabled yet for the sender wallet.',
+    });
+
+    return {
+      delivered: false,
+      pending: true,
+      reason: 'Sender wallet delegation is required for automatic transfer payout execution.',
+    };
+  }
 }
 
 async function syncPaymentOutcome(transaction, source) {
@@ -911,6 +1061,19 @@ async function syncPaymentOutcome(transaction, source) {
 
   if (isCustomerSellTransaction(transaction)) {
     const fulfillment = await fulfillCustomerSellTransaction(transaction);
+
+    return {
+      reserveLedger: null,
+      created: false,
+      skipped: true,
+      reason: fulfillment?.reason || null,
+      fulfillment,
+      source,
+    };
+  }
+
+  if (isCustomerTransferTransaction(transaction)) {
+    const fulfillment = await fulfillCustomerTransferFiatFallback(transaction);
 
     return {
       reserveLedger: null,
@@ -1700,6 +1863,7 @@ async function initiateCustomerBuyBtn(userId, options = {}) {
         customerId: user.id,
         customerCid: user.cid,
         sourceWalletAddress: primaryWallet.walletAddress,
+        issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
         reserveAccountName: reserveAccount.accountName,
         requestId,
@@ -1725,6 +1889,7 @@ async function initiateCustomerBuyBtn(userId, options = {}) {
         customerId: user.id,
         customerCid: user.cid,
         sourceWalletAddress: primaryWallet.walletAddress,
+        issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
         reserveAccountName: reserveAccount.accountName,
         requestId,
@@ -1755,6 +1920,7 @@ async function initiateCustomerBuyBtn(userId, options = {}) {
         customerId: user.id,
         customerCid: user.cid,
         sourceWalletAddress: primaryWallet.walletAddress,
+        issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
         reserveAccountName: reserveAccount.accountName,
         requestId,
@@ -1783,6 +1949,7 @@ async function initiateCustomerBuyBtn(userId, options = {}) {
         customerId: user.id,
         customerCid: user.cid,
         sourceWalletAddress: primaryWallet.walletAddress,
+        issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
         reserveAccountName: reserveAccount.accountName,
         requestId,
@@ -1845,6 +2012,19 @@ async function initiateCustomerSellBtn(userId, options = {}) {
     throw new ApiError(
       409,
       `Customer wallet has insufficient BTN balance. Available ${walletAvailableRawAmount.toString()}, required ${requiredRawAmount.toString()}.`,
+    );
+  }
+
+  const delegationStatus = await solanaService.getCustomerSellDelegationStatus({
+    mintAddress: managedToken.mintAddress,
+    walletAddress: primaryWallet.walletAddress,
+    requiredAmount: tokenAmount,
+  });
+
+  if (!delegationStatus.sufficient) {
+    throw new ApiError(
+      409,
+      'Automatic sell is not enabled for this wallet yet. Approve customer sell delegation first.',
     );
   }
 
@@ -2073,6 +2253,361 @@ async function initiateCustomerSellBtn(userId, options = {}) {
   };
 }
 
+async function initiateCustomerTransferBtn(userId, options = {}) {
+  const {
+    user,
+    primaryWallet,
+    issuerBank,
+    reserveAccount,
+    managedToken,
+    walletBtnBalance,
+    recipientUser,
+    recipientPrimaryWallet,
+  } = await getCustomerTransferContext(userId, options.recipientCid);
+  const tokenAmount = normalizePositiveAmount(options.amount, 'amount');
+  const fiatAmount = calculateFiatAmountFromTokenAmount(tokenAmount);
+  const walletAvailableRawAmount = BigInt(String(walletBtnBalance?.rawAmount || '0'));
+  const requiredRawAmount = BigInt(String(Number(tokenAmount).toFixed(0)));
+
+  if (walletAvailableRawAmount < requiredRawAmount) {
+    throw new ApiError(
+      409,
+      `Customer wallet has insufficient BTN balance. Available ${walletAvailableRawAmount.toString()}, required ${requiredRawAmount.toString()}.`,
+    );
+  }
+
+  const delegationStatus = await solanaService.getCustomerSellDelegationStatus({
+    mintAddress: managedToken.mintAddress,
+    walletAddress: primaryWallet.walletAddress,
+    requiredAmount: tokenAmount,
+  });
+
+  if (!delegationStatus.sufficient) {
+    throw new ApiError(
+      409,
+      'Automatic transfer is not enabled for this wallet yet. Approve customer sell delegation first.',
+    );
+  }
+
+  const paymentReference = buildCustomerPaymentReference(CUSTOMER_BTN_PAYMENT_PREFIXES.TRANSFER);
+  const customerReference = buildCustomerTransferReference(user.id);
+
+  if (recipientPrimaryWallet?.walletAddress) {
+    const transferResult = await solanaService.transferFromCustomerWalletToWallet({
+      mintAddress: managedToken.mintAddress,
+      amount: tokenAmount,
+      sourceWalletAddress: primaryWallet.walletAddress,
+      destinationWalletAddress: recipientPrimaryWallet.walletAddress,
+    });
+
+    const transaction = await prisma.paymentTransaction.create({
+      data: {
+        gatewayName: 'INTERNAL_BTN_TRANSFER',
+        paymentReference,
+        customerReference,
+        payerName: user.fullName,
+        payerAccount: user.linkedBankAccountNumber,
+        amount: fiatAmount,
+        currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+        status: 'COMPLETED',
+        statusMessage: 'BTN transferred successfully to the recipient wallet.',
+        confirmedAt: new Date(),
+        parsedPayload: {
+          initiatedBy: 'CUSTOMER_PORTAL',
+          transferMode: 'WALLET',
+          customerId: user.id,
+          customerCid: user.cid,
+          sourceWalletAddress: primaryWallet.walletAddress,
+          tokenAmount,
+          fiatAmount,
+          mintAddress: managedToken.mintAddress,
+          recipientUserId: recipientUser.id,
+          recipientCid: recipientUser.cid,
+          recipientName: recipientUser.fullName,
+          recipientWalletAddress: recipientPrimaryWallet.walletAddress,
+          fulfillment: {
+            status: 'COMPLETED',
+            updatedAt: new Date().toISOString(),
+            transfer: transferResult,
+            statusMessage: 'BTN transferred successfully to the recipient wallet.',
+          },
+        },
+      },
+    });
+
+    return {
+      paymentReference,
+      customerReference,
+      mode: 'WALLET',
+      tokenAmount,
+      fiatAmount,
+      currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+      customer: {
+        id: user.id,
+        fullName: user.fullName,
+        cid: user.cid,
+        primaryWalletAddress: primaryWallet.walletAddress,
+      },
+      recipient: {
+        id: recipientUser.id,
+        fullName: recipientUser.fullName,
+        cid: recipientUser.cid,
+        primaryWalletAddress: recipientPrimaryWallet.walletAddress,
+        linkedBankAccountNumber: recipientUser.linkedBankAccountNumber,
+      },
+      transaction,
+    };
+  }
+
+  if (!recipientUser.linkedBankAccountNumber) {
+    throw new ApiError(400, 'Recipient customer has neither an active wallet nor a linked bank account');
+  }
+
+  const distributionTokenAccount = await solanaService.resolveBankDistributionTokenAccount(
+    issuerBank.id,
+    managedToken.mintAddress,
+  );
+  const requestId = generateGatewayRequestId();
+  const transactionTimestamp = formatGatewayTimestamp();
+  const purpose = 'BTN transfer fiat fallback payout';
+  const beneficiaryInquiryPayload = {
+    request_id: requestId,
+    source_app: env.PAYMENT_GATEWAY_SOURCE_APP,
+    amount: fiatAmount,
+    currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+    source_account_name: reserveAccount.accountName,
+    source_account_number: reserveAccount.accountNumber,
+    soure_account_number: reserveAccount.accountNumber,
+    bene_account_number: recipientUser.linkedBankAccountNumber,
+    bene_bank_code: issuerBank.code,
+  };
+  const beneficiaryInquiryResult = await beneficiaryAccountInquiry({
+    payload: beneficiaryInquiryPayload,
+  });
+  const inquiryId = extractGatewayInquiryId(beneficiaryInquiryResult.payload);
+
+  if (!inquiryId) {
+    throw new ApiError(502, 'Payment gateway beneficiary inquiry did not return an inquiry id');
+  }
+
+  const requestPayload = {
+    request_id: requestId,
+    transaction_datetime: transactionTimestamp,
+    source_app: env.PAYMENT_GATEWAY_SOURCE_APP,
+    transaction_amount: fiatAmount,
+    payment_type: 'INTRA',
+    source_account_name: reserveAccount.accountName,
+    source_account_number: reserveAccount.accountNumber,
+    bene_cust_name: recipientUser.fullName,
+    bene_account_number: recipientUser.linkedBankAccountNumber,
+    bene_bank_code: issuerBank.code,
+    inquiry_id: inquiryId,
+    narration: purpose,
+    payment_reference: paymentReference,
+    customer_reference: customerReference,
+    amount: fiatAmount,
+    currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+    payer_name: reserveAccount.accountName,
+    payer_account: reserveAccount.accountNumber,
+    purpose,
+    remarks: purpose,
+    source_wallet_address: primaryWallet.walletAddress,
+    token_amount: tokenAmount,
+    token_symbol: 'BTN',
+    mint_address: managedToken.mintAddress,
+    issuer_bank_code: issuerBank.code,
+    issuer_bank_name: issuerBank.name,
+    distribution_wallet_address: distributionTokenAccount.treasuryWalletAddress,
+    distribution_token_account_address: distributionTokenAccount.tokenAccountAddress,
+    recipient_cid: recipientUser.cid,
+  };
+
+  await prisma.paymentTransaction.upsert({
+    where: {
+      paymentReference,
+    },
+    create: {
+      gatewayName: env.PAYMENT_GATEWAY_NAME,
+      paymentReference,
+      customerReference,
+      payerName: reserveAccount.accountName,
+      payerAccount: reserveAccount.accountNumber,
+      amount: fiatAmount,
+      currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+      status: 'INITIATED',
+      statusMessage: 'Customer BTN transfer fiat fallback payout initiated from portal.',
+      parsedPayload: {
+        initiatedBy: 'CUSTOMER_PORTAL',
+        transferMode: 'FIAT_FALLBACK',
+        customerId: user.id,
+        customerCid: user.cid,
+        recipientUserId: recipientUser.id,
+        recipientCid: recipientUser.cid,
+        recipientName: recipientUser.fullName,
+        sourceWalletAddress: primaryWallet.walletAddress,
+        issuerBankId: issuerBank.id,
+        reserveAccountNumber: reserveAccount.accountNumber,
+        reserveAccountName: reserveAccount.accountName,
+        statusBeneficiaryAccountNumber: recipientUser.linkedBankAccountNumber,
+        payoutAccountNumber: recipientUser.linkedBankAccountNumber,
+        distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
+        distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
+        requestId,
+        inquiryId,
+        tokenAmount,
+        fiatAmount,
+        mintAddress: managedToken.mintAddress,
+        beneficiaryInquiryPayload,
+        beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+        requestPayload,
+      },
+    },
+    update: {
+      customerReference,
+      payerName: reserveAccount.accountName,
+      payerAccount: reserveAccount.accountNumber,
+      amount: fiatAmount,
+      currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+      status: 'INITIATED',
+      statusMessage: 'Customer BTN transfer fiat fallback payout re-initiated from portal.',
+      parsedPayload: {
+        initiatedBy: 'CUSTOMER_PORTAL',
+        transferMode: 'FIAT_FALLBACK',
+        customerId: user.id,
+        customerCid: user.cid,
+        recipientUserId: recipientUser.id,
+        recipientCid: recipientUser.cid,
+        recipientName: recipientUser.fullName,
+        sourceWalletAddress: primaryWallet.walletAddress,
+        issuerBankId: issuerBank.id,
+        reserveAccountNumber: reserveAccount.accountNumber,
+        reserveAccountName: reserveAccount.accountName,
+        statusBeneficiaryAccountNumber: recipientUser.linkedBankAccountNumber,
+        payoutAccountNumber: recipientUser.linkedBankAccountNumber,
+        distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
+        distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
+        requestId,
+        inquiryId,
+        tokenAmount,
+        fiatAmount,
+        mintAddress: managedToken.mintAddress,
+        beneficiaryInquiryPayload,
+        beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+        requestPayload,
+      },
+    },
+  });
+
+  const gatewayResult = await initiateIntraTransaction({
+    payload: requestPayload,
+  });
+  const normalizedGatewayResponse = normalizePaymentPayload(gatewayResult.payload, paymentReference, env.PAYMENT_GATEWAY_NAME);
+
+  await prisma.paymentTransaction.update({
+    where: {
+      paymentReference,
+    },
+    data: {
+      parsedPayload: {
+        initiatedBy: 'CUSTOMER_PORTAL',
+        transferMode: 'FIAT_FALLBACK',
+        customerId: user.id,
+        customerCid: user.cid,
+        recipientUserId: recipientUser.id,
+        recipientCid: recipientUser.cid,
+        recipientName: recipientUser.fullName,
+        sourceWalletAddress: primaryWallet.walletAddress,
+        issuerBankId: issuerBank.id,
+        reserveAccountNumber: reserveAccount.accountNumber,
+        reserveAccountName: reserveAccount.accountName,
+        statusBeneficiaryAccountNumber: recipientUser.linkedBankAccountNumber,
+        payoutAccountNumber: recipientUser.linkedBankAccountNumber,
+        distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
+        distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
+        requestId,
+        inquiryId,
+        tokenAmount,
+        fiatAmount,
+        mintAddress: managedToken.mintAddress,
+        beneficiaryInquiryPayload,
+        beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+        requestPayload,
+        gatewayInitiationResponse: gatewayResult.payload,
+      },
+    },
+  });
+
+  if (normalizedGatewayResponse) {
+    await upsertPaymentTransaction({
+      normalized: {
+        ...normalizedGatewayResponse,
+        customerReference,
+        payerName: normalizedGatewayResponse.payerName || reserveAccount.accountName,
+        payerAccount: normalizedGatewayResponse.payerAccount || reserveAccount.accountNumber,
+      },
+      parsedPayload: {
+        initiatedBy: 'CUSTOMER_PORTAL',
+        transferMode: 'FIAT_FALLBACK',
+        customerId: user.id,
+        customerCid: user.cid,
+        recipientUserId: recipientUser.id,
+        recipientCid: recipientUser.cid,
+        recipientName: recipientUser.fullName,
+        sourceWalletAddress: primaryWallet.walletAddress,
+        issuerBankId: issuerBank.id,
+        reserveAccountNumber: reserveAccount.accountNumber,
+        reserveAccountName: reserveAccount.accountName,
+        statusBeneficiaryAccountNumber: recipientUser.linkedBankAccountNumber,
+        payoutAccountNumber: recipientUser.linkedBankAccountNumber,
+        distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
+        distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
+        requestId,
+        inquiryId,
+        tokenAmount,
+        fiatAmount,
+        mintAddress: managedToken.mintAddress,
+        beneficiaryInquiryPayload,
+        beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+        requestPayload,
+        gatewayInitiationResponse: gatewayResult.payload,
+      },
+    });
+  }
+
+  return {
+    paymentReference,
+    customerReference,
+    mode: 'FIAT_FALLBACK',
+    tokenAmount,
+    fiatAmount,
+    currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+    customer: {
+      id: user.id,
+      fullName: user.fullName,
+      cid: user.cid,
+      primaryWalletAddress: primaryWallet.walletAddress,
+      linkedBankAccountNumber: user.linkedBankAccountNumber,
+    },
+    recipient: {
+      id: recipientUser.id,
+      fullName: recipientUser.fullName,
+      cid: recipientUser.cid,
+      primaryWalletAddress: null,
+      linkedBankAccountNumber: recipientUser.linkedBankAccountNumber,
+    },
+    payout: {
+      beneficiaryAccountNumber: recipientUser.linkedBankAccountNumber,
+      beneficiaryName: recipientUser.fullName,
+    },
+    tokenReturn: {
+      mintAddress: managedToken.mintAddress,
+      distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
+      distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
+    },
+    gateway: gatewayResult,
+  };
+}
+
 async function getCustomerPaymentTransaction(userId, paymentReference) {
   const transaction = await prisma.paymentTransaction.findUnique({
     where: {
@@ -2086,7 +2621,8 @@ async function getCustomerPaymentTransaction(userId, paymentReference) {
 
   const customerReference = String(transaction.customerReference || '');
   const belongsToCustomer = customerReference.startsWith(`BTN_BUY:${userId}:`)
-    || customerReference.startsWith(`BTN_SELL:${userId}:`);
+    || customerReference.startsWith(`BTN_SELL:${userId}:`)
+    || customerReference.startsWith(`BTN_TRANSFER:${userId}:`);
 
   if (!belongsToCustomer) {
     throw new ApiError(404, 'Payment transaction not found');
@@ -2188,6 +2724,7 @@ module.exports = {
   getGatewayTransactionStatusForToday,
   initiateCustomerBuyBtn,
   initiateCustomerSellBtn,
+  initiateCustomerTransferBtn,
   ingestPaymentCallback,
   initiateIntraTransaction,
   initiateGatewayIntraTransaction,

@@ -285,6 +285,21 @@ async function getCustomerPortalSummary(userId) {
   const btnWalletBalance = managedToken?.mintAddress
     ? walletBalances.find((item) => item.mintAddress === managedToken.mintAddress) || null
     : null;
+  const sellDelegation = managedToken?.mintAddress && primaryWallet?.walletAddress
+    ? await solanaService.getCustomerSellDelegationStatus({
+      mintAddress: managedToken.mintAddress,
+      walletAddress: primaryWallet.walletAddress,
+    }).catch((error) => ({
+      configured: false,
+      active: false,
+      sufficient: false,
+      requiredAmount: null,
+      delegatedAmount: '0',
+      delegateWalletAddress: null,
+      tokenAccountAddress: null,
+      warning: error.message,
+    }))
+    : null;
   const recentPayments = await prisma.paymentTransaction.findMany({
     where: {
       OR: [
@@ -296,6 +311,11 @@ async function getCustomerPortalSummary(userId) {
         {
           customerReference: {
             startsWith: `BTN_SELL:${user.id}:`,
+          },
+        },
+        {
+          customerReference: {
+            startsWith: `BTN_TRANSFER:${user.id}:`,
           },
         },
       ],
@@ -353,6 +373,7 @@ async function getCustomerPortalSummary(userId) {
       btnBalance: btnWalletBalance?.amount || '0',
       btnBalanceRaw: btnWalletBalance?.rawAmount || '0',
       primaryAccountNumber: user.linkedBankAccountNumber || null,
+      sellDelegation,
     },
     linkedAccount,
     walletBalances,

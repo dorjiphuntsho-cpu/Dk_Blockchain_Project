@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSnackbar } from 'notistack';
+import { Connection, PublicKey, Transaction } from '@solana/web3.js';
+import { createApproveInstruction } from '@solana/spl-token';
 
 import Button from '../../components/ui/Button';
 import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
 import usePortalAuth from '../../hooks/usePortalAuth';
+import useSolanaWallet from '../../hooks/useSolanaWallet';
 import { portalApi } from '../../modules/portal/portal.api';
+import { signAndSendWalletTransaction } from '../../modules/solana/walletExecution';
 import { getErrorMessage } from '../../utils/error';
 import { formatAmount, truncateMiddle } from '../../utils/format';
+import { SOLANA_RPC_URL } from '../../utils/constants';
 
 const ACTION_CONFIG = {
   buy: {
@@ -22,9 +27,9 @@ const ACTION_CONFIG = {
   },
   sell: {
     title: 'Sell BTN',
-    summary: 'Payout fiat to the customer and record the required BTN return back into DK distribution inventory.',
+    summary: 'Payout fiat to the customer and return BTN back into DK distribution inventory automatically.',
     buttonLabel: 'Submit Sell Request',
-    helper: 'This flow pays out fiat first. After payout confirmation, the customer must return the sold BTN amount back to the DK distribution wallet.',
+    helper: 'This flow pays out fiat and then automatically returns the sold BTN amount back to the DK distribution wallet from the delegated customer wallet.',
     fields: [
       { name: 'amount', label: 'BTN Amount to Sell', placeholder: '100.00' },
       { name: 'payoutAccount', label: 'Payout Account Number', placeholder: '100100223740' },
@@ -44,14 +49,12 @@ const ACTION_CONFIG = {
   },
   transfer: {
     title: 'Transfer BTN',
-    summary: 'Move BTN from one customer holder to another without opening the admin portal.',
+    summary: 'Transfer BTN directly to another customer wallet, or fall back to fiat payout if the recipient has no wallet.',
     buttonLabel: 'Submit Transfer Request',
-    helper: 'Capture the receiving wallet or beneficiary account details for the customer transfer.',
+    helper: 'If the recipient has an active wallet, BTN is transferred there directly. Otherwise the recipient receives fiat and the sender BTN is returned to DK distribution inventory.',
     fields: [
       { name: 'amount', label: 'BTN Amount to Transfer', placeholder: '40.00' },
-      { name: 'recipientName', label: 'Recipient Name', placeholder: 'Sonam Choden' },
-      { name: 'recipientWallet', label: 'Recipient Wallet / Account', placeholder: 'wallet-or-account-id' },
-      { name: 'remarks', label: 'Remarks', placeholder: 'Family transfer' },
+      { name: 'recipientCid', label: 'Recipient CID', placeholder: '11101000002' },
     ],
   },
 };
@@ -68,8 +71,11 @@ function PortalActionPage({ mode }) {
   const [paymentDetails, setPaymentDetails] = useState(null);
   const [submissionError, setSubmissionError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [summary, setSummary] = useState(null);
+  const [isApprovingDelegation, setIsApprovingDelegation] = useState(false);
   const { enqueueSnackbar } = useSnackbar();
   const { token, customer } = usePortalAuth();
+  const solanaWallet = useSolanaWallet();
 
   useEffect(() => {
     setValues(initialValues);
@@ -77,6 +83,33 @@ function PortalActionPage({ mode }) {
     setPaymentDetails(null);
     setSubmissionError('');
   }, [initialValues, mode]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSummary = async () => {
+      if (!token) {
+        return;
+      }
+
+      try {
+        const response = await portalApi.getSummary(token);
+        if (isMounted) {
+          setSummary(response.data);
+        }
+      } catch {
+        if (isMounted) {
+          setSummary(null);
+        }
+      }
+    };
+
+    loadSummary();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [token, mode]);
 
   useEffect(() => {
     if (mode !== 'buy' && mode !== 'sell') {
@@ -118,12 +151,71 @@ function PortalActionPage({ mode }) {
     return loadPaymentDetails(paymentReference);
   };
 
+  const refreshSummary = async () => {
+    if (!token) {
+      return null;
+    }
+
+    const response = await portalApi.getSummary(token);
+    setSummary(response.data);
+    window.dispatchEvent(new CustomEvent('portal-summary-refresh'));
+    return response.data;
+  };
+
+  const handleApproveSellDelegation = async () => {
+    const currentSummary = summary || await refreshSummary();
+    const delegation = currentSummary?.customer?.sellDelegation;
+    const customerWalletAddress = currentSummary?.customer?.primaryWalletAddress || customer?.wallets?.[0]?.walletAddress || null;
+
+    if (!delegation?.tokenAccountAddress || !delegation?.delegateWalletAddress || !customerWalletAddress) {
+      enqueueSnackbar(`${mode === 'sell' ? 'Sell' : 'Transfer'} delegation metadata is not available for this customer wallet yet.`, { variant: 'error' });
+      return;
+    }
+
+    if (!solanaWallet.connected || !solanaWallet.provider || !solanaWallet.address) {
+      enqueueSnackbar(`Connect the customer Phantom wallet before enabling automatic ${mode}.`, { variant: 'warning' });
+      return;
+    }
+
+    if (solanaWallet.address !== customerWalletAddress) {
+      enqueueSnackbar(`Connected wallet must match the customer wallet ${customerWalletAddress}.`, { variant: 'error' });
+      return;
+    }
+
+    try {
+      setIsApprovingDelegation(true);
+      const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
+      const transaction = new Transaction();
+      transaction.add(
+        createApproveInstruction(
+          new PublicKey(delegation.tokenAccountAddress),
+          new PublicKey(delegation.delegateWalletAddress),
+          new PublicKey(customerWalletAddress),
+          BigInt('18446744073709551615'),
+        ),
+      );
+
+      await signAndSendWalletTransaction({
+        connection,
+        provider: solanaWallet.provider,
+        transaction,
+      });
+
+      await refreshSummary();
+      enqueueSnackbar(`Automatic ${mode} delegation enabled for this wallet.`, { variant: 'success' });
+    } catch (error) {
+      enqueueSnackbar(getErrorMessage(error, `Unable to enable automatic ${mode} delegation`), { variant: 'error' });
+    } finally {
+      setIsApprovingDelegation(false);
+    }
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setSubmissionError('');
     setLastSubmission(values);
 
-    if (mode !== 'buy' && mode !== 'sell') {
+    if (mode !== 'buy' && mode !== 'sell' && mode !== 'transfer') {
       enqueueSnackbar(`${config.title} request captured in portal UI`, { variant: 'success' });
       return;
     }
@@ -131,25 +223,52 @@ function PortalActionPage({ mode }) {
     setIsSubmitting(true);
 
     try {
-      const response = mode === 'buy'
-        ? await portalApi.buyBtn(token, {
+      if ((mode === 'sell' || mode === 'transfer') && !sellDelegationReady) {
+        throw new Error(
+          `Enable automatic ${mode === 'sell' ? 'sell' : 'transfer'} delegation for the customer wallet before submitting this request.`,
+        );
+      }
+
+      let response;
+      if (mode === 'buy') {
+        response = await portalApi.buyBtn(token, {
             amount: values.amount,
             debitAccount: values.debitAccount,
-          })
-        : await portalApi.sellBtn(token, {
+          });
+      } else if (mode === 'sell') {
+        response = await portalApi.sellBtn(token, {
             amount: values.amount,
             payoutAccount: values.payoutAccount,
           });
+      } else {
+        response = await portalApi.transferBtn(token, {
+          amount: values.amount,
+          recipientCid: values.recipientCid,
+        });
+      }
 
       const transaction = response.data;
       await loadPaymentDetails(transaction.paymentReference);
-      await verifyAndReloadPaymentDetails(transaction.paymentReference);
-      window.dispatchEvent(new CustomEvent('portal-summary-refresh'));
-      enqueueSnackbar(mode === 'buy' ? 'BTN buy request submitted successfully' : 'BTN sell request submitted successfully', { variant: 'success' });
+      if (transaction.mode === 'FIAT_FALLBACK' || mode === 'buy' || mode === 'sell') {
+        await verifyAndReloadPaymentDetails(transaction.paymentReference);
+      } else {
+        await loadPaymentDetails(transaction.paymentReference);
+      }
+      await refreshSummary();
+      enqueueSnackbar(
+        mode === 'buy'
+          ? 'BTN buy request submitted successfully'
+          : mode === 'sell'
+            ? 'BTN sell request submitted successfully'
+            : 'BTN transfer request submitted successfully',
+        { variant: 'success' },
+      );
     } catch (error) {
       const fallbackMessage = mode === 'buy'
         ? 'Unable to submit BTN buy request'
-        : 'Unable to submit BTN sell request';
+        : mode === 'sell'
+          ? 'Unable to submit BTN sell request'
+          : 'Unable to submit BTN transfer request';
       const message = getErrorMessage(error, fallbackMessage);
       setSubmissionError(message);
       enqueueSnackbar(message, { variant: 'error' });
@@ -199,6 +318,49 @@ function PortalActionPage({ mode }) {
       },
     ]
     : [];
+  const transferSummaryRows = paymentDetails
+    ? [
+      { label: 'Transfer reference', value: paymentDetails.paymentReference },
+      { label: 'Status', value: paymentDetails.status || '-' },
+      { label: 'Transfer mode', value: paymentDetails.parsedPayload?.transferMode || '-' },
+      {
+        label: 'BTN amount',
+        value: `${paymentDetails.parsedPayload?.tokenSymbol || 'BTN'} ${formatAmount(paymentDetails.parsedPayload?.tokenAmount || 0)}`,
+      },
+      {
+        label: 'Recipient',
+        value: [
+          paymentDetails.parsedPayload?.recipientName,
+          paymentDetails.parsedPayload?.recipientCid && `CID ${paymentDetails.parsedPayload.recipientCid}`,
+        ].filter(Boolean).join(' - ') || '-',
+      },
+      {
+        label: paymentDetails.parsedPayload?.transferMode === 'WALLET' ? 'Recipient wallet' : 'Recipient payout account',
+        value:
+          paymentDetails.parsedPayload?.recipientWalletAddress
+          || paymentDetails.parsedPayload?.payoutAccountNumber
+          || '-',
+      },
+      {
+        label: paymentDetails.parsedPayload?.transferMode === 'WALLET' ? 'Transfer result' : 'Fiat payout / token return',
+        value: paymentDetails.parsedPayload?.fulfillment?.status || paymentDetails.statusMessage || '-',
+      },
+      {
+        label: 'Status message',
+        value: paymentDetails.parsedPayload?.fulfillment?.error
+          || paymentDetails.parsedPayload?.fulfillment?.statusMessage
+          || paymentDetails.statusMessage
+          || '-',
+      },
+    ]
+    : [];
+  const sellDelegation = summary?.customer?.sellDelegation || null;
+  const sellDelegationReady = Boolean(sellDelegation?.sufficient || sellDelegation?.active);
+  const sellDelegationMetadataReady = Boolean(
+    summary?.customer?.sellDelegation?.tokenAccountAddress
+      && summary?.customer?.sellDelegation?.delegateWalletAddress
+      && (summary?.customer?.primaryWalletAddress || customer?.wallets?.[0]?.walletAddress),
+  );
 
   return (
     <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
@@ -213,6 +375,49 @@ function PortalActionPage({ mode }) {
               {mode === 'buy' ? 'Linked funding account' : 'Linked payout account'}
             </p>
             <p className="mt-2 font-mono text-white">{customer.linkedBankAccountNumber}</p>
+          </div>
+        ) : null}
+
+        {(mode === 'sell' || mode === 'transfer') ? (
+          <div className="mt-6 rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-emerald-300">
+              {mode === 'sell' ? 'Automatic sell delegation' : 'Automatic transfer delegation'}
+            </p>
+            <p className="mt-2 text-sm leading-7 text-zinc-300">
+              {sellDelegationReady
+                ? `This customer wallet has already delegated BTN transfer authority for automatic ${mode} execution.`
+                : `Enable a one-time wallet delegation so BTN can be moved automatically during ${mode} execution.`}
+            </p>
+            <div className="mt-3 grid gap-2 text-sm text-zinc-400">
+              <p>Customer wallet: <span className="break-all text-zinc-200">{summary?.customer?.primaryWalletAddress || '-'}</span></p>
+              <p>Delegate wallet: <span className="break-all text-zinc-200">{sellDelegation?.delegateWalletAddress || '-'}</span></p>
+              <p>Delegated amount: <span className="text-zinc-200">{sellDelegation?.delegatedAmount || '0'}</span></p>
+              {sellDelegation?.warning ? (
+                <p className="text-amber-200/80">{sellDelegation.warning}</p>
+              ) : null}
+            </div>
+            <div className="mt-4">
+              <Button
+                className="w-full"
+                disabled={isApprovingDelegation || !solanaWallet.available || !summary}
+                onClick={handleApproveSellDelegation}
+                type="button"
+                variant={sellDelegationReady ? 'outline' : 'secondary'}
+              >
+                {isApprovingDelegation
+                  ? 'Approving...'
+                  : !summary
+                    ? 'Loading wallet metadata...'
+                    : sellDelegationReady
+                      ? 'Refresh delegation'
+                      : `Enable Automatic ${mode === 'sell' ? 'Sell' : 'Transfer'}`}
+              </Button>
+            </div>
+            {!sellDelegationMetadataReady && summary ? (
+              <p className="mt-3 text-sm text-amber-200/80">
+                Wallet delegation metadata is still loading. If this persists after a refresh, the customer wallet may not have a BTN token account yet.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -247,18 +452,24 @@ function PortalActionPage({ mode }) {
         <Card className="rounded-[1.75rem] border-emerald-400/15 bg-emerald-400/[0.06]">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">Integration boundary</p>
           <p className="mt-3 text-sm leading-7 text-zinc-200">
-            Buy now initiates customer funding, verifies status, and delivers BTN from the distribution account. Sell now initiates fiat payout, verifies status, and records the required BTN return details. Redeem and transfer remain UI-only placeholders until their backend orchestration is added.
+            Buy initiates customer funding, verifies status, and delivers BTN from the distribution account. Sell pays out fiat and returns BTN automatically from the delegated customer wallet. Transfer either moves BTN directly to another customer wallet or falls back to fiat payout plus BTN return to distribution.
           </p>
         </Card>
 
         <Card className="rounded-[1.75rem] border-white/10 bg-zinc-950/70">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
-            {mode === 'buy' ? 'Latest payment status' : mode === 'sell' ? 'Latest sell status' : 'Latest submission preview'}
+            {mode === 'buy'
+              ? 'Latest payment status'
+              : mode === 'sell'
+                ? 'Latest sell status'
+                : mode === 'transfer'
+                  ? 'Latest transfer status'
+                  : 'Latest submission preview'}
           </p>
 
-          {(mode === 'buy' || mode === 'sell') && paymentDetails ? (
+          {(mode === 'buy' || mode === 'sell' || mode === 'transfer') && paymentDetails ? (
             <div className="mt-4 grid gap-3">
-              {(mode === 'buy' ? buySummaryRows : sellSummaryRows).map((row) => (
+              {(mode === 'buy' ? buySummaryRows : mode === 'sell' ? sellSummaryRows : transferSummaryRows).map((row) => (
                 <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3" key={row.label}>
                   <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">{row.label}</p>
                   <p className="mt-1 break-all text-sm text-white">{row.value || '-'}</p>
@@ -279,8 +490,10 @@ function PortalActionPage({ mode }) {
               {mode === 'buy'
                 ? 'After submission, the generated payment reference and current gateway-tracked status will appear here when the gateway callback updates the backend.'
                 : mode === 'sell'
-                  ? 'After submission, the generated payout reference, payout status, and BTN return destination details will appear here.'
-                : 'Submitted customer actions will appear here so the flow can be reviewed before wiring to backend APIs.'}
+                  ? 'After submission, the generated payout reference, payout status, and BTN return details will appear here.'
+                  : mode === 'transfer'
+                    ? 'After submission, the portal will show whether the backend completed a direct wallet transfer or switched to fiat fallback for the recipient.'
+                    : 'Submitted customer actions will appear here so the flow can be reviewed before wiring to backend APIs.'}
             </p>
           )}
         </Card>

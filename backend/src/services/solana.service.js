@@ -936,6 +936,177 @@ async function transferFromBankDistributionToWallet({ bankId, mintAddress, amoun
   };
 }
 
+async function getCustomerSellDelegationStatus({ mintAddress, walletAddress, requiredAmount = null }) {
+  const makerKeypair = getOptionalMakerKeypair();
+  if (!makerKeypair) {
+    return {
+      configured: false,
+      active: false,
+      sufficient: false,
+      requiredAmount: requiredAmount ? toRawAmount(requiredAmount) : null,
+      delegatedAmount: '0',
+      delegateWalletAddress: null,
+      tokenAccountAddress: null,
+      warning: 'SOLANA_MAKER_KEYPAIR_PATH is not configured for automatic sell delegation.',
+    };
+  }
+
+  const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+  const walletPublicKey = parsePublicKey(walletAddress, 'walletAddress');
+  const sourceTokenAccount = getOwnerAta(mintPublicKey, walletPublicKey);
+  const account = await getAccount(getConnection(), sourceTokenAccount, env.SOLANA_COMMITMENT);
+  const delegatedAmount = account.delegatedAmount?.toString() || '0';
+  const requiredRawAmount = requiredAmount ? toRawAmount(requiredAmount) : null;
+  const active = account.delegate?.toBase58() === makerKeypair.publicKey.toBase58();
+  const sufficient = active && (
+    requiredRawAmount === null
+      ? BigInt(delegatedAmount) > 0n
+      : BigInt(delegatedAmount) >= BigInt(requiredRawAmount)
+  );
+
+  return {
+    configured: true,
+    active,
+    sufficient,
+    requiredAmount: requiredRawAmount,
+    delegatedAmount,
+    delegateWalletAddress: makerKeypair.publicKey.toBase58(),
+    tokenAccountAddress: sourceTokenAccount.toBase58(),
+  };
+}
+
+async function transferFromCustomerWalletToDistribution({ bankId, mintAddress, amount, sourceWalletAddress }) {
+  const makerKeypair = getOptionalMakerKeypair();
+  if (!makerKeypair) {
+    throw new ApiError(500, 'SOLANA_MAKER_KEYPAIR_PATH must be configured for automatic customer sell transfers');
+  }
+
+  const distributionTokenAccount = await resolveBankDistributionTokenAccount(bankId, mintAddress);
+  const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+  const sourceWalletPublicKey = parsePublicKey(sourceWalletAddress, 'sourceWalletAddress');
+  const sourceTokenAccount = getOwnerAta(mintPublicKey, sourceWalletPublicKey);
+  const destinationTokenAccount = parsePublicKey(
+    distributionTokenAccount.tokenAccountAddress,
+    'distributionTokenAccountAddress',
+  );
+  const rawAmount = toBigIntAmount(amount);
+  const sourceAccount = await getAccount(getConnection(), sourceTokenAccount, env.SOLANA_COMMITMENT);
+
+  if (sourceAccount.amount < rawAmount) {
+    throw new ApiError(
+      409,
+      `Customer wallet has insufficient BTN balance. Available ${sourceAccount.amount.toString()}, required ${rawAmount.toString()}.`,
+    );
+  }
+
+  const delegatedAmount = sourceAccount.delegatedAmount || 0n;
+  const hasValidDelegate =
+    sourceAccount.delegate
+    && sourceAccount.delegate.toBase58() === makerKeypair.publicKey.toBase58()
+    && delegatedAmount >= rawAmount;
+
+  if (!hasValidDelegate) {
+    throw new ApiError(
+      409,
+      'Customer wallet has not delegated enough BTN allowance for automatic sell execution.',
+    );
+  }
+
+  const transferSignature = await transferTokens(
+    getConnection(),
+    makerKeypair,
+    sourceTokenAccount,
+    destinationTokenAccount,
+    makerKeypair,
+    rawAmount,
+    [],
+    {
+      commitment: env.SOLANA_COMMITMENT,
+      preflightCommitment: env.SOLANA_COMMITMENT,
+    },
+  );
+
+  return {
+    bankId,
+    mintAddress,
+    amount: rawAmount.toString(),
+    txSignature: transferSignature,
+    explorerUrl: buildExplorerUrl(transferSignature),
+    sourceWalletAddress: sourceWalletPublicKey.toBase58(),
+    sourceTokenAccount: sourceTokenAccount.toBase58(),
+    destinationTokenAccount: destinationTokenAccount.toBase58(),
+    delegateWalletAddress: makerKeypair.publicKey.toBase58(),
+    delegatedAmount: delegatedAmount.toString(),
+  };
+}
+
+async function transferFromCustomerWalletToWallet({ mintAddress, amount, sourceWalletAddress, destinationWalletAddress }) {
+  const makerKeypair = getOptionalMakerKeypair();
+  if (!makerKeypair) {
+    throw new ApiError(500, 'SOLANA_MAKER_KEYPAIR_PATH must be configured for automatic customer transfers');
+  }
+
+  const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+  const sourceWalletPublicKey = parsePublicKey(sourceWalletAddress, 'sourceWalletAddress');
+  const destinationWalletPublicKey = parsePublicKey(destinationWalletAddress, 'destinationWalletAddress');
+  const sourceTokenAccount = getOwnerAta(mintPublicKey, sourceWalletPublicKey);
+  const destinationTokenAccount = await getOrCreateAssociatedTokenAccount(
+    getConnection(),
+    makerKeypair,
+    mintPublicKey,
+    destinationWalletPublicKey,
+  );
+  const rawAmount = toBigIntAmount(amount);
+  const sourceAccount = await getAccount(getConnection(), sourceTokenAccount, env.SOLANA_COMMITMENT);
+
+  if (sourceAccount.amount < rawAmount) {
+    throw new ApiError(
+      409,
+      `Customer wallet has insufficient BTN balance. Available ${sourceAccount.amount.toString()}, required ${rawAmount.toString()}.`,
+    );
+  }
+
+  const delegatedAmount = sourceAccount.delegatedAmount || 0n;
+  const hasValidDelegate =
+    sourceAccount.delegate
+    && sourceAccount.delegate.toBase58() === makerKeypair.publicKey.toBase58()
+    && delegatedAmount >= rawAmount;
+
+  if (!hasValidDelegate) {
+    throw new ApiError(
+      409,
+      'Customer wallet has not delegated enough BTN allowance for automatic transfer execution.',
+    );
+  }
+
+  const transferSignature = await transferTokens(
+    getConnection(),
+    makerKeypair,
+    sourceTokenAccount,
+    destinationTokenAccount.address,
+    makerKeypair,
+    rawAmount,
+    [],
+    {
+      commitment: env.SOLANA_COMMITMENT,
+      preflightCommitment: env.SOLANA_COMMITMENT,
+    },
+  );
+
+  return {
+    mintAddress,
+    amount: rawAmount.toString(),
+    txSignature: transferSignature,
+    explorerUrl: buildExplorerUrl(transferSignature),
+    sourceWalletAddress: sourceWalletPublicKey.toBase58(),
+    sourceTokenAccount: sourceTokenAccount.toBase58(),
+    destinationWalletAddress: destinationWalletPublicKey.toBase58(),
+    destinationTokenAccount: destinationTokenAccount.address.toBase58(),
+    delegateWalletAddress: makerKeypair.publicKey.toBase58(),
+    delegatedAmount: delegatedAmount.toString(),
+  };
+}
+
 async function assertCheckerConfigured(configAddress, checkerKeypair) {
   const checkerProgram = getProgram(checkerKeypair);
   const config = await checkerProgram.account.config.fetch(configAddress);
@@ -1875,6 +2046,7 @@ module.exports = {
   getMetadataProgramId: () => METADATA_PROGRAM_ID,
   getProgramId,
   hydrateManagedToken,
+  getCustomerSellDelegationStatus,
   getTokenAccountBalance,
   getWalletTokenBalances,
   buildExplorerUrl,
@@ -1882,6 +2054,8 @@ module.exports = {
   resolveBankTreasuryTokenAccount,
   resolveBankDistributionTokenAccount,
   mintToBankTreasury,
+  transferFromCustomerWalletToWallet,
+  transferFromCustomerWalletToDistribution,
   transferFromBankTreasuryToWallet,
   transferFromBankDistributionToWallet,
   ensureManagedTokenMetadata,

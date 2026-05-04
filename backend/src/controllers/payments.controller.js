@@ -205,6 +205,16 @@ async function initiateCustomerSellBtn(req, res) {
   });
 }
 
+async function initiateCustomerTransferBtn(req, res) {
+  const result = await paymentsService.initiateCustomerTransferBtn(req.user.id, req.validated.body);
+
+  return successResponse(res, {
+    statusCode: 201,
+    message: 'Customer BTN transfer initiated successfully',
+    data: result,
+  });
+}
+
 async function getCustomerPaymentTransaction(req, res) {
   const result = await paymentsService.getCustomerPaymentTransaction(req.user.id, req.params.paymentReference);
 
@@ -240,6 +250,7 @@ module.exports = {
   ingestPaymentCallback,
   initiateCustomerBuyBtn,
   initiateCustomerSellBtn,
+  initiateCustomerTransferBtn,
   initiateIntraTransaction,
   initiateGatewayIntraTransaction,
   inquireGatewayBeneficiaryAccount,
