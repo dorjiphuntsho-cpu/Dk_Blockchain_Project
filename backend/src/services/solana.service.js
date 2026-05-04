@@ -19,11 +19,12 @@ const {
   getAssociatedTokenAddressSync,
   getMint,
   getOrCreateAssociatedTokenAccount,
+  transfer: transferTokens,
 } = require('@solana/spl-token');
 const env = require('../config/env');
 const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
-const { EXECUTION_MODES, TOKEN_REQUEST_TYPES } = require('../utils/enums');
+const { BANK_TOKEN_ACCOUNT_PURPOSES, EXECUTION_MODES, TOKEN_REQUEST_TYPES } = require('../utils/enums');
 
 const projectRoot = path.resolve(__dirname, '../../..');
 const METADATA_PROGRAM_ID = 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s';
@@ -154,6 +155,14 @@ function getOptionalMakerKeypair() {
   return getMakerKeypair();
 }
 
+function getOptionalTreasuryOwnerKeypair() {
+  if (!env.SOLANA_TREASURY_OWNER_KEYPAIR_PATH) {
+    return null;
+  }
+
+  return loadKeypair('Treasury owner', env.SOLANA_TREASURY_OWNER_KEYPAIR_PATH);
+}
+
 function getCheckerKeypair() {
   return loadKeypair('Checker', env.SOLANA_CHECKER_KEYPAIR_PATH);
 }
@@ -252,14 +261,17 @@ function parsePublicKey(value, label) {
 function toRawAmount(value) {
   const normalized = String(value).trim();
 
-  if (!/^\d+(\.0+)?$/.test(normalized)) {
-    throw new ApiError(
-      400,
-      'Only whole-number token amounts are supported by the current local-validator integration',
-    );
+  if (!/^\d+(\.\d+)?$/.test(normalized)) {
+    throw new ApiError(400, 'Token amount must be a valid positive number');
   }
 
-  return normalized.split('.')[0];
+  const rounded = Math.round(Number(normalized));
+
+  if (!Number.isFinite(rounded) || rounded < 0) {
+    throw new ApiError(400, 'Token amount must be a valid positive number');
+  }
+
+  return String(rounded);
 }
 
 function toAnchorAmount(value) {
@@ -594,12 +606,14 @@ async function autoProvisionIssuerTreasuryForMint(mintAddress) {
 
     return tx.bankTokenAccount.upsert({
       where: {
-        bankId_mintAddress: {
+        bankId_mintAddress_purpose: {
           bankId: issuerBank.id,
           mintAddress,
+          purpose: BANK_TOKEN_ACCOUNT_PURPOSES.TREASURY,
         },
       },
       update: {
+        purpose: BANK_TOKEN_ACCOUNT_PURPOSES.TREASURY,
         treasuryWalletAddress: issuerBank.treasuryWalletAddress,
         tokenAccountAddress,
         isPrimary: true,
@@ -608,6 +622,7 @@ async function autoProvisionIssuerTreasuryForMint(mintAddress) {
       create: {
         bankId: issuerBank.id,
         mintAddress,
+        purpose: BANK_TOKEN_ACCOUNT_PURPOSES.TREASURY,
         treasuryWalletAddress: issuerBank.treasuryWalletAddress,
         tokenAccountAddress,
         isPrimary: true,
@@ -645,11 +660,12 @@ async function autoProvisionIssuerTreasuryForMint(mintAddress) {
   };
 }
 
-async function resolveBankTreasuryTokenAccount(bankId, mintAddress) {
+async function resolveBankTokenAccountByPurpose(bankId, mintAddress, purpose) {
   const bankTokenAccount = await prisma.bankTokenAccount.findFirst({
     where: {
       bankId,
       mintAddress,
+      purpose,
       isActive: true,
     },
     orderBy: [
@@ -659,10 +675,21 @@ async function resolveBankTreasuryTokenAccount(bankId, mintAddress) {
   });
 
   if (!bankTokenAccount) {
-    throw new ApiError(404, `No active bank token account found for bank ${bankId} and mint ${mintAddress}`);
+    throw new ApiError(
+      404,
+      `No active ${String(purpose || '').toLowerCase()} bank token account found for bank ${bankId} and mint ${mintAddress}`,
+    );
   }
 
   return bankTokenAccount;
+}
+
+async function resolveBankTreasuryTokenAccount(bankId, mintAddress) {
+  return resolveBankTokenAccountByPurpose(bankId, mintAddress, BANK_TOKEN_ACCOUNT_PURPOSES.TREASURY);
+}
+
+async function resolveBankDistributionTokenAccount(bankId, mintAddress) {
+  return resolveBankTokenAccountByPurpose(bankId, mintAddress, BANK_TOKEN_ACCOUNT_PURPOSES.DISTRIBUTION);
 }
 
 async function mintToBankTreasury({ bankId, mintAddress, amount }) {
@@ -739,6 +766,173 @@ async function mintToBankTreasury({ bankId, mintAddress, amount }) {
     tokenAuthority: tokenAuthority.toBase58(),
     destinationTokenAccount: destinationTokenAccount.toBase58(),
     treasuryWalletAddress: treasuryTokenAccount.treasuryWalletAddress,
+  };
+}
+
+async function transferFromBankTreasuryToWallet({ bankId, mintAddress, amount, destinationWalletAddress }) {
+  const makerKeypair = getOptionalMakerKeypair();
+  const checkerKeypair = getOptionalCheckerKeypair();
+
+  if (!makerKeypair) {
+    throw new ApiError(
+      500,
+      'SOLANA_MAKER_KEYPAIR_PATH must be configured for backend-managed treasury transfers',
+    );
+  }
+
+  if (!checkerKeypair) {
+    throw new ApiError(
+      500,
+      'SOLANA_CHECKER_KEYPAIR_PATH must be configured for backend-managed treasury transfers',
+    );
+  }
+
+  const treasuryTokenAccount = await resolveBankTreasuryTokenAccount(bankId, mintAddress);
+  const configAddress = requireConfigAddress();
+  const tokenAuthority = getTokenAuthority(configAddress);
+  const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+  const sourceTokenAccount = parsePublicKey(
+    treasuryTokenAccount.tokenAccountAddress,
+    'tokenAccountAddress',
+  );
+  const destinationWalletPublicKey = parsePublicKey(destinationWalletAddress, 'destinationWalletAddress');
+  const destinationTokenAccount = await getOrCreateAssociatedTokenAccount(
+    getConnection(),
+    makerKeypair,
+    mintPublicKey,
+    destinationWalletPublicKey,
+  );
+  const requestKeypair = Keypair.generate();
+  const makerProgram = getProgram(makerKeypair);
+  const checkerProgram = getProgram(checkerKeypair);
+
+  await assertCheckerConfigured(configAddress, checkerKeypair);
+
+  const sourceAccount = await getAccount(getConnection(), sourceTokenAccount, env.SOLANA_COMMITMENT);
+  const rawAmount = toBigIntAmount(amount);
+
+  if (sourceAccount.amount < rawAmount) {
+    throw new ApiError(
+      409,
+      `DK treasury has insufficient BTN inventory. Available ${sourceAccount.amount.toString()}, required ${rawAmount.toString()}.`,
+    );
+  }
+
+  const treasuryOwner = resolveTreasuryOwnerKeypair(treasuryTokenAccount.treasuryWalletAddress);
+  const delegation = await ensureTreasuryDelegation({
+    sourceTokenAccount,
+    tokenAuthority,
+    treasuryOwnerKeypair: treasuryOwner.keypair,
+    amount: rawAmount,
+  });
+
+  const anchorAmount = new anchor.BN(rawAmount.toString());
+
+  const createSignature = await makerProgram.methods
+    .createTransferRequest(anchorAmount)
+    .accounts({
+      request: requestKeypair.publicKey,
+      config: configAddress,
+      mint: mintPublicKey,
+      sourceTokenAccount,
+      destinationTokenAccount: destinationTokenAccount.address,
+      maker: makerKeypair.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([makerKeypair, requestKeypair])
+    .rpc();
+
+  const approveSignature = await checkerProgram.methods
+    .approveRequest()
+    .accounts({
+      request: requestKeypair.publicKey,
+      config: configAddress,
+      mint: mintPublicKey,
+      sourceTokenAccount,
+      destinationTokenAccount: destinationTokenAccount.address,
+      tokenAuthority,
+      checker: checkerKeypair.publicKey,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .signers([checkerKeypair])
+    .rpc();
+
+  return {
+    bankId,
+    mintAddress,
+    amount: rawAmount.toString(),
+    onChainRequestAddress: requestKeypair.publicKey.toBase58(),
+    createSignature,
+    approveSignature,
+    txSignature: approveSignature,
+    explorerUrl: buildExplorerUrl(approveSignature),
+    tokenAuthority: tokenAuthority.toBase58(),
+    sourceTokenAccount: sourceTokenAccount.toBase58(),
+    destinationWalletAddress: destinationWalletPublicKey.toBase58(),
+    destinationTokenAccount: destinationTokenAccount.address.toBase58(),
+    treasuryWalletAddress: treasuryTokenAccount.treasuryWalletAddress,
+    treasuryOwnerRole: treasuryOwner.role,
+    delegation,
+  };
+}
+
+async function transferFromBankDistributionToWallet({ bankId, mintAddress, amount, destinationWalletAddress }) {
+  const distributionTokenAccount = await resolveBankDistributionTokenAccount(bankId, mintAddress);
+  const distributionOwner = resolveTreasuryOwnerKeypair(distributionTokenAccount.treasuryWalletAddress);
+  const payerKeypair = distributionOwner.keypair;
+  const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+  const sourceTokenAccount = parsePublicKey(
+    distributionTokenAccount.tokenAccountAddress,
+    'tokenAccountAddress',
+  );
+  const destinationWalletPublicKey = parsePublicKey(destinationWalletAddress, 'destinationWalletAddress');
+  const destinationTokenAccount = await getOrCreateAssociatedTokenAccount(
+    getConnection(),
+    payerKeypair,
+    mintPublicKey,
+    destinationWalletPublicKey,
+  );
+
+  const sourceAccount = await getAccount(getConnection(), sourceTokenAccount, env.SOLANA_COMMITMENT);
+  const rawAmount = toBigIntAmount(amount);
+
+  if (sourceAccount.amount < rawAmount) {
+    throw new ApiError(
+      409,
+      `Distribution account has insufficient BTN inventory. Available ${sourceAccount.amount.toString()}, required ${rawAmount.toString()}.`,
+    );
+  }
+
+  const transferSignature = await transferTokens(
+    getConnection(),
+    payerKeypair,
+    sourceTokenAccount,
+    destinationTokenAccount.address,
+    distributionOwner.keypair,
+    rawAmount,
+    [],
+    {
+      commitment: env.SOLANA_COMMITMENT,
+      preflightCommitment: env.SOLANA_COMMITMENT,
+    },
+  );
+
+  return {
+    bankId,
+    mintAddress,
+    amount: rawAmount.toString(),
+    onChainRequestAddress: null,
+    createSignature: null,
+    approveSignature: null,
+    txSignature: transferSignature,
+    explorerUrl: buildExplorerUrl(transferSignature),
+    tokenAuthority: null,
+    sourceTokenAccount: sourceTokenAccount.toBase58(),
+    destinationWalletAddress: destinationWalletPublicKey.toBase58(),
+    destinationTokenAccount: destinationTokenAccount.address.toBase58(),
+    distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
+    distributionOwnerRole: distributionOwner.role,
+    delegation: null,
   };
 }
 
@@ -1168,6 +1362,72 @@ async function approveSourceDelegation({ sourceTokenAccount, tokenAuthority, mak
   );
 }
 
+function resolveTreasuryOwnerKeypair(expectedTreasuryWalletAddress) {
+  const expectedWallet = String(expectedTreasuryWalletAddress || '').trim();
+
+  if (!expectedWallet) {
+    throw new ApiError(500, 'Treasury wallet address is not configured for the selected treasury token account');
+  }
+
+  const candidates = [
+    ['maker', getOptionalMakerKeypair()],
+    ['treasury owner', getOptionalTreasuryOwnerKeypair()],
+    ['admin', getAdminKeypair()],
+    ['checker', getOptionalCheckerKeypair()],
+  ].filter(([, keypair]) => Boolean(keypair));
+
+  const match = candidates.find(([, keypair]) => keypair.publicKey.toBase58() === expectedWallet);
+  if (match) {
+    return {
+      role: match[0],
+      keypair: match[1],
+    };
+  }
+
+  throw new ApiError(
+    500,
+    `No configured signer matches treasury wallet ${expectedWallet}. Set SOLANA_TREASURY_OWNER_KEYPAIR_PATH to that wallet's keypair.`,
+  );
+}
+
+async function ensureTreasuryDelegation({
+  sourceTokenAccount,
+  tokenAuthority,
+  treasuryOwnerKeypair,
+  amount,
+}) {
+  const currentAccount = await getAccount(getConnection(), sourceTokenAccount, env.SOLANA_COMMITMENT);
+  const delegatedAmount = currentAccount.delegatedAmount || 0n;
+  const hasValidDelegate =
+    currentAccount.delegate
+    && currentAccount.delegate.toBase58() === tokenAuthority.toBase58()
+    && delegatedAmount >= amount;
+
+  if (hasValidDelegate) {
+    return {
+      delegated: false,
+      delegate: currentAccount.delegate.toBase58(),
+      delegatedAmount: delegatedAmount.toString(),
+    };
+  }
+
+  await approveSourceDelegation({
+    sourceTokenAccount,
+    tokenAuthority,
+    makerKeypair: treasuryOwnerKeypair,
+    payerKeypair: treasuryOwnerKeypair,
+    amount,
+  });
+
+  const refreshedAccount = await getAccount(getConnection(), sourceTokenAccount, env.SOLANA_COMMITMENT);
+
+  return {
+    delegated: true,
+    delegate: refreshedAccount.delegate?.toBase58() || null,
+    delegatedAmount: refreshedAccount.delegatedAmount?.toString() || '0',
+  };
+}
+
 function resolveSourceTokenAccountAddress(tokenRequest, mintAddress) {
   if (tokenRequest.sourceTokenAccountAddress) {
     return parsePublicKey(tokenRequest.sourceTokenAccountAddress, 'sourceTokenAccountAddress');
@@ -1585,6 +1845,18 @@ async function getWalletTokenBalances(ownerAddress) {
     .sort((left, right) => left.mintAddress.localeCompare(right.mintAddress));
 }
 
+async function getTokenAccountBalance(tokenAccountAddress) {
+  const tokenAccountPublicKey = parsePublicKey(tokenAccountAddress, 'tokenAccountAddress');
+  const account = await getAccount(getConnection(), tokenAccountPublicKey, env.SOLANA_COMMITMENT);
+
+  return {
+    tokenAccountAddress: tokenAccountPublicKey.toBase58(),
+    mintAddress: account.mint.toBase58(),
+    ownerAddress: account.owner.toBase58(),
+    rawAmount: account.amount.toString(),
+  };
+}
+
 module.exports = {
   addChecker,
   addTreasuryAccount,
@@ -1603,10 +1875,15 @@ module.exports = {
   getMetadataProgramId: () => METADATA_PROGRAM_ID,
   getProgramId,
   hydrateManagedToken,
+  getTokenAccountBalance,
   getWalletTokenBalances,
   buildExplorerUrl,
+  resolveBankTokenAccountByPurpose,
   resolveBankTreasuryTokenAccount,
+  resolveBankDistributionTokenAccount,
   mintToBankTreasury,
+  transferFromBankTreasuryToWallet,
+  transferFromBankDistributionToWallet,
   ensureManagedTokenMetadata,
   validateRecordedOnChainRequest,
   verifyConfirmedTransaction,

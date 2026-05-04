@@ -5,6 +5,7 @@ const bankAccountOrderBy = [
 ];
 
 const bankTokenAccountOrderBy = [
+  { purpose: 'asc' },
   { isPrimary: 'desc' },
   { createdAt: 'asc' },
 ];

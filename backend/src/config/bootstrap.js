@@ -65,11 +65,31 @@ function runPrismaCommand(args) {
   });
 }
 
+function isWindowsPrismaEngineLockError(error) {
+  const message = String(error?.message || '');
+
+  return process.platform === 'win32'
+    && message.includes('EPERM: operation not permitted, rename')
+    && message.includes('node_modules')
+    && message.includes('.prisma')
+    && message.includes('query_engine');
+}
+
 async function bootstrapApplication() {
   if (env.AUTO_GENERATE_PRISMA) {
     if (shouldRegeneratePrismaClient()) {
       logger.info('Generating Prisma client...');
-      await runPrismaCommand(['generate']);
+      try {
+        await runPrismaCommand(['generate']);
+      } catch (error) {
+        if (hasGeneratedPrismaClient() && isWindowsPrismaEngineLockError(error)) {
+          logger.warn(
+            'Prisma client regeneration was skipped because the Windows query engine DLL is locked by another process. Reusing the existing generated client for this startup.',
+          );
+        } else {
+          throw error;
+        }
+      }
     } else {
       logger.info('Prisma client already up to date. Skipping generate.');
     }

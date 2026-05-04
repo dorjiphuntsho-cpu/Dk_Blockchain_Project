@@ -36,10 +36,6 @@ pub fn handler(ctx: Context<CreateMintRequest>, amount: u64) -> Result<()> {
             .has_treasury_account(&ctx.accounts.destination_token_account.key()),
         ErrorCode::UnapprovedTreasuryAccount
     );
-    require!(
-        ctx.accounts.destination_token_account.owner == ctx.accounts.maker.key(),
-        ErrorCode::InvalidDestinationAccount
-    );
 
     let request = &mut ctx.accounts.request;
 

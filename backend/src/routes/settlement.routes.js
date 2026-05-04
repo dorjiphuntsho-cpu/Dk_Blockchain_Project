@@ -154,7 +154,7 @@ router.post(
 );
 router.post(
   '/:id/route',
-  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.EXECUTOR),
+  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.CHECKER, ROLE_NAMES.EXECUTOR),
   validate(settlementIdParamSchema),
   asyncHandler(settlementController.routeSettlement),
 );

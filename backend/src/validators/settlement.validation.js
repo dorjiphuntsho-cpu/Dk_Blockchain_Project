@@ -36,7 +36,7 @@ const baseSettlementBody = {
 const createReserveMintRequestSchema = z.object({
   body: z.object({
     sourceBankId: uuidSchema,
-    reserveLedgerId: uuidSchema,
+    reserveLedgerId: uuidSchema.nullable().optional(),
     tokenMintAddress: tokenMintAddressSchema,
     amount: numericStringSchema,
     transferPurpose: optionalTrimmedString.nullable().optional(),
@@ -48,7 +48,7 @@ const createReserveMintRequestSchema = z.object({
 const createReplenishmentMintRequestSchema = z.object({
   body: z.object({
     sourceBankId: uuidSchema,
-    reserveLedgerId: uuidSchema,
+    reserveLedgerId: uuidSchema.nullable().optional(),
     tokenMintAddress: tokenMintAddressSchema,
     amount: numericStringSchema,
     transferPurpose: optionalTrimmedString.nullable().optional(),

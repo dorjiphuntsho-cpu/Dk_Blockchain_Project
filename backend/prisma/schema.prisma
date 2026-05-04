@@ -83,11 +83,20 @@ enum BankAccountType {
   OTHER
 }
 
+enum BankTokenAccountPurpose {
+  TREASURY
+  DISTRIBUTION
+}
+
 model User {
   id                   String         @id @default(uuid()) @db.Uuid
   fullName             String
   email                String         @unique
   passwordHash         String
+  cid                  String?        @unique
+  customerType         String?
+  linkedBankAccountNumber String?
+  mpinHash             String?
   isActive             Boolean        @default(true)
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
@@ -151,6 +160,7 @@ model BankTokenAccount {
   id                   String    @id @default(uuid()) @db.Uuid
   bankId               String    @db.Uuid
   mintAddress          String
+  purpose              BankTokenAccountPurpose @default(TREASURY)
   treasuryWalletAddress String
   tokenAccountAddress  String    @unique
   isPrimary            Boolean   @default(true)
@@ -160,9 +170,10 @@ model BankTokenAccount {
   updatedAt            DateTime  @updatedAt
   bank                 Bank      @relation(fields: [bankId], references: [id], onDelete: Cascade)
 
-  @@unique([bankId, mintAddress])
+  @@unique([bankId, mintAddress, purpose])
   @@index([bankId])
   @@index([mintAddress])
+  @@index([purpose])
   @@index([treasuryWalletAddress])
   @@map("bank_token_accounts")
 }

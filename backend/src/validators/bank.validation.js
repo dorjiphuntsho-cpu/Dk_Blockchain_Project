@@ -12,6 +12,7 @@ const {
 } = require('../utils/validation');
 
 const bankAccountTypeEnum = z.enum(['RESERVE', 'BIPS_SETTLEMENT', 'OTHER']);
+const bankTokenAccountPurposeEnum = z.enum(['TREASURY', 'DISTRIBUTION']);
 
 const listBanksQuerySchema = z.object({
   body: z.object({}).optional(),
@@ -116,6 +117,7 @@ const updateBankAccountSchema = z.object({
 const createBankTokenAccountSchema = z.object({
   body: z.object({
     mintAddress: tokenMintAddressSchema,
+    purpose: bankTokenAccountPurposeEnum.optional().default('TREASURY'),
     treasuryWalletAddress: walletAddressSchema,
     tokenAccountAddress: walletAddressSchema,
     isPrimary: z.boolean().optional().default(true),
@@ -131,6 +133,7 @@ const createBankTokenAccountSchema = z.object({
 const updateBankTokenAccountSchema = z.object({
   body: z
     .object({
+      purpose: bankTokenAccountPurposeEnum.optional(),
       treasuryWalletAddress: walletAddressSchema.optional(),
       tokenAccountAddress: walletAddressSchema.optional(),
       isPrimary: z.boolean().optional(),

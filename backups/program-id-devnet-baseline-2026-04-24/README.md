@@ -49,3 +49,5 @@ This backup restores code and env configuration only. It does not roll back:
 - devnet mints
 - database resets already applied
 
+//deployment command
+anchor deploy --provider.cluster devnet --provider.wallet /mnt/c/Users/itand/.config/solana/admin-devnet.json

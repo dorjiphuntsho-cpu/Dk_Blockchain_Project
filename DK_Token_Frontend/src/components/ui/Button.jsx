@@ -17,11 +17,11 @@ const SIZES = {
 };
 
 const Button = forwardRef(function Button(
-  { className, variant = 'primary', size = 'md', type = 'button', disabled = false, ...props },
+  { as: Component = 'button', className, variant = 'primary', size = 'md', type = 'button', disabled = false, ...props },
   ref,
 ) {
   return (
-    <button
+    <Component
       ref={ref}
       className={cn(
         'inline-flex items-center justify-center gap-2 rounded-md font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-60',
@@ -29,8 +29,8 @@ const Button = forwardRef(function Button(
         SIZES[size],
         className,
       )}
-      disabled={disabled}
-      type={type}
+      disabled={Component === 'button' ? disabled : undefined}
+      type={Component === 'button' ? type : undefined}
       {...props}
     />
   );

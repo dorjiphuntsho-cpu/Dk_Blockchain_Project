@@ -14,6 +14,10 @@ const createUserSchema = z.object({
     fullName: requiredTrimmedString.min(3, 'Full name must be at least 3 characters'),
     email: requiredTrimmedString.email('Invalid email format'),
     password: requiredTrimmedString.min(8, 'Password must be at least 8 characters'),
+    cid: requiredTrimmedString.regex(/^\d{11}$/, 'CID must be 11 digits').optional(),
+    customerType: requiredTrimmedString.optional(),
+    linkedBankAccountNumber: requiredTrimmedString.optional(),
+    mpin: requiredTrimmedString.regex(/^\d{4,6}$/, 'MPIN must be 4 to 6 digits').optional(),
     roles: z
       .array(roleEnum)
       .optional()
@@ -53,6 +57,10 @@ const updateUserSchema = z.object({
       fullName: requiredTrimmedString.min(3).optional(),
       email: requiredTrimmedString.email('Invalid email format').optional(),
       password: requiredTrimmedString.min(8, 'Password must be at least 8 characters').optional(),
+      cid: requiredTrimmedString.regex(/^\d{11}$/, 'CID must be 11 digits').nullable().optional(),
+      customerType: requiredTrimmedString.nullable().optional(),
+      linkedBankAccountNumber: requiredTrimmedString.nullable().optional(),
+      mpin: requiredTrimmedString.regex(/^\d{4,6}$/, 'MPIN must be 4 to 6 digits').optional(),
     })
     .refine((data) => Object.keys(data).length > 0, {
       message: 'At least one field is required',

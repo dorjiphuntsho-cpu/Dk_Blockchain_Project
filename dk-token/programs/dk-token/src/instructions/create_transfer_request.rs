@@ -18,8 +18,7 @@ pub struct CreateTransferRequest<'info> {
     pub mint: Account<'info, Mint>,
 
     #[account(
-        constraint = source_token_account.mint == mint.key() @ ErrorCode::InvalidMint,
-        constraint = source_token_account.owner == maker.key() @ ErrorCode::InvalidSourceOwner
+        constraint = source_token_account.mint == mint.key() @ ErrorCode::InvalidMint
     )]
     pub source_token_account: Account<'info, TokenAccount>,
 

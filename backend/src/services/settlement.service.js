@@ -6,6 +6,7 @@ const { settlementInclude } = require('../models/settlement.model');
 const auditLogService = require('./auditLog.service');
 const solanaService = require('./solana.service');
 const bipsService = require('./bips.service');
+const cbsService = require('./cbs.service');
 const {
   resolveSettlementMode,
   assessBipsReconciliationResult,
@@ -46,6 +47,7 @@ const RESERVE_STATUSES = {
 };
 
 const PAYMENT_GATEWAY_REFERENCE_TYPE = 'PAYMENT_GATEWAY';
+const RESERVE_MINT_RATIO = 0.8;
 
 async function createSettlementAuditLog({ actorUserId, entityId, action, metadata }, tx = prisma) {
   await auditLogService.createAuditLog(
@@ -99,6 +101,22 @@ async function getReserveLedgerOrThrow(id, tx = prisma) {
   }
 
   return reserveLedger;
+}
+
+async function getApprovedReserveLedgerForBank(bankId, tx = prisma) {
+  return tx.reserveLedger.findFirst({
+    where: {
+      bankId,
+      referenceType: PAYMENT_GATEWAY_REFERENCE_TYPE,
+      status: RESERVE_STATUSES.APPROVED,
+      availableAmount: {
+        gt: 0,
+      },
+    },
+    orderBy: [
+      { createdAt: 'asc' },
+    ],
+  });
 }
 
 async function getSettlementOrThrow(id, tx = prisma) {
@@ -286,6 +304,38 @@ function ensureReserveAvailable(reserveLedger, requestedAmount) {
   }
 }
 
+function roundReserveMintAmount(value) {
+  return Math.round(Number(value || 0));
+}
+
+function calculateRequiredReserveMintAmount(reserveLedger) {
+  return roundReserveMintAmount(numberValue(reserveLedger.availableAmount) * RESERVE_MINT_RATIO);
+}
+
+function ensureReserveMintAmountMatchesPolicy(reserveLedger, requestedAmount) {
+  const expectedAmount = calculateRequiredReserveMintAmount(reserveLedger);
+  const normalizedRequestedAmount = roundReserveMintAmount(requestedAmount);
+
+  if (normalizedRequestedAmount !== expectedAmount) {
+    throw new ApiError(
+      400,
+      `Reserve mint amount must equal 80% of the available reserve balance, rounded to a whole token (${expectedAmount}).`,
+    );
+  }
+}
+
+function ensureReserveMintAmountMatchesFiatBalance(availableReserveBalance, requestedAmount) {
+  const expectedAmount = roundReserveMintAmount(Number(availableReserveBalance || 0) * RESERVE_MINT_RATIO);
+  const normalizedRequestedAmount = roundReserveMintAmount(requestedAmount);
+
+  if (normalizedRequestedAmount !== expectedAmount) {
+    throw new ApiError(
+      400,
+      `Reserve mint amount must equal 80% of the available reserve balance, rounded to a whole token (${expectedAmount}).`,
+    );
+  }
+}
+
 function getReserveStatusAfterLock(reserveLedger, amount) {
   const nextLockedAmount = Number(reserveLedger.lockedAmount || 0) + Number(amount);
 
@@ -328,14 +378,31 @@ async function createMintSettlement({
 }) {
   const issuerBank = await getBankOrThrow(payload.sourceBankId);
   requireIssuerBank(issuerBank);
-  const reserveLedger = await getReserveLedgerOrThrow(payload.reserveLedgerId);
+  const reserveLedger = payload.reserveLedgerId
+    ? await getReserveLedgerOrThrow(payload.reserveLedgerId)
+    : await getApprovedReserveLedgerForBank(issuerBank.id);
+  const reserveBalance = await cbsService.getIssuerReserveBalance();
 
-  if (reserveLedger.bankId !== issuerBank.id) {
-    throw new ApiError(400, 'Reserve ledger does not belong to the selected issuer bank');
+  if (reserveBalance.bank.id !== issuerBank.id) {
+    throw new ApiError(400, 'Issuer reserve balance does not belong to the selected issuer bank');
   }
 
-  requirePaymentBackedReserve(reserveLedger);
-  ensureReserveAvailable(reserveLedger, payload.amount);
+  const availableReserveBalance = Number(reserveBalance?.inquiry?.availableBalance || 0);
+  if (availableReserveBalance <= 0) {
+    throw new ApiError(400, 'DK Bank reserve fiat balance is unavailable or zero');
+  }
+
+  ensureReserveMintAmountMatchesFiatBalance(availableReserveBalance, payload.amount);
+
+  if (reserveLedger) {
+    if (reserveLedger.bankId !== issuerBank.id) {
+      throw new ApiError(400, 'Reserve ledger does not belong to the selected issuer bank');
+    }
+
+    requirePaymentBackedReserve(reserveLedger);
+    ensureReserveAvailable(reserveLedger, payload.amount);
+    ensureReserveMintAmountMatchesPolicy(reserveLedger, payload.amount);
+  }
 
   return prisma.$transaction(async (tx) => {
     const settlement = await tx.settlementRequest.create({
@@ -344,7 +411,7 @@ async function createMintSettlement({
         settlementMode: SETTLEMENT_MODES.ON_CHAIN_BTN,
         status: SETTLEMENT_STATUSES.DRAFT,
         sourceBankId: issuerBank.id,
-        reserveLedgerId: reserveLedger.id,
+        reserveLedgerId: reserveLedger?.id || null,
         tokenMintAddress: payload.tokenMintAddress,
         amount: payload.amount,
         transferPurpose: payload.transferPurpose || null,
@@ -360,7 +427,9 @@ async function createMintSettlement({
         requestType,
         settlementMode: settlement.settlementMode,
         sourceBankId: issuerBank.id,
-        reserveLedgerId: reserveLedger.id,
+        reserveLedgerId: reserveLedger?.id || null,
+        reserveFiatAccountNumber: reserveBalance.reserveAccount.accountNumber,
+        reserveFiatAvailableBalance: reserveBalance.inquiry.availableBalance,
         amount: payload.amount,
         tokenMintAddress: payload.tokenMintAddress,
       },

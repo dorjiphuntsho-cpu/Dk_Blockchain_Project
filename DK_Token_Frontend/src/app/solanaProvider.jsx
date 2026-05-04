@@ -17,6 +17,15 @@ function detectInjectedWallet() {
     };
   }
 
+  const backpackProvider = window.backpack?.solana;
+  if (backpackProvider?.isBackpack) {
+    return {
+      provider: backpackProvider,
+      walletName: 'Backpack',
+      available: true,
+    };
+  }
+
   const phantomProvider = window.phantom?.solana;
   if (phantomProvider?.isPhantom) {
     return {
@@ -26,11 +35,26 @@ function detectInjectedWallet() {
     };
   }
 
+  const solflareProvider = window.solflare;
+  if (solflareProvider?.isSolflare) {
+    return {
+      provider: solflareProvider,
+      walletName: 'Solflare',
+      available: true,
+    };
+  }
+
   const injectedProvider = window.solana;
   if (injectedProvider) {
     return {
       provider: injectedProvider,
-      walletName: injectedProvider.isPhantom ? 'Phantom' : 'Injected Solana Wallet',
+      walletName: injectedProvider.isPhantom
+        ? 'Phantom'
+        : injectedProvider.isBackpack
+          ? 'Backpack'
+          : injectedProvider.isSolflare
+            ? 'Solflare'
+            : 'Injected Solana Wallet',
       available: true,
     };
   }

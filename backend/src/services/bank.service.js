@@ -269,11 +269,14 @@ async function createBankTokenAccount(bankId, payload, actorUserId) {
   await getBankOrThrow(bankId);
 
   return prisma.$transaction(async (tx) => {
+    const purpose = payload.purpose || 'TREASURY';
+
     if (payload.isPrimary) {
       await tx.bankTokenAccount.updateMany({
         where: {
           bankId,
           mintAddress: payload.mintAddress,
+          purpose,
           isPrimary: true,
         },
         data: {
@@ -286,6 +289,7 @@ async function createBankTokenAccount(bankId, payload, actorUserId) {
       data: {
         bankId,
         mintAddress: payload.mintAddress,
+        purpose,
         treasuryWalletAddress: payload.treasuryWalletAddress,
         tokenAccountAddress: payload.tokenAccountAddress,
         isPrimary: payload.isPrimary ?? true,
@@ -297,6 +301,7 @@ async function createBankTokenAccount(bankId, payload, actorUserId) {
     await createAuditLog(actorUserId, bankId, AUDIT_ACTIONS.CREATE, {
       objectType: 'BANK_TOKEN_ACCOUNT',
       mintAddress: payload.mintAddress,
+      purpose,
       tokenAccountAddress: payload.tokenAccountAddress,
       treasuryWalletAddress: payload.treasuryWalletAddress,
     }, tx);
@@ -309,7 +314,7 @@ async function updateBankTokenAccount(bankId, tokenAccountId, payload, actorUser
   const existingTokenAccount = await getBankTokenAccountOrThrow(bankId, tokenAccountId);
 
   const changedFields = {};
-  for (const field of ['treasuryWalletAddress', 'tokenAccountAddress', 'isPrimary', 'isActive', 'remarks']) {
+  for (const field of ['purpose', 'treasuryWalletAddress', 'tokenAccountAddress', 'isPrimary', 'isActive', 'remarks']) {
     if (payload[field] !== undefined && payload[field] !== existingTokenAccount[field]) {
       changedFields[field] = {
         previous: existingTokenAccount[field],
@@ -319,11 +324,14 @@ async function updateBankTokenAccount(bankId, tokenAccountId, payload, actorUser
   }
 
   return prisma.$transaction(async (tx) => {
+    const purpose = payload.purpose || existingTokenAccount.purpose;
+
     if (payload.isPrimary === true) {
       await tx.bankTokenAccount.updateMany({
         where: {
           bankId,
           mintAddress: existingTokenAccount.mintAddress,
+          purpose,
           isPrimary: true,
           NOT: {
             id: tokenAccountId,
@@ -338,6 +346,7 @@ async function updateBankTokenAccount(bankId, tokenAccountId, payload, actorUser
     await tx.bankTokenAccount.update({
       where: { id: tokenAccountId },
       data: {
+        ...(payload.purpose !== undefined ? { purpose: payload.purpose } : {}),
         ...(payload.treasuryWalletAddress !== undefined
           ? { treasuryWalletAddress: payload.treasuryWalletAddress }
           : {}),

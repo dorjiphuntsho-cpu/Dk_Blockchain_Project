@@ -11,6 +11,7 @@ import {
 import { PublicKey } from '@solana/web3.js';
 
 import AppTable from '../../components/common/AppTable';
+import ReserveBalancePanel from '../../components/cbs/ReserveBalancePanel';
 import ErrorState from '../../components/common/ErrorState';
 import LoadingScreen from '../../components/common/LoadingScreen';
 import PageHeader from '../../components/common/PageHeader';
@@ -19,6 +20,7 @@ import StatusChip from '../../components/common/StatusChip';
 import WalletConnectCard from '../../components/wallet/WalletConnectCard';
 import useAuth from '../../hooks/useAuth';
 import useSolanaWallet from '../../hooks/useSolanaWallet';
+import { cbsApi } from '../../modules/cbs/cbs.api';
 import {
   buildCheckerApprovalTransaction,
   buildCheckerRejectionTransaction,
@@ -116,6 +118,9 @@ function TokenRequestDetailsPage() {
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectSubmitting, setRejectSubmitting] = useState(false);
   const [formState, setFormState] = useState({ rejectionReason: '' });
+  const [reserveBalance, setReserveBalance] = useState(null);
+  const [reserveBalanceLoading, setReserveBalanceLoading] = useState(true);
+  const [reserveBalanceError, setReserveBalanceError] = useState('');
 
   const reload = useCallback(async () => {
     try {
@@ -205,6 +210,43 @@ function TokenRequestDetailsPage() {
 
     void recoverInitiation();
   }, [enqueueSnackbar, recoveringInitiation, reload, request]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadReserveBalance() {
+      if (request?.requestType !== 'MINT') {
+        setReserveBalance(null);
+        setReserveBalanceError('');
+        setReserveBalanceLoading(false);
+        return;
+      }
+
+      try {
+        setReserveBalanceLoading(true);
+        setReserveBalanceError('');
+        const response = await cbsApi.getIssuerReserveBalance();
+        if (!cancelled) {
+          setReserveBalance(response.data);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setReserveBalance(null);
+          setReserveBalanceError(getErrorMessage(loadError, 'Unable to load DK Bank reserve balance.'));
+        }
+      } finally {
+        if (!cancelled) {
+          setReserveBalanceLoading(false);
+        }
+      }
+    }
+
+    void loadReserveBalance();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [request?.requestType]);
 
   const timeline = useMemo(() => getStatusTimeline(request || {}), [request]);
 
@@ -571,6 +613,15 @@ function TokenRequestDetailsPage() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0 space-y-6">
+          {request.requestType === 'MINT' ? (
+            <ReserveBalancePanel
+              data={reserveBalance}
+              error={reserveBalanceError}
+              loading={reserveBalanceLoading}
+              subtitle="Live linked DK Bank fiat reserve balance available before approving this BTN mint request."
+              title="DK Bank Fiat Reserve"
+            />
+          ) : null}
           <section className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-xl">
             <div className="mb-6 flex flex-wrap gap-2">
               <StatusChip kind="type" value={request.requestType} />

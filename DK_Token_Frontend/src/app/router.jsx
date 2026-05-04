@@ -1,11 +1,17 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 
 import ProtectedRoute from '../components/auth/ProtectedRoute';
+import PortalProtectedRoute from '../components/auth/PortalProtectedRoute';
 import RoleGuard from '../components/auth/RoleGuard';
 import AuthLayout from '../layouts/AuthLayout';
 import DashboardLayout from '../layouts/DashboardLayout';
+import PortalAuthLayout from '../layouts/PortalAuthLayout';
+import PortalLayout from '../layouts/PortalLayout';
 import LoginPage from '../pages/auth/LoginPage';
 import DashboardPage from '../pages/dashboard/DashboardPage';
+import PortalActionPage from '../pages/portal/PortalActionPage';
+import PortalHomePage from '../pages/portal/PortalHomePage';
+import PortalLoginPage from '../pages/portal/PortalLoginPage';
 import UsersPage from '../pages/users/UsersPage';
 import UserCreatePage from '../pages/users/UserCreatePage';
 import UserDetailsPage from '../pages/users/UserDetailsPage';
@@ -33,9 +39,35 @@ import { ROLES } from '../utils/constants';
 
 const router = createBrowserRouter([
   {
+    path: '/',
+    element: <Navigate replace to="/portal/login" />,
+  },
+  {
     path: '/login',
     element: <AuthLayout />,
     children: [{ index: true, element: <LoginPage /> }],
+  },
+  {
+    path: '/portal/login',
+    element: <PortalAuthLayout />,
+    children: [{ index: true, element: <PortalLoginPage /> }],
+  },
+  {
+    path: '/portal',
+    element: <PortalProtectedRoute />,
+    children: [
+      {
+        element: <PortalLayout />,
+        children: [
+          { index: true, element: <Navigate replace to="/portal/overview" /> },
+          { path: 'overview', element: <PortalHomePage /> },
+          { path: 'buy', element: <PortalActionPage mode="buy" /> },
+          { path: 'sell', element: <PortalActionPage mode="sell" /> },
+          { path: 'redeem', element: <PortalActionPage mode="redeem" /> },
+          { path: 'transfer', element: <PortalActionPage mode="transfer" /> },
+        ],
+      },
+    ],
   },
   {
     path: '/',
@@ -44,7 +76,6 @@ const router = createBrowserRouter([
       {
         element: <DashboardLayout />,
         children: [
-          { index: true, element: <Navigate replace to="/dashboard" /> },
           { path: 'dashboard', element: <DashboardPage /> },
           { path: 'my-wallets', element: <MyWalletsPage /> },
           {

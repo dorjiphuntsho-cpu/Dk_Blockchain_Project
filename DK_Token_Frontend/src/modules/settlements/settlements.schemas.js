@@ -36,7 +36,7 @@ const addressSchema = z.string().trim().min(32, 'A valid address is required').m
 
 export const reserveMintSettlementSchema = z.object({
   sourceBankId: requiredTrimmed,
-  reserveLedgerId: requiredTrimmed,
+  reserveLedgerId: nullableTrimmed,
   tokenMintAddress: addressSchema,
   amount: amountSchema,
   transferPurpose: nullableTrimmed,

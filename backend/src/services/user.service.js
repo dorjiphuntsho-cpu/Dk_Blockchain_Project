@@ -27,6 +27,7 @@ async function getRoleRecords(roleNames, tx = prisma) {
 async function createUser(payload, actorUserId) {
   const roleNames = payload.roles || [];
   const passwordHash = await bcrypt.hash(payload.password, env.BCRYPT_SALT_ROUNDS);
+  const mpinHash = payload.mpin ? await bcrypt.hash(payload.mpin, env.BCRYPT_SALT_ROUNDS) : null;
 
   const user = await prisma.$transaction(async (tx) => {
     const roles = roleNames.length ? await getRoleRecords(roleNames, tx) : [];
@@ -36,6 +37,10 @@ async function createUser(payload, actorUserId) {
         fullName: payload.fullName,
         email: payload.email.toLowerCase(),
         passwordHash,
+        cid: payload.cid || null,
+        customerType: payload.customerType || null,
+        linkedBankAccountNumber: payload.linkedBankAccountNumber || null,
+        mpinHash,
         roles: roles.length
           ? {
               create: roles.map((role) => ({
@@ -56,6 +61,9 @@ async function createUser(payload, actorUserId) {
         metadata: {
           fullName: createdUser.fullName,
           email: createdUser.email,
+          cid: createdUser.cid,
+          customerType: createdUser.customerType,
+          linkedBankAccountNumber: createdUser.linkedBankAccountNumber,
           roles: roleNames,
         },
       },
@@ -101,6 +109,18 @@ async function listUsers(query) {
             },
             {
               email: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+            {
+              cid: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+            {
+              linkedBankAccountNumber: {
                 contains: search,
                 mode: 'insensitive',
               },
@@ -172,6 +192,41 @@ async function updateUser(id, payload, actorUserId) {
   if (payload.password) {
     updateData.passwordHash = await bcrypt.hash(payload.password, env.BCRYPT_SALT_ROUNDS);
     changedFields.password = {
+      previous: '***',
+      current: '***',
+    };
+  }
+
+  if (payload.cid !== undefined && payload.cid !== existingUser.cid) {
+    updateData.cid = payload.cid;
+    changedFields.cid = {
+      previous: existingUser.cid,
+      current: payload.cid,
+    };
+  }
+
+  if (payload.customerType !== undefined && payload.customerType !== existingUser.customerType) {
+    updateData.customerType = payload.customerType;
+    changedFields.customerType = {
+      previous: existingUser.customerType,
+      current: payload.customerType,
+    };
+  }
+
+  if (
+    payload.linkedBankAccountNumber !== undefined
+    && payload.linkedBankAccountNumber !== existingUser.linkedBankAccountNumber
+  ) {
+    updateData.linkedBankAccountNumber = payload.linkedBankAccountNumber;
+    changedFields.linkedBankAccountNumber = {
+      previous: existingUser.linkedBankAccountNumber,
+      current: payload.linkedBankAccountNumber,
+    };
+  }
+
+  if (payload.mpin) {
+    updateData.mpinHash = await bcrypt.hash(payload.mpin, env.BCRYPT_SALT_ROUNDS);
+    changedFields.mpin = {
       previous: '***',
       current: '***',
     };

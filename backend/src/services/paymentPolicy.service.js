@@ -10,6 +10,14 @@ function getFirstNonEmptyValue(source, keys) {
       continue;
     }
 
+     if (typeof value === 'object') {
+      continue;
+    }
+
+    if (typeof value === 'boolean') {
+      return String(value);
+    }
+
     const normalized = String(value).trim();
     if (normalized) {
       return normalized;
@@ -37,7 +45,13 @@ function normalizeGatewayStatus(value) {
     return null;
   }
 
-  return String(value).trim().replace(/\s+/g, '_').replace(/-/g, '_').toUpperCase();
+  const normalized = String(value).trim().replace(/\s+/g, '_').replace(/-/g, '_').toUpperCase();
+
+  if (normalized === '0' || normalized === 'SUCCESS' || normalized === 'SUCCESSFULLY_COMPLETED') {
+    return 'COMPLETED';
+  }
+
+  return normalized;
 }
 
 function normalizeAmount(value) {
@@ -61,32 +75,93 @@ function isTerminalFailedPaymentStatus(status) {
   return FAILURE_STATUSES.has(String(status || '').toUpperCase());
 }
 
-function normalizePaymentPayload(payload, fallbackReference = null, gatewayName = DEFAULT_GATEWAY_NAME) {
-  const source = {
-    ...(payload && typeof payload === 'object' ? payload : {}),
-    ...(payload?.data && typeof payload.data === 'object' ? payload.data : {}),
-    ...(payload?.response_data && typeof payload.response_data === 'object' ? payload.response_data : {}),
-  };
+function buildNormalizationCandidates(payload) {
+  const candidates = [];
+  const queue = [payload];
+  const seen = new Set();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+
+    if (!current || typeof current !== 'object') {
+      continue;
+    }
+
+    if (seen.has(current)) {
+      continue;
+    }
+
+    seen.add(current);
+    candidates.push(current);
+
+    if (Array.isArray(current)) {
+      queue.push(...current);
+      continue;
+    }
+
+    queue.push(current.data);
+    queue.push(current.response_data);
+    queue.push(current.meta_info);
+    queue.push(current.result);
+    queue.push(current.transaction);
+    queue.push(current.payment);
+
+    if (Array.isArray(current.errors)) {
+      queue.push(...current.errors);
+    }
+
+    for (const value of Object.values(current)) {
+      if (value && typeof value === 'object') {
+        queue.push(value);
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function pickFirstValue(sources, keys) {
+  for (const source of sources) {
+    const value = getFirstNonEmptyValue(source, keys);
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function normalizePaymentPayload(payload, fallbackReference = null, gatewayName = DEFAULT_GATEWAY_NAME, options = {}) {
+  const sources = buildNormalizationCandidates(payload);
 
   const paymentReference =
-    getFirstNonEmptyValue(source, [
+    pickFirstValue(sources, [
       'paymentReference',
       'payment_reference',
       'transactionReference',
       'transaction_reference',
+      'reference',
+      'reference_number',
     ]) || fallbackReference;
 
-  const amount = normalizeAmount(
-    source.amount ?? source.transactionAmount ?? source.transaction_amount,
-  );
+  const rawAmount =
+    pickFirstValue(sources, ['amount', 'transactionAmount', 'transaction_amount'])
+    || options.fallbackAmount
+    || null;
+  const amount = normalizeAmount(rawAmount);
 
   const status = normalizeGatewayStatus(
-    getFirstNonEmptyValue(source, [
+    pickFirstValue(sources, [
       'status',
+      'status_desc',
       'paymentStatus',
       'payment_status',
       'transactionStatus',
       'transaction_status',
+      'txn_status',
+      'response_status',
+      'payment_state',
+      'state',
     ]),
   );
 
@@ -96,39 +171,44 @@ function normalizePaymentPayload(payload, fallbackReference = null, gatewayName 
 
   const confirmedAt =
     parseGatewayDate(
-      getFirstNonEmptyValue(source, [
+      pickFirstValue(sources, [
         'confirmedAt',
         'confirmed_at',
         'paymentTime',
         'payment_time',
         'transactionTime',
         'transaction_time',
+        'transaction_datetime',
       ]),
     ) || (isSuccessfulPaymentStatus(status) ? new Date() : null);
 
   return {
     gatewayName,
     paymentReference,
-    gatewayTransactionId: getFirstNonEmptyValue(source, [
+    gatewayTransactionId: pickFirstValue(sources, [
+      'txn_status_id',
       'gatewayTransactionId',
       'gateway_transaction_id',
       'transactionId',
       'transaction_id',
+      'txn_id',
+      'srn',
     ]),
-    customerReference: getFirstNonEmptyValue(source, [
+    customerReference: pickFirstValue(sources, [
       'customerReference',
       'customer_reference',
     ]),
-    payerName: getFirstNonEmptyValue(source, ['payerName', 'payer_name']),
-    payerAccount: getFirstNonEmptyValue(source, ['payerAccount', 'payer_account']),
+    payerName: pickFirstValue(sources, ['payerName', 'payer_name', 'source_account_name']),
+    payerAccount: pickFirstValue(sources, ['payerAccount', 'payer_account', 'source_account_number']),
     amount,
-    currency: getFirstNonEmptyValue(source, ['currency', 'currencyCode', 'currency_code']) || 'BTN',
+    currency: pickFirstValue(sources, ['currency', 'currencyCode', 'currency_code']) || options.fallbackCurrency || 'BTN',
     status,
-    statusMessage: getFirstNonEmptyValue(source, [
+    statusMessage: pickFirstValue(sources, [
       'statusMessage',
       'status_message',
       'message',
       'description',
+      'response_detail',
     ]),
     confirmedAt,
   };

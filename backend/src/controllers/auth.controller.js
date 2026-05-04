@@ -10,6 +10,15 @@ async function login(req, res) {
   });
 }
 
+async function customerLogin(req, res) {
+  const result = await authService.customerLogin(req.validated.body);
+
+  return successResponse(res, {
+    message: 'Customer login successful',
+    data: result,
+  });
+}
+
 async function me(req, res) {
   const user = await authService.getCurrentUser(req.user.id);
 
@@ -19,7 +28,18 @@ async function me(req, res) {
   });
 }
 
+async function customerPortalSummary(req, res) {
+  const summary = await authService.getCustomerPortalSummary(req.user.id);
+
+  return successResponse(res, {
+    message: 'Customer portal summary fetched successfully',
+    data: summary,
+  });
+}
+
 module.exports = {
+  customerLogin,
+  customerPortalSummary,
   login,
   me,
 };

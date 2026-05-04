@@ -107,8 +107,109 @@ const paymentReferenceLookupSchema = paymentReferenceParamSchema;
 
 const paymentStatusVerifySchema = paymentReferenceParamSchema;
 
+const paymentGatewayTokenSchema = z.object({
+  body: z.object({
+    scopes: optionalTrimmedString,
+    sourceApp: optionalTrimmedString,
+    requestId: optionalTrimmedString
+      .refine((value) => !value || (value.length >= 10 && value.length <= 32), {
+        message: 'requestId must be between 10 and 32 characters',
+      })
+      .optional(),
+  }).optional(),
+  params: z.object({}).optional(),
+  query: z.object({}).optional(),
+});
+
+const paymentGatewaySignKeySchema = z.object({
+  body: z.object({
+    accessToken: optionalTrimmedString,
+    sourceApp: optionalTrimmedString,
+    requestId: optionalTrimmedString
+      .refine((value) => !value || (value.length >= 10 && value.length <= 36), {
+        message: 'requestId must be between 10 and 36 characters',
+      })
+      .optional(),
+  }).optional(),
+  params: z.object({}).optional(),
+  query: z.object({}).optional(),
+});
+
+const paymentGatewaySignatureSchema = z.object({
+  body: z.object({
+    privateKeyPem: requiredTrimmedString,
+    payload: z.record(z.any()),
+    sourceApp: optionalTrimmedString,
+    timestamp: optionalTrimmedString,
+    nonce: optionalTrimmedString,
+  }),
+  params: z.object({}).optional(),
+  query: z.object({}).optional(),
+});
+
+const paymentGatewayAccountAuthSchema = z.object({
+  body: z.object({
+    accessToken: optionalTrimmedString,
+    privateKeyPem: requiredTrimmedString,
+    payload: z.record(z.any()),
+    sourceApp: optionalTrimmedString,
+    timestamp: optionalTrimmedString,
+    nonce: optionalTrimmedString,
+  }),
+  params: z.object({}).optional(),
+  query: z.object({}).optional(),
+});
+
+const paymentGatewaySignedRequestSchema = paymentGatewayAccountAuthSchema;
+
+const paymentGatewayManagedRequestSchema = z.object({
+  body: z.object({
+    payload: z.record(z.any()),
+    sourceApp: optionalTrimmedString,
+    timestamp: optionalTrimmedString,
+    nonce: optionalTrimmedString,
+  }),
+  params: z.object({}).optional(),
+  query: z.object({}).optional(),
+});
+
+const customerBuyBtnSchema = z.object({
+  body: z.object({
+    amount: numericStringSchema,
+    debitAccount: optionalTrimmedString,
+  }),
+  params: z.object({}).optional(),
+  query: z.object({}).optional(),
+});
+
+const customerSellBtnSchema = z.object({
+  body: z.object({
+    amount: numericStringSchema,
+    payoutAccount: optionalTrimmedString,
+  }),
+  params: z.object({}).optional(),
+  query: z.object({}).optional(),
+});
+
+const customerPaymentReferenceParamSchema = z.object({
+  body: z.object({}).optional(),
+  params: z.object({
+    paymentReference: z.preprocess(emptyStringToUndefined, requiredTrimmedString),
+  }),
+  query: z.object({}).optional(),
+});
+
 module.exports = {
+  customerBuyBtnSchema,
+  customerSellBtnSchema,
+  customerPaymentReferenceParamSchema,
+  paymentGatewayAccountAuthSchema,
+  paymentGatewaySignedRequestSchema,
+  paymentGatewayManagedRequestSchema,
   paymentCallbackSchema,
+  paymentGatewaySignatureSchema,
+  paymentGatewaySignKeySchema,
+  paymentGatewayTokenSchema,
   paymentReferenceLookupSchema,
   paymentStatusVerifySchema,
 };

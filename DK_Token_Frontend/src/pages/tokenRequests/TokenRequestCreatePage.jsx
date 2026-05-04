@@ -10,11 +10,13 @@ import Alert from '../../components/ui/Alert';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Card from '../../components/ui/Card';
+import ReserveBalancePanel from '../../components/cbs/ReserveBalancePanel';
 import PageHeader from '../../components/common/PageHeader';
 import ErrorState from '../../components/common/ErrorState';
 import FormAmountField from '../../components/form/FormAmountField';
 import FormTextField from '../../components/form/FormTextField';
 import { managedTokensApi } from '../../modules/solana/managedTokens.api';
+import { cbsApi } from '../../modules/cbs/cbs.api';
 import { buildExplorerTransactionUrl, buildMakerInitiationTransaction, signAndSendMakerTransaction } from '../../modules/solana/walletExecution';
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
 import { clearPendingInitiationRecovery, savePendingInitiationRecovery } from '../../modules/tokenRequests/tokenRequestRecovery';
@@ -40,6 +42,9 @@ function TokenRequestCreatePage() {
   const [makerWallets, setMakerWallets] = useState([]);
   const [managedTokens, setManagedTokens] = useState([]);
   const [sourceWalletBalances, setSourceWalletBalances] = useState([]);
+  const [reserveBalance, setReserveBalance] = useState(null);
+  const [reserveBalanceError, setReserveBalanceError] = useState('');
+  const [reserveBalanceLoading, setReserveBalanceLoading] = useState(true);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submitLockRef = useRef(false);
@@ -106,6 +111,36 @@ function TokenRequestCreatePage() {
     }
 
     loadFormOptions();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadReserveBalance() {
+      try {
+        setReserveBalanceLoading(true);
+        setReserveBalanceError('');
+        const response = await cbsApi.getIssuerReserveBalance();
+        if (!cancelled) {
+          setReserveBalance(response.data);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setReserveBalance(null);
+          setReserveBalanceError(getErrorMessage(loadError, 'Unable to load DK Bank reserve balance.'));
+        }
+      } finally {
+        if (!cancelled) {
+          setReserveBalanceLoading(false);
+        }
+      }
+    }
+
+    loadReserveBalance();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -359,6 +394,17 @@ function TokenRequestCreatePage() {
       />
       {error ? <ErrorState description={error} onAction={() => window.location.reload()} /> : null}
       <section className="max-w-3xl">
+        {requestType === REQUEST_TYPES.MINT ? (
+          <div className="mb-6">
+            <ReserveBalancePanel
+              data={reserveBalance}
+              error={reserveBalanceError}
+              loading={reserveBalanceLoading}
+              subtitle="Use the linked DK Bank fiat reserve balance as the funding reference before creating a BTN mint request."
+              title="DK Bank Fiat Reserve"
+            />
+          </div>
+        ) : null}
         <Card className="rounded-2xl bg-zinc-900/80">
           <div className="space-y-6">
             <div className="space-y-3">

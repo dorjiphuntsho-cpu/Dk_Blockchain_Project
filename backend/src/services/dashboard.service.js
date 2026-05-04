@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const { tokenRequestInclude } = require('../models/tokenRequest.model');
 const { ROLE_NAMES, TOKEN_REQUEST_STATUSES } = require('../utils/enums');
+const cbsService = require('./cbs.service');
 
 function getVisibleRequestWhere(user) {
   if (user.roles.includes(ROLE_NAMES.ADMIN)) {
@@ -53,6 +54,7 @@ async function getDashboardOverview(user) {
     settlementCounts,
     recentSettlements,
     pendingSettlementReconciliation,
+    issuerReserveBalance,
   ] = await Promise.all([
     prisma.tokenRequest.groupBy({
       by: ['status'],
@@ -135,6 +137,9 @@ async function getDashboardOverview(user) {
           take: 5,
         })
       : Promise.resolve([]),
+    cbsService.getIssuerReserveBalance().catch((error) => ({
+      warning: error.message,
+    })),
   ]);
 
   const countByStatus = Object.fromEntries(
@@ -194,6 +199,7 @@ async function getDashboardOverview(user) {
       executedRequests: countByStatus[TOKEN_REQUEST_STATUSES.EXECUTED] || 0,
       failedRequests: countByStatus[TOKEN_REQUEST_STATUSES.FAILED] || 0,
     },
+    issuerReserveBalance,
     settlementSummary,
     recentRequests,
     recentSettlements,

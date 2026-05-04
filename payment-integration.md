@@ -262,9 +262,20 @@ That gives the system a proper reserve source before expanding the UI and mint w
 
 
 
+CID 11101000001 / MPIN 1234
+CID 11101000002 / MPIN 2345
+CID 11101000003 / MPIN 3456
+CID 11101000004 / MPIN 4567
+
 Dk accounts 
 100100223740
 110158212197
 100100353884
 100100426695
-100100414316 (Account not used) this will be used for reserve meaning all the payment done by users will go to this account so it can be used for minting the BTN token
+
+100100364185 is the DK Bank reserve account. User fiat payments should flow into this account so the backend can treat them as reserve backing for BTN minting capacity.
+
+
+6i6nZMGZdqNiyxHzqnHnJTkrP6QgmLd52yzLsntAyazb
+
+tandin@56PixelPC:/mnt/d/Office/Dk_Blockchain_Project/dk-token$ spl-token balance --address 6i6nZMGZdqNiyxHzqnHnJTkrP6QgmLd52yzLsntAyazb --url https://api.devnet.solana.com

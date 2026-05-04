@@ -15,6 +15,7 @@ import AuditActivityPanel from '../../components/dashboard/AuditActivityPanel';
 import DashboardMetricGrid from '../../components/dashboard/DashboardMetricGrid';
 import RecentRequestsTable from '../../components/dashboard/RecentRequestsTable';
 import RequestListPanel from '../../components/dashboard/RequestListPanel';
+import ReserveBalancePanel from '../../components/cbs/ReserveBalancePanel';
 import ErrorState from '../../components/common/ErrorState';
 import PageHeader from '../../components/common/PageHeader';
 import PageSection from '../../components/common/PageSection';
@@ -23,6 +24,7 @@ import useAuth from '../../hooks/useAuth';
 import { auditLogsApi } from '../../modules/auditLogs/auditLogs.api';
 import { tokenRequestsApi } from '../../modules/tokenRequests/tokenRequests.api';
 import { REQUEST_STATUSES, ROLES } from '../../utils/constants';
+import { formatAmount } from '../../utils/format';
 
 function DashboardSkeleton() {
   return (
@@ -154,6 +156,12 @@ function DashboardPage() {
 
   const overview = state.overview;
   const settlementSummary = overview?.settlementSummary || null;
+  const reserveSummary = overview?.issuerReserveBalance || null;
+  
+  console.log(reserveSummary)
+  const reserveBalanceMetricValue = reserveSummary?.inquiry?.availableBalance != null
+    ? `${reserveSummary.inquiry.currencyCode || reserveSummary.reserveAccount?.currency || 'BTN'} ${formatAmount(reserveSummary.inquiry.availableBalance)}`
+    : 'Unavailable';
 
   const pageCopy = useMemo(() => {
     switch (dashboardRole) {
@@ -206,6 +214,7 @@ function DashboardPage() {
     switch (dashboardRole) {
       case ROLES.ADMIN:
         return [
+          metric('reserve', 'Reserve balance', reserveBalanceMetricValue, 'DK Bank issuer reserve account', <DocumentChartBarIcon className="size-4" />, 'success.main'),
           metric('total', 'Total requests', summary.totalRequests ?? 0, 'Across all visible workflows', <DocumentChartBarIcon className="size-4" />, 'primary.main'),
           metric('pending', 'Pending approvals', summary.pendingApprovals ?? 0, 'Waiting for checker action', <ClockIcon className="size-4" />, 'warning.main'),
           metric('ready', 'In progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Still syncing wallet and chain state', <InboxStackIcon className="size-4" />, 'secondary.main'),
@@ -213,6 +222,7 @@ function DashboardPage() {
         ];
       case ROLES.MAKER:
         return [
+          metric('reserve', 'Reserve balance', reserveBalanceMetricValue, 'Available reserve before issuer-backed minting', <DocumentChartBarIcon className="size-4" />, 'success.main'),
           metric('drafts', 'Drafts', state.draftCount, 'Still editable by you', <PencilSquareIcon className="size-4" />, 'primary.main'),
           metric('pending', 'Pending review', summary.pendingApprovals ?? 0, 'Submitted and awaiting a checker', <ClockIcon className="size-4" />, 'warning.main'),
           metric('rejected', 'Rejected', state.rejectedCount, 'Need revision before resubmission', <XCircleIcon className="size-4" />, 'error.main'),
@@ -220,6 +230,7 @@ function DashboardPage() {
         ];
       case ROLES.CHECKER:
         return [
+          metric('reserve', 'Reserve balance', reserveBalanceMetricValue, 'Reference balance before approving mint requests', <DocumentChartBarIcon className="size-4" />, 'success.main'),
           metric('pending', 'Pending approvals', summary.pendingApprovals ?? 0, 'Requests waiting in your queue', <ClockIcon className="size-4" />, 'warning.main'),
           metric('ready', 'In progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Still settling after wallet approval', <InboxStackIcon className="size-4" />, 'primary.main'),
           metric('reviewed', 'Reviewed recently', state.reviewedCount, 'Latest decisions linked to you', <ClipboardDocumentCheckIcon className="size-4" />, 'secondary.main'),
@@ -227,6 +238,7 @@ function DashboardPage() {
         ];
       case ROLES.EXECUTOR:
         return [
+          metric('reserve', 'Reserve balance', reserveBalanceMetricValue, 'Current DK Bank issuer reserve position', <DocumentChartBarIcon className="size-4" />, 'success.main'),
           metric('ready', 'In progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Still settling between wallet and backend capture', <InboxStackIcon className="size-4" />, 'secondary.main'),
           metric('executed', 'Executed', summary.executedRequests ?? 0, 'Successfully recorded outcomes', <CheckCircleIcon className="size-4" />, 'success.main'),
           metric('failed', 'Failed', summary.failedRequests ?? 0, 'Need retry or investigation', <ExclamationCircleIcon className="size-4" />, 'error.main'),
@@ -234,7 +246,7 @@ function DashboardPage() {
       default:
         return [];
     }
-  }, [dashboardRole, overview, state.draftCount, state.rejectedCount, state.reviewedCount]);
+  }, [dashboardRole, overview, reserveBalanceMetricValue, state.draftCount, state.rejectedCount, state.reviewedCount]);
 
   const settlementMetrics = useMemo(() => {
     if (!(dashboardRole === ROLES.ADMIN || dashboardRole === ROLES.EXECUTOR) || !settlementSummary) {
@@ -275,6 +287,15 @@ function DashboardPage() {
   return (
     <div className="min-w-0 space-y-4">
       <PageHeader eyebrow={pageCopy.eyebrow} subtitle={pageCopy.subtitle} title={pageCopy.title} />
+
+      <PageSection title="DK Bank Reserve Balance" subtitle="Live fiat reserve balance linked to DK Bank for BTN minting support.">
+        <ReserveBalancePanel
+          data={reserveSummary?.bank ? reserveSummary : null}
+          error={reserveSummary?.warning || ''}
+          title="DK Bank Fiat Reserve"
+          subtitle="This is the linked DK Bank reserve account balance used as the fiat reference for BTN minting."
+        />
+      </PageSection>
 
       <PageSection>
         <DashboardMetricGrid items={metrics} />

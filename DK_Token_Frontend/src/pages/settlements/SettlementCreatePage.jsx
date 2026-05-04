@@ -8,9 +8,15 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import Textarea from '../../components/ui/Textarea';
+import ReserveBalancePanel from '../../components/cbs/ReserveBalancePanel';
+import useSolanaWallet from '../../hooks/useSolanaWallet';
 import { banksApi } from '../../modules/banks/banks.api';
-import { reservesApi } from '../../modules/reserves/reserves.api';
-import { formatReserveLabel } from '../../modules/reserves/reserves.schemas';
+import { cbsApi } from '../../modules/cbs/cbs.api';
+import {
+  buildExplorerTransactionUrl,
+  buildMakerInitiationTransaction,
+  signAndSendMakerTransaction,
+} from '../../modules/solana/walletExecution';
 import { managedTokensApi } from '../../modules/solana/managedTokens.api';
 import { settlementsApi } from '../../modules/settlements/settlements.api';
 import {
@@ -20,8 +26,13 @@ import {
   reserveMintSettlementSchema,
   settlementRequestTypeOptions,
 } from '../../modules/settlements/settlements.schemas';
+import {
+  clearPendingInitiationRecovery,
+  savePendingInitiationRecovery,
+} from '../../modules/tokenRequests/tokenRequestRecovery';
 import { REQUEST_TYPES } from '../../utils/constants';
 import { getErrorMessage } from '../../utils/error';
+import { formatAmount } from '../../utils/format';
 
 const initialForm = {
   requestType: REQUEST_TYPES.INTERBANK_TRANSFER,
@@ -39,40 +50,62 @@ const initialForm = {
   sourceAccountNumber: '',
 };
 
+function formatReserveDerivedAmount(value) {
+  const numericValue = Number(value || 0);
+
+  if (!Number.isFinite(numericValue)) {
+    return '0';
+  }
+
+  return String(Math.round(numericValue));
+}
+
 function SettlementCreatePage() {
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
+  const {
+    address: connectedWalletAddress,
+    available: walletAvailable,
+    connect: connectWallet,
+    connected: walletConnected,
+    provider: walletProvider,
+  } = useSolanaWallet();
   const [banks, setBanks] = useState([]);
   const [managedTokens, setManagedTokens] = useState([]);
-  const [reserves, setReserves] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState(initialForm);
+  const [reserveBalance, setReserveBalance] = useState(null);
+  const [reserveBalanceLoading, setReserveBalanceLoading] = useState(true);
+  const [reserveBalanceError, setReserveBalanceError] = useState('');
 
   useEffect(() => {
     async function loadBootstrapData() {
       try {
         setLoading(true);
         setError('');
-        const [banksResponse, tokensResponse, reservesResponse] = await Promise.all([
+        const [banksResponse, tokensResponse] = await Promise.all([
           banksApi.list({ limit: 100, isActive: true }),
           managedTokensApi.list({ page: 1, limit: 100 }),
-          reservesApi.list({
-            page: 1,
-            limit: 100,
-            status: 'APPROVED',
-            referenceType: 'PAYMENT_GATEWAY',
-          }),
         ]);
         const loadedBanks = banksResponse.data.items || [];
         setBanks(loadedBanks);
         setManagedTokens(tokensResponse.data.items || []);
-        setReserves(reservesResponse.data.items || []);
+
+        try {
+          const reserveBalanceResponse = await cbsApi.getIssuerReserveBalance();
+          setReserveBalance(reserveBalanceResponse.data);
+          setReserveBalanceError('');
+        } catch (reserveLoadError) {
+          setReserveBalance(null);
+          setReserveBalanceError(getErrorMessage(reserveLoadError, 'Unable to load DK Bank fiat reserve balance.'));
+        }
       } catch (loadError) {
         setError(loadError.message || 'Unable to load settlement setup data.');
       } finally {
         setLoading(false);
+        setReserveBalanceLoading(false);
       }
     }
 
@@ -91,18 +124,13 @@ function SettlementCreatePage() {
     () => banks.find((bank) => bank.isIssuer) || null,
     [banks],
   );
-  const availableReserveLedgers = useMemo(() => {
-    if (!sourceBank?.id) {
-      return [];
-    }
-
-    return reserves.filter((reserve) =>
-      reserve.bankId === sourceBank.id
-      && reserve.referenceType === 'PAYMENT_GATEWAY'
-      && reserve.status === 'APPROVED'
-      && Number(reserve.availableAmount || 0) > 0,
-    );
-  }, [reserves, sourceBank]);
+  const reserveFiatAvailableAmount = Number(
+    reserveBalance?.inquiry?.availableBalance
+    ?? 0,
+  );
+  const reserveMintAmount = reserveFiatAvailableAmount > 0
+    ? Math.round(reserveFiatAvailableAmount * 0.8)
+    : 0;
   const availableManagedTokens = useMemo(() => {
     const allManagedTokens = managedTokens.filter((token) => token.mintAddress);
 
@@ -118,6 +146,37 @@ function SettlementCreatePage() {
 
     return allManagedTokens.filter((token) => issuerMintAddresses.has(token.mintAddress));
   }, [form.requestType, managedTokens, sourceBank]);
+
+  useEffect(() => {
+    const isReserveMintFlow =
+      form.requestType === REQUEST_TYPES.RESERVE_MINT
+      || form.requestType === REQUEST_TYPES.REPLENISHMENT_MINT;
+
+    if (!isReserveMintFlow) {
+      return;
+    }
+
+    const currentTokenIsAvailable = availableManagedTokens.some(
+      (token) => token.mintAddress === form.tokenMintAddress,
+    );
+
+    if (currentTokenIsAvailable) {
+      return;
+    }
+
+    const preferredToken =
+      availableManagedTokens.find((token) => token.symbol === 'BTN')
+      || availableManagedTokens.find((token) => String(token.name || '').toUpperCase().includes('BTN'))
+      || availableManagedTokens[0]
+      || null;
+
+    if (form.tokenMintAddress !== (preferredToken?.mintAddress || '')) {
+      setForm((current) => ({
+        ...current,
+        tokenMintAddress: preferredToken?.mintAddress || '',
+      }));
+    }
+  }, [availableManagedTokens, form.requestType, form.tokenMintAddress]);
 
   const routePreview = useMemo(() => {
     if (form.requestType === REQUEST_TYPES.RESERVE_MINT || form.requestType === REQUEST_TYPES.REPLENISHMENT_MINT) {
@@ -157,40 +216,165 @@ function SettlementCreatePage() {
       form.requestType === REQUEST_TYPES.RESERVE_MINT
       || form.requestType === REQUEST_TYPES.REPLENISHMENT_MINT
     ) {
-      const hasSelectedReserve = availableReserveLedgers.some((ledger) => ledger.id === form.reserveLedgerId);
+      const derivedAmount = reserveMintAmount > 0 ? formatReserveDerivedAmount(reserveMintAmount) : '';
 
-      if (!hasSelectedReserve && form.reserveLedgerId) {
+      if (form.amount !== derivedAmount) {
         setForm((current) => ({
           ...current,
-          reserveLedgerId: '',
+          amount: derivedAmount,
         }));
       }
     }
-  }, [availableReserveLedgers, form.requestType, form.reserveLedgerId]);
+  }, [form.amount, form.requestType, reserveMintAmount]);
 
   const submit = async () => {
     try {
       setSaving(true);
       let response;
+      let savedSettlementId = null;
 
       if (form.requestType === REQUEST_TYPES.RESERVE_MINT) {
+        if (reserveBalanceLoading) {
+          throw new Error('DK Bank reserve fiat balance is still loading.');
+        }
+
+        if (reserveFiatAvailableAmount <= 0) {
+          throw new Error('DK Bank reserve fiat balance is unavailable or zero.');
+        }
+
         const payload = reserveMintSettlementSchema.parse({
           sourceBankId: form.sourceBankId,
-          reserveLedgerId: form.reserveLedgerId,
           tokenMintAddress: form.tokenMintAddress,
           amount: form.amount,
           transferPurpose: form.transferPurpose || null,
         });
         response = await settlementsApi.createReserveMint(payload);
+        savedSettlementId = response.data.id;
+
+        let makerWalletAddress = connectedWalletAddress;
+
+        if (!walletConnected || !makerWalletAddress) {
+          if (!walletAvailable || !connectWallet) {
+            throw new Error('Connect the maker wallet before creating this settlement.');
+          }
+
+          makerWalletAddress = await connectWallet();
+        }
+
+        if (!makerWalletAddress) {
+          throw new Error('Connect the maker wallet before creating this settlement.');
+        }
+
+        if (!walletProvider) {
+          throw new Error('Wallet provider is not available.');
+        }
+
+        const prepareResponse = await settlementsApi.prepareMintRequest(savedSettlementId, makerWalletAddress);
+        const executionPayload = prepareResponse.data;
+        const builtTransaction = await buildMakerInitiationTransaction({
+          executionPayload,
+          makerWalletAddress,
+        });
+        const initiationSignature = await signAndSendMakerTransaction({
+          connection: builtTransaction.connection,
+          provider: walletProvider,
+          requestKeypair: builtTransaction.requestKeypair,
+          transaction: builtTransaction.transaction,
+        });
+
+        const initiationPayload = {
+          makerWalletAddress,
+          onChainRequestAddress: builtTransaction.requestAddress,
+          initiationTxSignature: initiationSignature,
+          initiationExplorerUrl: buildExplorerTransactionUrl(initiationSignature, executionPayload.rpcUrl),
+        };
+
+        if (builtTransaction.sourceTokenAccountAddress) {
+          initiationPayload.sourceTokenAccountAddress = builtTransaction.sourceTokenAccountAddress;
+        }
+
+        if (builtTransaction.destinationTokenAccountAddress) {
+          initiationPayload.destinationTokenAccountAddress = builtTransaction.destinationTokenAccountAddress;
+        }
+
+        savePendingInitiationRecovery(savedSettlementId, initiationPayload);
+        await settlementsApi.recordMintInitiation(savedSettlementId, initiationPayload);
+        clearPendingInitiationRecovery(savedSettlementId);
+
+        enqueueSnackbar('Settlement created and wallet initiation submitted.', { variant: 'success' });
+        navigate(`/settlements/${savedSettlementId}`);
+        return;
       } else if (form.requestType === REQUEST_TYPES.REPLENISHMENT_MINT) {
+        if (reserveBalanceLoading) {
+          throw new Error('DK Bank reserve fiat balance is still loading.');
+        }
+
+        if (reserveFiatAvailableAmount <= 0) {
+          throw new Error('DK Bank reserve fiat balance is unavailable or zero.');
+        }
+
         const payload = replenishmentMintSettlementSchema.parse({
           sourceBankId: form.sourceBankId,
-          reserveLedgerId: form.reserveLedgerId,
           tokenMintAddress: form.tokenMintAddress,
           amount: form.amount,
           transferPurpose: form.transferPurpose || null,
         });
         response = await settlementsApi.createReplenishmentMint(payload);
+        savedSettlementId = response.data.id;
+
+        let makerWalletAddress = connectedWalletAddress;
+
+        if (!walletConnected || !makerWalletAddress) {
+          if (!walletAvailable || !connectWallet) {
+            throw new Error('Connect the maker wallet before creating this settlement.');
+          }
+
+          makerWalletAddress = await connectWallet();
+        }
+
+        if (!makerWalletAddress) {
+          throw new Error('Connect the maker wallet before creating this settlement.');
+        }
+
+        if (!walletProvider) {
+          throw new Error('Wallet provider is not available.');
+        }
+
+        const prepareResponse = await settlementsApi.prepareMintRequest(savedSettlementId, makerWalletAddress);
+        const executionPayload = prepareResponse.data;
+        const builtTransaction = await buildMakerInitiationTransaction({
+          executionPayload,
+          makerWalletAddress,
+        });
+        const initiationSignature = await signAndSendMakerTransaction({
+          connection: builtTransaction.connection,
+          provider: walletProvider,
+          requestKeypair: builtTransaction.requestKeypair,
+          transaction: builtTransaction.transaction,
+        });
+
+        const initiationPayload = {
+          makerWalletAddress,
+          onChainRequestAddress: builtTransaction.requestAddress,
+          initiationTxSignature: initiationSignature,
+          initiationExplorerUrl: buildExplorerTransactionUrl(initiationSignature, executionPayload.rpcUrl),
+        };
+
+        if (builtTransaction.sourceTokenAccountAddress) {
+          initiationPayload.sourceTokenAccountAddress = builtTransaction.sourceTokenAccountAddress;
+        }
+
+        if (builtTransaction.destinationTokenAccountAddress) {
+          initiationPayload.destinationTokenAccountAddress = builtTransaction.destinationTokenAccountAddress;
+        }
+
+        savePendingInitiationRecovery(savedSettlementId, initiationPayload);
+        await settlementsApi.recordMintInitiation(savedSettlementId, initiationPayload);
+        clearPendingInitiationRecovery(savedSettlementId);
+
+        enqueueSnackbar('Settlement created and wallet initiation submitted.', { variant: 'success' });
+        navigate(`/settlements/${savedSettlementId}`);
+        return;
       } else if (form.requestType === REQUEST_TYPES.REDEMPTION) {
         const payload = redemptionSettlementSchema.parse({
           sourceBankId: form.sourceBankId,
@@ -284,20 +468,6 @@ function SettlementCreatePage() {
               </label>
             ) : null}
 
-            {form.requestType === REQUEST_TYPES.RESERVE_MINT || form.requestType === REQUEST_TYPES.REPLENISHMENT_MINT ? (
-              <label className="space-y-2">
-                <span className="text-sm font-medium text-zinc-200">Reserve ledger</span>
-                <Select value={form.reserveLedgerId} onChange={(event) => setForm((current) => ({ ...current, reserveLedgerId: event.target.value }))}>
-                  <option value="">Select approved reserve</option>
-                  {availableReserveLedgers.map((ledger) => (
-                    <option key={ledger.id} value={ledger.id}>
-                      {formatReserveLabel(ledger)}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-            ) : null}
-
             <label className="space-y-2">
               <span className="text-sm font-medium text-zinc-200">Token mint</span>
               <Select value={form.tokenMintAddress} onChange={(event) => setForm((current) => ({ ...current, tokenMintAddress: event.target.value }))}>
@@ -312,7 +482,11 @@ function SettlementCreatePage() {
 
             <label className="space-y-2">
               <span className="text-sm font-medium text-zinc-200">Amount</span>
-              <Input value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))} />
+              <Input
+                value={form.amount}
+                onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))}
+                readOnly={form.requestType === REQUEST_TYPES.RESERVE_MINT || form.requestType === REQUEST_TYPES.REPLENISHMENT_MINT}
+              />
             </label>
 
             {(form.requestType === REQUEST_TYPES.INTERBANK_TRANSFER || form.requestType === REQUEST_TYPES.REDEMPTION) ? (
@@ -322,6 +496,42 @@ function SettlementCreatePage() {
               </label>
             ) : null}
           </div>
+
+          {(form.requestType === REQUEST_TYPES.RESERVE_MINT || form.requestType === REQUEST_TYPES.REPLENISHMENT_MINT) ? (
+            <div className="space-y-4 rounded-xl border border-emerald-400/15 bg-emerald-400/[0.06] p-4">
+              <ReserveBalancePanel
+                data={reserveBalance}
+                error={reserveBalanceError}
+                loading={reserveBalanceLoading}
+                subtitle="Reserve minting uses the linked DK Bank fiat reserve balance as the minting reference."
+                title="Reserve Fiat"
+              />
+              <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-white">Selected Reserve Capacity</h2>
+                  <p className="mt-1 text-sm text-zinc-300">
+                    Minted BTN should stay within the available fiat-backed reserve amount tracked for DK Bank.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                  <p className="text-xs uppercase tracking-[0.18em] text-zinc-400">Available reserve fiat</p>
+                  <p className="mt-1 text-xl font-semibold text-white">
+                    {formatAmount(reserveFiatAvailableAmount)} {reserveBalance?.inquiry?.currencyCode || reserveBalance?.reserveAccount?.currency || 'BTN'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.18em] text-zinc-400">Mint token amount</p>
+                <p className="mt-1 text-xl font-semibold text-white">
+                  {formatAmount(reserveMintAmount)} {reserveBalance?.inquiry?.currencyCode || reserveBalance?.reserveAccount?.currency || 'BTN'}
+                </p>
+                <p className="mt-2 text-sm text-zinc-300">
+                  The mint amount is fixed at 80% of the available reserve balance and rounded to a whole token.
+                </p>
+              </div>
+            </div>
+          ) : null}
 
           <label className="space-y-2">
             <span className="text-sm font-medium text-zinc-200">Transfer purpose</span>
@@ -379,10 +589,14 @@ function SettlementCreatePage() {
             {(form.requestType === REQUEST_TYPES.RESERVE_MINT || form.requestType === REQUEST_TYPES.REPLENISHMENT_MINT) ? (
               <>
                 <p>
-                  Reserve source: {(() => {
-                    const selectedReserve = availableReserveLedgers.find((ledger) => ledger.id === form.reserveLedgerId);
-                    return selectedReserve ? formatReserveLabel(selectedReserve) : '-';
-                  })()}
+                  Reserve fiat: {reserveBalance?.inquiry?.availableBalance != null
+                    ? `${formatAmount(reserveBalance.inquiry.availableBalance)} ${reserveBalance.inquiry.currencyCode || reserveBalance.reserveAccount?.currency || 'BTN'}`
+                    : '-'}
+                </p>
+                <p>
+                  Reserve available balance: {reserveBalance?.inquiry?.availableBalance != null
+                    ? `${formatAmount(reserveBalance.inquiry.availableBalance)} ${reserveBalance.inquiry.currencyCode || reserveBalance.reserveAccount?.currency || 'BTN'}`
+                    : '-'}
                 </p>
                 <p>Mint target: {sourceBank?.name ? `${sourceBank.name} treasury token account` : '-'}</p>
               </>
