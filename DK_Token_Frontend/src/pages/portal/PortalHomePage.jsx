@@ -1,4 +1,4 @@
-import { ArrowTrendingUpIcon, BanknotesIcon, BoltIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
+import { ArrowTrendingUpIcon, BanknotesIcon, BoltIcon } from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -21,12 +21,6 @@ const ACTION_CARDS = [
     description: 'Create a sell instruction for BTN and capture your preferred payout account details.',
     path: '/portal/sell',
     icon: ArrowTrendingUpIcon,
-  },
-  {
-    title: 'Redeem BTN',
-    description: 'Start a reserve-backed redemption flow when you want BTN returned against fiat value.',
-    path: '/portal/redeem',
-    icon: ShieldCheckIcon,
   },
   {
     title: 'Transfer BTN',
@@ -128,7 +122,7 @@ function PortalHomePage() {
               Welcome back, {customer?.fullName}
             </h2>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-zinc-200/80">
-              Use this portal to manage customer-facing BTN actions only. Buy, sell, redeem, and transfer flows are kept separate from the admin operations console.
+              Use this portal to manage customer-facing BTN actions only. Buy, sell, and transfer flows are kept separate from the admin operations console.
             </p>
           </div>
 

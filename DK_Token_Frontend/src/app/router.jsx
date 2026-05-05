@@ -63,7 +63,6 @@ const router = createBrowserRouter([
           { path: 'overview', element: <PortalHomePage /> },
           { path: 'buy', element: <PortalActionPage mode="buy" /> },
           { path: 'sell', element: <PortalActionPage mode="sell" /> },
-          { path: 'redeem', element: <PortalActionPage mode="redeem" /> },
           { path: 'transfer', element: <PortalActionPage mode="transfer" /> },
         ],
       },

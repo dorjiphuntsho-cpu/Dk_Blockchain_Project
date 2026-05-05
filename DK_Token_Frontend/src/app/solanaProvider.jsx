@@ -5,7 +5,13 @@ import SolanaContext from './solanaContext';
 import { SOLANA_CLUSTER, SOLANA_RPC_URL } from '../utils/constants';
 
 function getAddress(provider) {
-  return provider?.publicKey?.toBase58?.() || null;
+  return (
+    provider?.publicKey?.toBase58?.()
+    || provider?.publicKey?.toString?.()
+    || provider?._publicKey?.toBase58?.()
+    || provider?._publicKey?.toString?.()
+    || null
+  );
 }
 
 function detectInjectedWallet() {
@@ -162,7 +168,14 @@ function SolanaProvider({ children }) {
   }, [providerState.available, providerState.provider]);
 
   const connect = useCallback(async () => {
-    const provider = providerState.provider;
+    let { provider } = providerState;
+
+    if (!provider?.connect) {
+      const refreshed = detectInjectedWallet();
+      setProviderState(refreshed);
+      provider = refreshed.provider;
+    }
+
     if (!provider?.connect) {
       setError('No compatible browser wallet detected. Install Phantom or another injected Solana wallet.');
       return null;
@@ -170,11 +183,19 @@ function SolanaProvider({ children }) {
 
     try {
       setConnecting(true);
+
       const response = await provider.connect();
-      const nextAddress = response?.publicKey?.toBase58?.() || getAddress(provider);
+      const nextAddress =
+        response?.publicKey?.toBase58?.()
+        || response?.publicKey?.toString?.()
+        || provider?.publicKey?.toBase58?.()
+        || provider?.publicKey?.toString?.()
+        || null;
+
       setConnected(Boolean(nextAddress));
       setAddress(nextAddress);
       setError('');
+
       return nextAddress;
     } catch (connectionError) {
       setError(normalizeWalletError(connectionError, 'Wallet connection was not completed.'));
@@ -182,7 +203,8 @@ function SolanaProvider({ children }) {
     } finally {
       setConnecting(false);
     }
-  }, [providerState.provider]);
+  }, [providerState]);
+
 
   const resetSession = useCallback(async () => {
     const provider = providerState.provider;

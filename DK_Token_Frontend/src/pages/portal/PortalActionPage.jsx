@@ -14,6 +14,13 @@ import { getErrorMessage } from '../../utils/error';
 import { formatAmount, truncateMiddle } from '../../utils/format';
 import { SOLANA_RPC_URL } from '../../utils/constants';
 
+const Spinner = ({ className = 'size-4' }) => (
+  <span
+    aria-hidden="true"
+    className={`inline-block animate-spin rounded-full border-2 border-current border-t-transparent ${className}`}
+  />
+);
+
 const ACTION_CONFIG = {
   buy: {
     title: 'Buy BTN',
@@ -65,8 +72,8 @@ function buildInitialValues(fields) {
 
 function PortalActionPage({ mode }) {
   const config = ACTION_CONFIG[mode];
-  const initialValues = useMemo(() => buildInitialValues(config.fields), [config.fields]);
-  const [values, setValues] = useState(initialValues);
+  const [values, setValues] = useState(() => buildInitialValues(config.fields));
+
   const [lastSubmission, setLastSubmission] = useState(null);
   const [paymentDetails, setPaymentDetails] = useState(null);
   const [submissionError, setSubmissionError] = useState('');
@@ -78,11 +85,11 @@ function PortalActionPage({ mode }) {
   const solanaWallet = useSolanaWallet();
 
   useEffect(() => {
-    setValues(initialValues);
+    setValues(buildInitialValues(ACTION_CONFIG[mode].fields));
     setLastSubmission(null);
     setPaymentDetails(null);
     setSubmissionError('');
-  }, [initialValues, mode]);
+  }, [mode]);
 
   useEffect(() => {
     let isMounted = true;
@@ -172,12 +179,21 @@ function PortalActionPage({ mode }) {
       return;
     }
 
-    if (!solanaWallet.connected || !solanaWallet.provider || !solanaWallet.address) {
-      enqueueSnackbar(`Connect the customer Phantom wallet before enabling automatic ${mode}.`, { variant: 'warning' });
+    let activeWalletAddress = solanaWallet.address;
+    const walletAlreadyConnected = solanaWallet.connected && Boolean(activeWalletAddress);
+
+    if (!walletAlreadyConnected) {
+      activeWalletAddress = await solanaWallet.connect();
+    }
+
+    if (!activeWalletAddress) {
+      enqueueSnackbar(`Connect the customer Phantom wallet before enabling automatic ${mode}.`, {
+        variant: 'warning',
+      });
       return;
     }
 
-    if (solanaWallet.address !== customerWalletAddress) {
+    if (activeWalletAddress !== customerWalletAddress) {
       enqueueSnackbar(`Connected wallet must match the customer wallet ${customerWalletAddress}.`, { variant: 'error' });
       return;
     }
@@ -232,14 +248,14 @@ function PortalActionPage({ mode }) {
       let response;
       if (mode === 'buy') {
         response = await portalApi.buyBtn(token, {
-            amount: values.amount,
-            debitAccount: values.debitAccount,
-          });
+          amount: values.amount,
+          debitAccount: values.debitAccount,
+        });
       } else if (mode === 'sell') {
         response = await portalApi.sellBtn(token, {
-            amount: values.amount,
-            payoutAccount: values.payoutAccount,
-          });
+          amount: values.amount,
+          payoutAccount: values.payoutAccount,
+        });
       } else {
         response = await portalApi.transferBtn(token, {
           amount: values.amount,
@@ -358,8 +374,8 @@ function PortalActionPage({ mode }) {
   const sellDelegationReady = Boolean(sellDelegation?.sufficient || sellDelegation?.active);
   const sellDelegationMetadataReady = Boolean(
     summary?.customer?.sellDelegation?.tokenAccountAddress
-      && summary?.customer?.sellDelegation?.delegateWalletAddress
-      && (summary?.customer?.primaryWalletAddress || customer?.wallets?.[0]?.walletAddress),
+    && summary?.customer?.sellDelegation?.delegateWalletAddress
+    && (summary?.customer?.primaryWalletAddress || customer?.wallets?.[0]?.walletAddress),
   );
 
   return (
@@ -399,20 +415,28 @@ function PortalActionPage({ mode }) {
             <div className="mt-4">
               <Button
                 className="w-full"
-                disabled={isApprovingDelegation || !solanaWallet.available || !summary}
+                disabled={isApprovingDelegation || !solanaWallet.available || !summary || !solanaWallet.connected}
                 onClick={handleApproveSellDelegation}
                 type="button"
                 variant={sellDelegationReady ? 'outline' : 'secondary'}
               >
+                {isApprovingDelegation ? <Spinner /> : null}
                 {isApprovingDelegation
                   ? 'Approving...'
                   : !summary
                     ? 'Loading wallet metadata...'
-                    : sellDelegationReady
-                      ? 'Refresh delegation'
-                      : `Enable Automatic ${mode === 'sell' ? 'Sell' : 'Transfer'}`}
+                    : !solanaWallet.connected
+                      ? 'Connect wallet first'
+                      : sellDelegationReady
+                        ? 'Refresh delegation'
+                        : `Enable Automatic ${mode === 'sell' ? 'Sell' : 'Transfer'}`}
               </Button>
             </div>
+            {!solanaWallet.connected ? (
+              <p className="mt-3 text-sm text-zinc-400">
+                Connect the customer Phantom wallet before enabling automatic {mode}. This prevents an extra wallet authorization prompt during transaction signing.
+              </p>
+            ) : null}
             {!sellDelegationMetadataReady && summary ? (
               <p className="mt-3 text-sm text-amber-200/80">
                 Wallet delegation metadata is still loading. If this persists after a refresh, the customer wallet may not have a BTN token account yet.
@@ -431,18 +455,23 @@ function PortalActionPage({ mode }) {
           {config.fields.map((field) => (
             <label className="grid gap-2" key={field.name}>
               <span className="text-sm font-medium text-zinc-200">{field.label}</span>
+
               <Input
                 disabled={isSubmitting}
                 onChange={(event) => handleChange(field.name, event.target.value)}
                 placeholder={field.placeholder}
-                value={values[field.name]}
+                value={values[field.name] ?? ""}
               />
             </label>
+
           ))}
 
           <div className="pt-2">
             <Button className="w-full" disabled={isSubmitting} size="lg" type="submit">
-              {isSubmitting ? 'Submitting...' : config.buttonLabel}
+              <span className="inline-flex items-center gap-2">
+                {isSubmitting ? <Spinner /> : null}
+                {isSubmitting ? 'Submitting...' : config.buttonLabel}
+              </span>
             </Button>
           </div>
         </form>

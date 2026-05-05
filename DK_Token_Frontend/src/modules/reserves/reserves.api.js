@@ -6,6 +6,11 @@ function unsupportedMock(name) {
 }
 
 export const reservesApi = {
+  listTransactions: async () => (
+    ENABLE_MOCK_API
+      ? unsupportedMock('Reserve transactions')
+      : (await axiosClient.get('/reserves/transactions')).data
+  ),
   list: async (params) => (
     ENABLE_MOCK_API
       ? unsupportedMock('Reserve list')

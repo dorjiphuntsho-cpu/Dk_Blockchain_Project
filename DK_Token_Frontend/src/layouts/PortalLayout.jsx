@@ -1,6 +1,5 @@
 import {
   ArrowsRightLeftIcon,
-  ArrowPathRoundedSquareIcon,
   BanknotesIcon,
   CurrencyDollarIcon,
   PowerIcon,
@@ -18,7 +17,6 @@ const PORTAL_NAV_ITEMS = [
   { label: 'Overview', path: '/portal/overview', icon: BanknotesIcon },
   { label: 'Buy BTN', path: '/portal/buy', icon: CurrencyDollarIcon },
   { label: 'Sell BTN', path: '/portal/sell', icon: ArrowsRightLeftIcon },
-  { label: 'Redeem BTN', path: '/portal/redeem', icon: ArrowPathRoundedSquareIcon },
   { label: 'Transfer BTN', path: '/portal/transfer', icon: ArrowsRightLeftIcon },
 ];
 

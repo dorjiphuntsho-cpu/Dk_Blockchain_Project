@@ -11,6 +11,15 @@ async function getReserves(req, res) {
   });
 }
 
+async function getReserveTransactions(req, res) {
+  const transactions = await reserveService.getReserveTransactions();
+
+  return successResponse(res, {
+    message: 'Reserve transactions fetched successfully',
+    data: transactions,
+  });
+}
+
 async function getReserveById(req, res) {
   const reserve = await reserveService.getReserveLedgerOrThrow(req.params.id);
 
@@ -40,6 +49,7 @@ async function rejectReserve(req, res) {
 
 module.exports = {
   getReserves,
+  getReserveTransactions,
   getReserveById,
   approveReserve,
   rejectReserve,

@@ -3,6 +3,7 @@ const ApiError = require('../utils/ApiError');
 const { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } = require('../utils/enums');
 const auditLogService = require('./auditLog.service');
 const { buildPagination, getPagination, getSortOptions } = require('../utils/pagination');
+const { isSuccessfulPaymentStatus } = require('./paymentPolicy.service');
 
 const RESERVE_STATUSES = {
   PENDING: 'PENDING',
@@ -135,6 +136,53 @@ async function listReserves(query) {
     items: hydratedItems,
     pagination: buildPagination({ page, limit, totalItems }),
   };
+}
+
+async function getReserveTransactions() {
+  const paymentTransactions = await prisma.paymentTransaction.findMany({
+    orderBy: {
+      createdAt: 'desc',
+    },
+    select: {
+      id: true,
+      paymentReference: true,
+      customerReference: true,
+      amount: true,
+      currency: true,
+      status: true,
+      parsedPayload: true,
+      confirmedAt: true,
+      createdAt: true,
+    },
+  });
+
+  return paymentTransactions.flatMap((transaction) => {
+    if (!isSuccessfulPaymentStatus(transaction.status)) {
+      return [];
+    }
+
+    const customerReference = String(transaction.customerReference || '');
+    const isBuy = customerReference.startsWith('BTN_BUY:');
+    const isSell = customerReference.startsWith('BTN_SELL:');
+    const isFiatFallbackTransfer = customerReference.startsWith('BTN_TRANSFER:')
+      && transaction.parsedPayload?.transferMode === 'FIAT_FALLBACK';
+
+    if (!isBuy && !isSell && !isFiatFallbackTransfer) {
+      return [];
+    }
+
+    return [{
+      id: transaction.id,
+      type: isBuy ? 'CREDIT' : 'DEBIT',
+      amount: Number(transaction.amount),
+      currency: transaction.currency,
+      source: isBuy ? 'BUY' : (isSell ? 'SELL' : 'TRANSFER'),
+      referenceId: transaction.paymentReference,
+      createdAt: transaction.confirmedAt || transaction.createdAt,
+    }];
+  }).sort((left, right) => (
+    new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+  ));
 }
 
 async function approveReserve(id, actorUserId) {
@@ -328,6 +376,7 @@ module.exports = {
   PAYMENT_GATEWAY_REFERENCE_TYPE,
   getReserveLedgerOrThrow,
   listReserves,
+  getReserveTransactions,
   approveReserve,
   rejectReserve,
   findReserveByPaymentReference,

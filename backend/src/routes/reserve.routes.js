@@ -23,6 +23,12 @@ router.get(
 );
 
 router.get(
+  '/transactions',
+  authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.MAKER, ROLE_NAMES.CHECKER, ROLE_NAMES.EXECUTOR),
+  asyncHandler(reserveController.getReserveTransactions),
+);
+
+router.get(
   '/:id',
   authorize(ROLE_NAMES.ADMIN, ROLE_NAMES.MAKER, ROLE_NAMES.CHECKER, ROLE_NAMES.EXECUTOR),
   validate(reserveIdParamSchema),

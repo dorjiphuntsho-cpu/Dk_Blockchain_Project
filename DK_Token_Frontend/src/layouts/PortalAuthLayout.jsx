@@ -12,7 +12,7 @@ function PortalAuthLayout() {
                   BTN User Portal
                 </div>
                 <h1 className="mt-6 max-w-md text-4xl font-semibold tracking-tight text-white">
-                  Buy, sell, redeem, and transfer BTN without entering the admin console.
+                  Buy, sell, and transfer BTN without entering the admin console.
                 </h1>
                 <p className="mt-4 max-w-xl text-sm leading-7 text-zinc-400">
                   This customer space is isolated from operations dashboards and intended for direct retail flows using CID and DK Bank MPIN.
@@ -23,7 +23,6 @@ function PortalAuthLayout() {
                 {[
                   ['Buy BTN', 'Move money into DK Bank and request BTN issuance against your customer flow.'],
                   ['Sell BTN', 'Start a sell instruction and route proceeds to your linked bank account.'],
-                  ['Redeem BTN', 'Burn or redeem your BTN against eligible reserve-backed payout paths.'],
                   ['Transfer BTN', 'Send BTN directly to another registered beneficiary account.'],
                 ].map(([title, description]) => (
                   <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4" key={title}>

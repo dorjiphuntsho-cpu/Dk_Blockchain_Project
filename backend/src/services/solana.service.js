@@ -1048,14 +1048,7 @@ async function transferFromCustomerWalletToWallet({ mintAddress, amount, sourceW
 
   const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
   const sourceWalletPublicKey = parsePublicKey(sourceWalletAddress, 'sourceWalletAddress');
-  const destinationWalletPublicKey = parsePublicKey(destinationWalletAddress, 'destinationWalletAddress');
   const sourceTokenAccount = getOwnerAta(mintPublicKey, sourceWalletPublicKey);
-  const destinationTokenAccount = await getOrCreateAssociatedTokenAccount(
-    getConnection(),
-    makerKeypair,
-    mintPublicKey,
-    destinationWalletPublicKey,
-  );
   const rawAmount = toBigIntAmount(amount);
   const sourceAccount = await getAccount(getConnection(), sourceTokenAccount, env.SOLANA_COMMITMENT);
 
@@ -1079,6 +1072,31 @@ async function transferFromCustomerWalletToWallet({ mintAddress, amount, sourceW
     );
   }
 
+  let destinationWalletPublicKey = null;
+  try {
+    destinationWalletPublicKey = destinationWalletAddress ? new PublicKey(destinationWalletAddress) : null;
+  } catch {
+    destinationWalletPublicKey = null;
+  }
+
+  let transferTargetOwner = destinationWalletPublicKey;
+  let transferMode = 'wallet';
+  let fiatAmount = null;
+
+  if (!transferTargetOwner) {
+    transferTargetOwner = parsePublicKey(env.DISTRIBUTOR_WALLET_ADDRESS, 'DISTRIBUTOR_WALLET_ADDRESS');
+    fiatAmount = await convertBtnToFiat(rawAmount);
+    await creditFiatBalance({ amount: fiatAmount, destinationWalletAddress, sourceWalletAddress });
+    transferMode = 'fiat_fallback';
+  }
+
+  const destinationTokenAccount = await getOrCreateAssociatedTokenAccount(
+    getConnection(),
+    makerKeypair,
+    mintPublicKey,
+    transferTargetOwner,
+  );
+
   const transferSignature = await transferTokens(
     getConnection(),
     makerKeypair,
@@ -1100,12 +1118,16 @@ async function transferFromCustomerWalletToWallet({ mintAddress, amount, sourceW
     explorerUrl: buildExplorerUrl(transferSignature),
     sourceWalletAddress: sourceWalletPublicKey.toBase58(),
     sourceTokenAccount: sourceTokenAccount.toBase58(),
-    destinationWalletAddress: destinationWalletPublicKey.toBase58(),
+    destinationWalletAddress: destinationWalletPublicKey?.toBase58() || null,
     destinationTokenAccount: destinationTokenAccount.address.toBase58(),
+    distributorWalletAddress: transferMode === 'fiat_fallback' ? transferTargetOwner.toBase58() : null,
     delegateWalletAddress: makerKeypair.publicKey.toBase58(),
     delegatedAmount: delegatedAmount.toString(),
+    transferMode,
+    fiatAmount,
   };
 }
+
 
 async function assertCheckerConfigured(configAddress, checkerKeypair) {
   const checkerProgram = getProgram(checkerKeypair);
