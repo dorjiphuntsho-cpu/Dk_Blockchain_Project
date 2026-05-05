@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint .",
+    "format": "prettier --write '**/*.{js,json,md}'",
     "bips:reconcile": "node scripts/reconcile-bips.js",
     "payments:reconcile": "node scripts/reconcile-payments.js",
     "test:backend": "node tests/run-backend-tests.js",
@@ -45,7 +47,9 @@
     "zod": "^3.24.4"
   },
   "devDependencies": {
+    "eslint": "^8.57.0",
     "nodemon": "^3.1.10",
+    "prettier": "^3.8.3",
     "prisma": "^6.7.0"
   }
 }

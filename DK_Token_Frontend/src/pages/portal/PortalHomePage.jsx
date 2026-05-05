@@ -99,7 +99,7 @@ function PortalHomePage() {
   const linkedAccount = summary?.linkedAccount;
   const tokenName = tokenSummary?.name || 'BTN Token';
   const tokenSymbol = tokenSummary?.symbol || 'BTN';
-  const walletAddress = summary?.customer?.primaryWalletAddress || customer?.wallets?.[0]?.walletAddress || 'Not linked';
+  const walletAddress = summary?.customer?.primaryWalletAddress || customer?.wallets?.[0]?.walletAddress || 'Not linked'; // eslint-disable-line no-unused-vars
   const linkedBankAccountNumber = summary?.customer?.linkedBankAccountNumber || customer?.linkedBankAccountNumber || 'Not linked';
   const btnBalance = summary?.customer?.btnBalance != null
     ? `${formatAmount(summary.customer.btnBalance)} ${tokenSymbol}`

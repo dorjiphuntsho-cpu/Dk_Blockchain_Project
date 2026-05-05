@@ -157,8 +157,6 @@ function DashboardPage() {
   const overview = state.overview;
   const settlementSummary = overview?.settlementSummary || null;
   const reserveSummary = overview?.issuerReserveBalance || null;
-  
-  console.log(reserveSummary)
   const reserveBalanceMetricValue = reserveSummary?.inquiry?.availableBalance != null
     ? `${reserveSummary.inquiry.currencyCode || reserveSummary.reserveAccount?.currency || 'BTN'} ${formatAmount(reserveSummary.inquiry.availableBalance)}`
     : 'Unavailable';

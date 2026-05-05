@@ -33,7 +33,7 @@ router.use('/payments', paymentsRoutes);
 router.use('/reserves', reserveRoutes);
 router.use('/settlements', settlementRoutes);
 router.use('/token-requests', tokenRequestRoutes);
-router.use('/token-requests', approvalRoutes);
+router.use('/token-requests', approvalRoutes); // approval subpaths for token requests
 router.use('/audit-logs', auditLogRoutes);
 
 module.exports = router;

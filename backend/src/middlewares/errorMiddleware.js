@@ -3,6 +3,7 @@ const ApiError = require('../utils/ApiError');
 const logger = require('../utils/logger');
 
 function errorMiddleware(error, _req, res, _next) {
+  const isProduction = process.env.NODE_ENV === 'production';
   let statusCode = error.statusCode || 500;
   let message = error.message || 'Internal server error';
   let errors = error.errors || [];
@@ -27,6 +28,13 @@ function errorMiddleware(error, _req, res, _next) {
     message = 'Database validation failed';
   } else if (!(error instanceof ApiError)) {
     logger.error(error);
+    if (statusCode === 500) {
+      message = 'Internal server error';
+    }
+  }
+
+  if (!isProduction && error.stack) {
+    errors = [...errors, { stack: error.stack }];
   }
 
   return res.status(statusCode).json({

@@ -43,8 +43,22 @@ function BanksPage() {
   }, [filters, paginationQuery]);
 
   useEffect(() => {
-    loadBanks();
-  }, [loadBanks]);
+    const loadData = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        const response = await banksApi.list({ ...filters, ...paginationQuery });
+        setBanks(response.data.items);
+        setPagination(response.data.pagination);
+      } catch (loadError) {
+        setError(loadError.message || 'Unable to load banks.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [filters, paginationQuery]);
 
   const columns = useMemo(() => [
     {

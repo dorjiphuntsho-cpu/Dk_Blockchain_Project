@@ -6,6 +6,8 @@ const env = require('./env');
 const logger = require('../utils/logger');
 const solanaService = require('../services/solana.service');
 
+const prisma = require('./prisma');
+
 function getPrismaBinaryPath() {
   const binaryName = process.platform === 'win32' ? 'prisma.cmd' : 'prisma';
   return path.join(process.cwd(), 'node_modules', '.bin', binaryName);
@@ -100,7 +102,6 @@ async function bootstrapApplication() {
     await runPrismaCommand(['db', 'push', '--skip-generate']);
   }
 
-  const prisma = require('./prisma');
   await prisma.$connect();
   logger.info('Database connection established.');
 

@@ -102,8 +102,25 @@ function BankDetailsPage() {
   }, [applyBankState, id]);
 
   useEffect(() => {
-    loadBank();
-  }, [loadBank]);
+    const loadData = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        const [bankResponse, solanaStatusResponse] = await Promise.all([
+          banksApi.getById(id),
+          solanaAdminApi.getConfigStatus(),
+        ]);
+        applyBankState(bankResponse.data);
+        setSolanaStatus(solanaStatusResponse.data);
+      } catch (loadError) {
+        setError(loadError.message || 'Unable to load bank details.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [applyBankState, id]);
 
   const tokenColumns = useMemo(() => [
     {
