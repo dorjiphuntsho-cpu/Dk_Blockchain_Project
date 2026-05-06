@@ -2,6 +2,143 @@ const prisma = require('../config/prisma');
 const { tokenRequestInclude } = require('../models/tokenRequest.model');
 const { ROLE_NAMES, TOKEN_REQUEST_STATUSES } = require('../utils/enums');
 const cbsService = require('./cbs.service');
+const solanaService = require('./solana.service');
+
+function formatTokenSupply(rawAmount, decimals) {
+  const normalizedRawAmount = String(rawAmount ?? '0');
+  const normalizedDecimals = Number.isInteger(decimals) && decimals >= 0 ? decimals : 0;
+
+  if (normalizedDecimals === 0) {
+    return normalizedRawAmount;
+  }
+
+  const padded = normalizedRawAmount.padStart(normalizedDecimals + 1, '0');
+  const whole = padded.slice(0, -normalizedDecimals) || '0';
+  const fraction = padded.slice(-normalizedDecimals).replace(/0+$/, '');
+
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
+function normalizeTokenLabel(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function selectDashboardManagedToken(tokens) {
+  if (!Array.isArray(tokens) || tokens.length === 0) {
+    return null;
+  }
+
+  const exactBtnSymbolMatch = tokens.find((token) => normalizeTokenLabel(token.symbol) === 'BTN');
+  if (exactBtnSymbolMatch) {
+    return exactBtnSymbolMatch;
+  }
+
+  const btnNameMatch = tokens.find((token) => normalizeTokenLabel(token.name).includes('BTN'));
+  if (btnNameMatch) {
+    return btnNameMatch;
+  }
+
+  return tokens[0];
+}
+
+function subtractRawAmounts(totalRawAmount, allocatedRawAmount) {
+  const total = BigInt(String(totalRawAmount ?? '0'));
+  const allocated = BigInt(String(allocatedRawAmount ?? '0'));
+  return total > allocated ? String(total - allocated) : '0';
+}
+
+async function buildDashboardTokenSummary() {
+  const managedTokens = await prisma.managedToken.findMany({
+    orderBy: [{ createdAt: 'desc' }],
+  });
+  const managedToken = selectDashboardManagedToken(managedTokens);
+
+  if (!managedToken) {
+    return {
+      id: null,
+      name: 'BTN Token',
+      symbol: 'BTN',
+      mintAddress: null,
+      decimals: 0,
+      totalSupplyRaw: null,
+      totalSupplyDisplay: null,
+      distributionInventory: null,
+      inCirculationRaw: null,
+      inCirculationDisplay: null,
+      warning: 'No managed BTN token is registered yet.',
+    };
+  }
+
+  const issuerBank = await prisma.bank.findFirst({
+    where: {
+      isIssuer: true,
+      isActive: true,
+    },
+    include: {
+      accounts: {
+        where: {
+          isActive: true,
+        },
+        orderBy: [
+          { isPrimary: 'desc' },
+          { createdAt: 'asc' },
+        ],
+      },
+    },
+    orderBy: [{ createdAt: 'asc' }],
+  });
+  const hydratedToken = await solanaService.hydrateManagedToken(managedToken);
+  const decimals = hydratedToken.onChain?.decimals ?? hydratedToken.decimals ?? 0;
+  const rawSupply = hydratedToken.onChain?.supply ?? '0';
+  let distributionInventory = null;
+
+  if (issuerBank?.id && hydratedToken.mintAddress) {
+    try {
+      const distributionTokenAccount = await solanaService.resolveBankDistributionTokenAccount(
+        issuerBank.id,
+        hydratedToken.mintAddress,
+      );
+      const distributionBalance = await solanaService.getTokenAccountBalance(
+        distributionTokenAccount.tokenAccountAddress,
+      );
+
+      distributionInventory = {
+        purpose: distributionTokenAccount.purpose,
+        tokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
+        walletAddress: distributionTokenAccount.treasuryWalletAddress,
+        rawAmount: distributionBalance.rawAmount,
+        displayAmount: formatTokenSupply(distributionBalance.rawAmount, decimals),
+      };
+    } catch (error) {
+      distributionInventory = {
+        purpose: 'DISTRIBUTION',
+        tokenAccountAddress: null,
+        walletAddress: null,
+        rawAmount: null,
+        displayAmount: null,
+        warning: error.message,
+      };
+    }
+  }
+
+  const inCirculationRaw = distributionInventory?.rawAmount != null
+    ? subtractRawAmounts(rawSupply, distributionInventory.rawAmount)
+    : rawSupply;
+
+  return {
+    id: hydratedToken.id,
+    name: hydratedToken.name || 'BTN Token',
+    symbol: hydratedToken.symbol || 'BTN',
+    mintAddress: hydratedToken.mintAddress,
+    decimals,
+    totalSupplyRaw: rawSupply,
+    totalSupplyDisplay: formatTokenSupply(rawSupply, decimals),
+    distributionInventory,
+    inCirculationRaw,
+    inCirculationDisplay: formatTokenSupply(inCirculationRaw, decimals),
+    warning: hydratedToken.warning || distributionInventory?.warning || null,
+  };
+}
 
 function getVisibleRequestWhere(user) {
   if (user.roles.includes(ROLE_NAMES.ADMIN)) {
@@ -55,6 +192,7 @@ async function getDashboardOverview(user) {
     recentSettlements,
     pendingSettlementReconciliation,
     issuerReserveBalance,
+    tokenSummary,
   ] = await Promise.all([
     prisma.tokenRequest.groupBy({
       by: ['status'],
@@ -140,6 +278,19 @@ async function getDashboardOverview(user) {
     cbsService.getIssuerReserveBalance().catch((error) => ({
       warning: error.message,
     })),
+    buildDashboardTokenSummary().catch((error) => ({
+      id: null,
+      name: 'BTN Token',
+      symbol: 'BTN',
+      mintAddress: null,
+      decimals: 0,
+      totalSupplyRaw: null,
+      totalSupplyDisplay: null,
+      distributionInventory: null,
+      inCirculationRaw: null,
+      inCirculationDisplay: null,
+      warning: error.message,
+    })),
   ]);
 
   const countByStatus = Object.fromEntries(
@@ -199,6 +350,7 @@ async function getDashboardOverview(user) {
       executedRequests: countByStatus[TOKEN_REQUEST_STATUSES.EXECUTED] || 0,
       failedRequests: countByStatus[TOKEN_REQUEST_STATUSES.FAILED] || 0,
     },
+    tokenSummary,
     issuerReserveBalance,
     settlementSummary,
     recentRequests,

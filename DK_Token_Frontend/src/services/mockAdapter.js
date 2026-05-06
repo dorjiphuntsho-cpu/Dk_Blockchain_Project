@@ -557,6 +557,68 @@ function serializeManagedToken(db, token) {
   };
 }
 
+function formatMockTokenSupply(rawAmount, decimals) {
+  const normalizedRawAmount = String(rawAmount ?? '0');
+  const normalizedDecimals = Number.isInteger(decimals) && decimals >= 0 ? decimals : 0;
+
+  if (normalizedDecimals === 0) {
+    return normalizedRawAmount;
+  }
+
+  const padded = normalizedRawAmount.padStart(normalizedDecimals + 1, '0');
+  const whole = padded.slice(0, -normalizedDecimals) || '0';
+  const fraction = padded.slice(-normalizedDecimals).replace(/0+$/, '');
+
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
+function buildMockDashboardTokenSummary(db) {
+  const token = db.managedTokens[0] || null;
+
+  if (!token) {
+    return {
+      id: null,
+      name: 'BTN Token',
+      symbol: 'BTN',
+      mintAddress: null,
+      decimals: 0,
+      totalSupplyRaw: null,
+      totalSupplyDisplay: null,
+      distributionInventory: null,
+      inCirculationRaw: null,
+      inCirculationDisplay: null,
+      warning: 'No managed BTN token is registered yet.',
+    };
+  }
+
+  const distributionRawAmount = token.distributionRawAmount ?? token.supply ?? '0';
+  const inCirculationRaw = (() => {
+    const supply = BigInt(String(token.supply ?? '0'));
+    const distribution = BigInt(String(distributionRawAmount ?? '0'));
+    return supply > distribution ? String(supply - distribution) : '0';
+  })();
+
+  return {
+    id: token.id,
+    name: token.name || 'BTN Token',
+    symbol: token.symbol || 'BTN',
+    mintAddress: token.mintAddress,
+    decimals: token.decimals ?? 0,
+    totalSupplyRaw: token.supply ?? '0',
+    totalSupplyDisplay: formatMockTokenSupply(token.supply ?? '0', token.decimals ?? 0),
+    distributionInventory: {
+      purpose: 'DISTRIBUTION',
+      tokenAccountAddress: token.distributionTokenAccountAddress || null,
+      walletAddress: token.distributionWalletAddress || null,
+      rawAmount: distributionRawAmount,
+      displayAmount: formatMockTokenSupply(distributionRawAmount, token.decimals ?? 0),
+    },
+    inCirculationRaw,
+    inCirculationDisplay: formatMockTokenSupply(inCirculationRaw, token.decimals ?? 0),
+    warning: null,
+  };
+}
+
 export const mockAdapter = {
   auth: {
     login: async ({ email, password }) =>
@@ -1438,6 +1500,7 @@ export const mockAdapter = {
             executedRequests: visibleRequests.filter((request) => request.status === REQUEST_STATUSES.EXECUTED).length,
             failedRequests: visibleRequests.filter((request) => request.status === REQUEST_STATUSES.FAILED).length,
           },
+          tokenSummary: buildMockDashboardTokenSummary(db),
           recentRequests: sortItems(visibleRequests, 'createdAt', 'desc').slice(0, 5),
           pendingApprovals: visibleRequests.filter((request) => request.status === REQUEST_STATUSES.PENDING_APPROVAL).slice(0, 5),
           auditTrail: db.auditLogs.slice(0, 5).map((log) => serializeAuditLog(db, log)),

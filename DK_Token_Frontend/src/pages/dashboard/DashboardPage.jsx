@@ -157,8 +157,16 @@ function DashboardPage() {
   const overview = state.overview;
   const settlementSummary = overview?.settlementSummary || null;
   const reserveSummary = overview?.issuerReserveBalance || null;
+  const tokenSummary = overview?.tokenSummary || null;
+  const tokenSymbol = tokenSummary?.symbol || 'BTN';
   const reserveBalanceMetricValue = reserveSummary?.inquiry?.availableBalance != null
     ? `${reserveSummary.inquiry.currencyCode || reserveSummary.reserveAccount?.currency || 'BTN'} ${formatAmount(reserveSummary.inquiry.availableBalance)}`
+    : 'Unavailable';
+  const circulationMetricValue = tokenSummary?.inCirculationDisplay != null
+    ? `${formatAmount(tokenSummary.inCirculationDisplay)} ${tokenSymbol}`
+    : 'Unavailable';
+  const distributorMetricValue = tokenSummary?.distributionInventory?.displayAmount != null
+    ? `${formatAmount(tokenSummary.distributionInventory.displayAmount)} ${tokenSymbol}`
     : 'Unavailable';
 
   const pageCopy = useMemo(() => {
@@ -212,6 +220,8 @@ function DashboardPage() {
     switch (dashboardRole) {
       case ROLES.ADMIN:
         return [
+          metric('circulation', 'In circulation', circulationMetricValue, 'Minted supply outside the distributor wallet', <CheckCircleIcon className="size-4" />, 'success.main'),
+          metric('distributor', 'In distributor', distributorMetricValue, 'BTN currently parked in the distributor wallet', <ClipboardDocumentCheckIcon className="size-4" />, 'secondary.main'),
           metric('reserve', 'Reserve balance', reserveBalanceMetricValue, 'DK Bank issuer reserve account', <DocumentChartBarIcon className="size-4" />, 'success.main'),
           metric('total', 'Total requests', summary.totalRequests ?? 0, 'Across all visible workflows', <DocumentChartBarIcon className="size-4" />, 'primary.main'),
           metric('pending', 'Pending approvals', summary.pendingApprovals ?? 0, 'Waiting for checker action', <ClockIcon className="size-4" />, 'warning.main'),
@@ -220,6 +230,8 @@ function DashboardPage() {
         ];
       case ROLES.MAKER:
         return [
+          metric('circulation', 'In circulation', circulationMetricValue, 'Minted supply outside the distributor wallet', <CheckCircleIcon className="size-4" />, 'success.main'),
+          metric('distributor', 'In distributor', distributorMetricValue, 'BTN currently parked in the distributor wallet', <ClipboardDocumentCheckIcon className="size-4" />, 'secondary.main'),
           metric('reserve', 'Reserve balance', reserveBalanceMetricValue, 'Available reserve before issuer-backed minting', <DocumentChartBarIcon className="size-4" />, 'success.main'),
           metric('drafts', 'Drafts', state.draftCount, 'Still editable by you', <PencilSquareIcon className="size-4" />, 'primary.main'),
           metric('pending', 'Pending review', summary.pendingApprovals ?? 0, 'Submitted and awaiting a checker', <ClockIcon className="size-4" />, 'warning.main'),
@@ -228,6 +240,8 @@ function DashboardPage() {
         ];
       case ROLES.CHECKER:
         return [
+          metric('circulation', 'In circulation', circulationMetricValue, 'Minted supply outside the distributor wallet', <CheckCircleIcon className="size-4" />, 'success.main'),
+          metric('distributor', 'In distributor', distributorMetricValue, 'BTN currently parked in the distributor wallet', <ClipboardDocumentCheckIcon className="size-4" />, 'secondary.main'),
           metric('reserve', 'Reserve balance', reserveBalanceMetricValue, 'Reference balance before approving mint requests', <DocumentChartBarIcon className="size-4" />, 'success.main'),
           metric('pending', 'Pending approvals', summary.pendingApprovals ?? 0, 'Requests waiting in your queue', <ClockIcon className="size-4" />, 'warning.main'),
           metric('ready', 'In progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Still settling after wallet approval', <InboxStackIcon className="size-4" />, 'primary.main'),
@@ -236,6 +250,8 @@ function DashboardPage() {
         ];
       case ROLES.EXECUTOR:
         return [
+          metric('circulation', 'In circulation', circulationMetricValue, 'Minted supply outside the distributor wallet', <CheckCircleIcon className="size-4" />, 'success.main'),
+          metric('distributor', 'In distributor', distributorMetricValue, 'BTN currently parked in the distributor wallet', <ClipboardDocumentCheckIcon className="size-4" />, 'secondary.main'),
           metric('reserve', 'Reserve balance', reserveBalanceMetricValue, 'Current DK Bank issuer reserve position', <DocumentChartBarIcon className="size-4" />, 'success.main'),
           metric('ready', 'In progress', summary.onChainPending ?? summary.readyForExecution ?? 0, 'Still settling between wallet and backend capture', <InboxStackIcon className="size-4" />, 'secondary.main'),
           metric('executed', 'Executed', summary.executedRequests ?? 0, 'Successfully recorded outcomes', <CheckCircleIcon className="size-4" />, 'success.main'),
@@ -244,7 +260,7 @@ function DashboardPage() {
       default:
         return [];
     }
-  }, [dashboardRole, overview, reserveBalanceMetricValue, state.draftCount, state.rejectedCount, state.reviewedCount]);
+  }, [circulationMetricValue, dashboardRole, distributorMetricValue, overview, reserveBalanceMetricValue, state.draftCount, state.rejectedCount, state.reviewedCount]);
 
   const settlementMetrics = useMemo(() => {
     if (!(dashboardRole === ROLES.ADMIN || dashboardRole === ROLES.EXECUTOR) || !settlementSummary) {

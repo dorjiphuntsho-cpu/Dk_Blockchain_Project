@@ -80,7 +80,6 @@ export const REQUEST_STATUS_OPTIONS = [
 
 export const NAV_ITEMS = [
   { label: 'Dashboard', path: '/dashboard', roles: Object.values(ROLES), section: 'Overview', icon: 'dashboard' },
-  { label: 'Token Requests', path: '/token-requests', roles: [ROLES.ADMIN], section: 'Operations', icon: 'request' },
   { label: 'My Wallets', path: '/my-wallets', roles: Object.values(ROLES), section: 'Overview', icon: 'wallets' },
   { label: 'My Requests', path: '/my-requests', roles: [ROLES.MAKER], section: 'Operations', icon: 'myRequests' },
   { label: 'Pending Approvals', path: '/pending-approvals', roles: [ROLES.CHECKER], section: 'Operations', icon: 'approvals' },

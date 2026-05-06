@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSnackbar } from 'notistack';
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import { createApproveInstruction } from '@solana/spl-token';

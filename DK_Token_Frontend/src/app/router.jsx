@@ -26,7 +26,6 @@ import ReserveDetailsPage from '../pages/reserves/ReserveDetailsPage';
 import SettlementsPage from '../pages/settlements/SettlementsPage';
 import SettlementCreatePage from '../pages/settlements/SettlementCreatePage';
 import SettlementDetailsPage from '../pages/settlements/SettlementDetailsPage';
-import TokenRequestsPage from '../pages/tokenRequests/TokenRequestsPage';
 import TokenRequestCreatePage from '../pages/tokenRequests/TokenRequestCreatePage';
 import TokenRequestDetailsPage from '../pages/tokenRequests/TokenRequestDetailsPage';
 import MyTokenRequestsPage from '../pages/tokenRequests/MyTokenRequestsPage';
@@ -90,7 +89,7 @@ const router = createBrowserRouter([
               { path: 'banks/:id', element: <BankDetailsPage /> },
               { path: 'solana-admin', element: <SolanaAdminPage /> },
               { path: 'managed-tokens', element: <ManagedTokensPage /> },
-              { path: 'token-requests', element: <TokenRequestsPage /> },
+              // { path: 'token-requests', element: <TokenRequestsPage /> },
               { path: 'audit-logs', element: <AuditLogsPage /> },
             ],
           },
