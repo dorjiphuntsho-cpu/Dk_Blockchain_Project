@@ -5,9 +5,8 @@ package_manager = "yarn"
 resolution = true
 skip-lint = false
 
-
 [programs.localnet]
-dk_token = "8Kxsa814MpA7dmC5HNXy53TuQ4PWyi2JhqcUhAGYczY5"
+dk_token = "8NVHpP98zZjy6xiSeMXLkQDgn8PsH5Ggf6zCZWUJGfmx"
 
 [registry]
 url = "https://api.apr.dev"
@@ -17,4 +16,11 @@ cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "anchor test"
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 'tests/**/*.ts'"
+
+[test.validator]
+rpc_port = 8899
+bind_address = "127.0.0.1"
+
+[test]
+startup_wait = 20000

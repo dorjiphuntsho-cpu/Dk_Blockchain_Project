@@ -1,0 +1,89 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model MintRequest {
+  id            String   @id @default(uuid())
+  requestAddr   String   @unique
+  maker         String
+  bankId        String?
+  amount        Float
+  reserveSnapshot Float?
+  status        String   @default("Pending")
+  txSignature   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  bank          Bank?    @relation(fields: [bankId], references: [id])
+}
+
+model User {
+  id        String   @id @default(uuid())
+  wallet    String   @unique
+  role      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model TokenConfig {
+  id         String   @id @default("default")
+  adminAddr  String?
+  configAddr String?
+  mintAddr   String?
+  checkers   String[] @default([])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("token_config")
+}
+
+model Bank {
+  id          String   @id @default(uuid())
+  name        String
+  wallet      String   @unique
+  currency    String   @default("BTN")
+  fiatReserve Float
+  status      String   @default("Active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  mintRequests MintRequest[]
+  settlements  Settlement[]
+}
+
+model Settlement {
+  id                  String   @id @default(uuid())
+  bankId              String
+  senderWallet        String
+  recipientWallet     String
+  recipientRegistered Boolean
+  settlementType      String
+  amount              Float
+  currency            String   @default("BTN")
+  status              String   @default("Completed")
+  txSignature         String?
+  receiverName        String?
+  receiverAccount     String?
+  cbsProductType      String?
+  bankReference       String?
+  bankInquiryId       String?
+  bankTransactionId   String?
+  bankApiStatus       String?
+  bankApiMessage      String?
+  bankStatusCheckedAt DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  bank                Bank     @relation(fields: [bankId], references: [id])
+}
