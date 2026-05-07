@@ -1,6 +1,26 @@
 {
   "name": "DK Token",
   "symbol": "DKT",
-  "description": "Decentralized academic credential token",
-  "image": "https://gateway.pinata.cloud/ipfs/bafkreic6vvp3avjyuqqx56zwit6htsrxjxjv4kthodehai2y3vss6g2l6y"
+  "description": "Reserve-backed DKT payment token for the DK Blockchain Project. DKT is designed around a 1 DKT = 1 BTN settlement model with bank reserve, maker-checker minting, and FIAT payout fallback.",
+  "image": "https://gateway.pinata.cloud/ipfs/bafkreic6vvp3avjyuqqx56zwit6htsrxjxjv4kthodehai2y3vss6g2l6y",
+  "external_url": "https://github.com/dorjiphuntsho-cpu/Dk_Blockchain_Project",
+  "attributes": [
+    {
+      "trait_type": "Asset Type",
+      "value": "Reserve-backed payment token"
+    },
+    {
+      "trait_type": "Settlement Model",
+      "value": "1 DKT = 1 BTN"
+    }
+  ],
+  "properties": {
+    "category": "image",
+    "files": [
+      {
+        "uri": "https://gateway.pinata.cloud/ipfs/bafkreic6vvp3avjyuqqx56zwit6htsrxjxjv4kthodehai2y3vss6g2l6y",
+        "type": "image/png"
+      }
+    ]
+  }
 }
