@@ -11,7 +11,6 @@ import tokenConfigRoutes from "./routes/tokenConfig.routes.js";
 import userRoutes from "./routes/user.routes.js";
 
 dotenv.config();
-
 const app = express();
 
 app.use(cors());

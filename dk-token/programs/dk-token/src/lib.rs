@@ -1,9 +1,15 @@
-
 use anchor_lang::prelude::*;
+use anchor_spl::metadata::{
+    mpl_token_metadata::{
+        instructions::{CreateV1CpiBuilder, UpdateV1CpiBuilder},
+        types::{Data, TokenStandard},
+    },
+    Metadata,
+};
 use anchor_spl::token_interface::{
     self, Burn, Mint, MintTo, TokenAccount, TokenInterface, TransferChecked,
 };
-7
+
 pub mod error;
 pub mod state;
 
@@ -20,10 +26,7 @@ pub mod dk_token {
     // -------------------------------------------------
     // INITIALIZE SYSTEM
     // -------------------------------------------------
-    pub fn initialize(
-        ctx: Context<Initialize>,
-        checkers: Vec<Pubkey>,
-    ) -> Result<()> {
+    pub fn initialize(ctx: Context<Initialize>, checkers: Vec<Pubkey>) -> Result<()> {
         let config = &mut ctx.accounts.config;
         config.admin = ctx.accounts.admin.key();
         config.mint = Pubkey::default();
@@ -38,20 +41,98 @@ pub mod dk_token {
         let config = &mut ctx.accounts.config;
         require!(
             ctx.accounts.admin.key() == config.admin,
-
             ErrorCode::UnauthorizedChecker
         );
-        config.mint = ctx.accounts.mint.key(); 
+        config.mint = ctx.accounts.mint.key();
         Ok(())
-}
+    }
+
+    // -------------------------------------------------
+    // CREATE TOKEN METADATA (PDA mint authority signs)
+    // -------------------------------------------------
+    pub fn create_metadata(
+        ctx: Context<CreateMetadata>,
+        name: String,
+        symbol: String,
+        uri: String,
+    ) -> Result<()> {
+        let config = &ctx.accounts.config;
+        require!(
+            ctx.accounts.admin.key() == config.admin,
+            ErrorCode::UnauthorizedChecker
+        );
+        require!(
+            config.mint == ctx.accounts.mint.key(),
+            ErrorCode::InvalidConfig
+        );
+
+        let bump = ctx.bumps.mint_authority;
+        let seeds: &[&[u8]] = &[b"mint_authority", &[bump]];
+        let signer = &[seeds];
+
+        CreateV1CpiBuilder::new(&ctx.accounts.metadata_program.to_account_info())
+            .metadata(&ctx.accounts.metadata.to_account_info())
+            .mint(&ctx.accounts.mint.to_account_info(), false)
+            .authority(&ctx.accounts.mint_authority.to_account_info())
+            .payer(&ctx.accounts.admin.to_account_info())
+            .update_authority(&ctx.accounts.admin.to_account_info(), true)
+            .system_program(&ctx.accounts.system_program.to_account_info())
+            .sysvar_instructions(&ctx.accounts.sysvar_instructions.to_account_info())
+            .spl_token_program(Some(&ctx.accounts.token_program.to_account_info()))
+            .name(name)
+            .symbol(symbol)
+            .uri(uri)
+            .seller_fee_basis_points(0)
+            .primary_sale_happened(false)
+            .is_mutable(true)
+            .token_standard(TokenStandard::Fungible)
+            .decimals(ctx.accounts.mint.decimals)
+            .invoke_signed(signer)?;
+
+        Ok(())
+    }
+
+    // -------------------------------------------------
+    // UPDATE TOKEN METADATA (admin update authority)
+    // -------------------------------------------------
+    pub fn update_metadata(
+        ctx: Context<UpdateMetadata>,
+        name: String,
+        symbol: String,
+        uri: String,
+    ) -> Result<()> {
+        let config = &ctx.accounts.config;
+        require!(
+            ctx.accounts.admin.key() == config.admin,
+            ErrorCode::UnauthorizedChecker
+        );
+
+        let data = Data {
+            name,
+            symbol,
+            uri,
+            seller_fee_basis_points: 0,
+            creators: None,
+        };
+
+        UpdateV1CpiBuilder::new(&ctx.accounts.metadata_program.to_account_info())
+            .authority(&ctx.accounts.admin.to_account_info())
+            .mint(&ctx.accounts.mint.to_account_info())
+            .metadata(&ctx.accounts.metadata.to_account_info())
+            .payer(&ctx.accounts.admin.to_account_info())
+            .system_program(&ctx.accounts.system_program.to_account_info())
+            .sysvar_instructions(&ctx.accounts.sysvar_instructions.to_account_info())
+            .data(data)
+            .is_mutable(true)
+            .invoke()?;
+
+        Ok(())
+    }
 
     // -------------------------------------------------
     // MAKER CREATES MINT REQUEST
     // -------------------------------------------------
-    pub fn create_mint_request(
-        ctx: Context<CreateMintRequest>,
-        amount: u64,
-    ) -> Result<()> {
+    pub fn create_mint_request(ctx: Context<CreateMintRequest>, amount: u64) -> Result<()> {
         let request = &mut ctx.accounts.request;
         request.config = ctx.accounts.config.key();
         request.maker = ctx.accounts.maker.key();
@@ -77,10 +158,7 @@ pub mod dk_token {
             config.checkers.contains(&checker),
             ErrorCode::UnauthorizedChecker
         );
-        require!(
-            checker != request.maker,
-            ErrorCode::SelfApprovalNotAllowed
-        );
+        require!(checker != request.maker, ErrorCode::SelfApprovalNotAllowed);
         require!(
             config.mint == ctx.accounts.mint.key(),
             ErrorCode::InvalidConfig
@@ -144,10 +222,7 @@ pub mod dk_token {
         };
 
         token_interface::transfer_checked(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                cpi_accounts,
-            ),
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts),
             amount,
             ctx.accounts.mint.decimals,
         )?;
@@ -166,10 +241,7 @@ pub mod dk_token {
         };
 
         token_interface::burn(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                cpi_accounts,
-            ),
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts),
             amount,
         )?;
 
@@ -218,6 +290,57 @@ pub struct CreateMint<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CreateMetadata<'info> {
+    pub config: Account<'info, Config>,
+
+    #[account(mut)]
+    pub mint: InterfaceAccount<'info, Mint>,
+
+    /// CHECK: Metaplex metadata PDA for this mint
+    #[account(mut)]
+    pub metadata: UncheckedAccount<'info>,
+
+    /// CHECK: PDA mint authority
+    #[account(
+        seeds = [b"mint_authority"],
+        bump
+    )]
+    pub mint_authority: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    pub metadata_program: Program<'info, Metadata>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+
+    /// CHECK: Instructions sysvar required by Metaplex token metadata.
+    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
+    pub sysvar_instructions: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateMetadata<'info> {
+    pub config: Account<'info, Config>,
+
+    pub mint: InterfaceAccount<'info, Mint>,
+
+    /// CHECK: Metaplex metadata PDA for this mint
+    #[account(mut)]
+    pub metadata: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    pub metadata_program: Program<'info, Metadata>,
+    pub system_program: Program<'info, System>,
+
+    /// CHECK: Instructions sysvar required by Metaplex token metadata.
+    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
+    pub sysvar_instructions: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]

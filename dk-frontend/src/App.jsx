@@ -1,6 +1,6 @@
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, SYSVAR_INSTRUCTIONS_PUBKEY, Transaction } from "@solana/web3.js";
 import { useState, useEffect, useCallback } from "react";
 import { TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import * as anchor from "@coral-xyz/anchor";
@@ -9,10 +9,7 @@ import {
   createAssociatedTokenAccountInstruction,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import {
-  createCreateMetadataAccountV3Instruction,
-  PROGRAM_ID as METADATA_PROGRAM_ID,
-} from "@metaplex-foundation/mpl-token-metadata";
+import { MPL_TOKEN_METADATA_PROGRAM_ID } from "@metaplex-foundation/mpl-token-metadata";
 import { api } from "./services/api";
 import { getProgram } from "./utils/anchor";
 import "./App.css";
@@ -20,6 +17,22 @@ import "./App.css";
 /* ─── helpers ─── */
 const shorten = (addr) => addr.slice(0, 6) + "…" + addr.slice(-4);
 const USER_ROLES = ["Maker", "Checker", "User", "Admin"];
+const HISTORY_FILTERS = [
+  { id: "all", label: "All" },
+  { id: "mint", label: "Mint" },
+  { id: "transfer", label: "Transfer" },
+  { id: "burn", label: "Burn" },
+  { id: "fiat", label: "FIAT" },
+  { id: "pending", label: "Pending" },
+  { id: "failed", label: "Failed" },
+];
+const DKT_METADATA = {
+  name: "DK Token",
+  symbol: "DKT",
+  uri: "https://raw.githubusercontent.com/dorjiphuntsho-cpu/Dk_Blockchain_Project/main/dk-token/metadata/dk-token.json",
+};
+const METADATA_PROGRAM_ID = new PublicKey(MPL_TOKEN_METADATA_PROGRAM_ID);
+const OFFICIAL_DKT_MINT = "rUzMLQjHdDidBSErnWBCqpbqJW8RKd6GW94TNSLTnmz";
 const DEFAULT_PUBLIC_KEY = "11111111111111111111111111111111";
 const formatAmount = (value) => Number(value || 0).toLocaleString();
 const parseAmount = (value) => {
@@ -43,6 +56,9 @@ const formatDateTime = (value) => value
       minute: "2-digit",
     })
   : "";
+const getExplorerTxUrl = (signature) => (
+  `https://explorer.solana.com/tx/${signature}?cluster=devnet`
+);
 const mapMintRequestToHistory = (request) => ({
   backendId: request.id,
   addr: request.requestAddr,
@@ -91,7 +107,28 @@ const Toast = ({ toasts }) => (
   </div>
 );
 
-const SettlementHistoryRow = ({ settlement, perspective, loading, onRefreshStatus }) => {
+const TxActions = ({ signature, onCopy }) => {
+  if (!signature) return null;
+
+  return (
+    <div className="tx-actions">
+      <span className="tx-sig">{shorten(signature)}</span>
+      <button className="btn btn-sm" onClick={() => onCopy(signature, "Transaction signature")}>
+        Copy Tx
+      </button>
+      <a
+        className="btn btn-sm"
+        href={getExplorerTxUrl(signature)}
+        target="_blank"
+        rel="noreferrer"
+      >
+        Explorer
+      </a>
+    </div>
+  );
+};
+
+const SettlementHistoryRow = ({ settlement, perspective, loading, onRefreshStatus, onCopyTx }) => {
   const isFiat = settlement.settlementType === "FIAT";
   const counterparty = perspective === "bank"
     ? shorten(settlement.recipientWallet)
@@ -134,6 +171,7 @@ const SettlementHistoryRow = ({ settlement, perspective, loading, onRefreshStatu
         {settlement.bankReference && (
           <span className="history-time">{settlement.bankReference}</span>
         )}
+        <TxActions signature={settlement.txSignature} onCopy={onCopyTx} />
         <span className="history-time">{checkedAt || formatDateTime(settlement.createdAt)}</span>
         {isFiat && (
           <button
@@ -193,6 +231,141 @@ const DemoChecklist = ({ items }) => (
     </div>
   </div>
 );
+
+const ReservePanel = ({
+  currentBank,
+  currency,
+  fiatReserve,
+  dktBalance,
+  sendCapacity,
+  approvedMinted,
+  fiatPaid,
+  fiatPending,
+  backingGap,
+  coveragePercent,
+  onOpenBank,
+  onOpenHistory,
+}) => (
+  <div className="reserve-panel">
+    <div className="reserve-main">
+      <div className="card-title">Reserve Monitor</div>
+      <div className="reserve-heading">1 DKT = 1 {currency}</div>
+      <p className="reserve-copy">
+        {currentBank
+          ? `${currentBank.name} can send up to the lower value between on-chain DKT and backend fiat reserve.`
+          : "Register a bank wallet to show live reserve, DKT balance, and payout capacity."}
+      </p>
+      <div className="reserve-actions">
+        <button className="btn btn-accent" onClick={onOpenBank}>
+          {currentBank ? "Open Bank Desk" : "Register Bank"}
+        </button>
+        <button className="btn" onClick={onOpenHistory}>
+          View History
+        </button>
+      </div>
+    </div>
+    <div className="reserve-meter-card">
+      <div className="reserve-meter-top">
+        <span>Backing coverage</span>
+        <strong>{currentBank ? `${coveragePercent.toFixed(0)}%` : "--"}</strong>
+      </div>
+      <div className="reserve-meter">
+        <div className="reserve-meter-fill" style={{ width: `${coveragePercent}%` }} />
+      </div>
+      <div className="reserve-meter-foot">
+        <span>{formatAmount(dktBalance)} DKT</span>
+        <span>{formatAmount(fiatReserve)} {currency}</span>
+      </div>
+    </div>
+    <div className="reserve-metrics">
+      <div className="reserve-metric">
+        <span>Sendable</span>
+        <strong>{formatAmount(sendCapacity)} DKT</strong>
+      </div>
+      <div className="reserve-metric">
+        <span>Approved Minted</span>
+        <strong>{formatAmount(approvedMinted)} DKT</strong>
+      </div>
+      <div className="reserve-metric">
+        <span>FIAT Paid</span>
+        <strong>{formatAmount(fiatPaid)} {currency}</strong>
+      </div>
+      <div className="reserve-metric">
+        <span>FIAT Pending</span>
+        <strong>{fiatPending}</strong>
+      </div>
+      <div className="reserve-metric reserve-wide">
+        <span>Reserve Difference</span>
+        <strong>{currentBank ? `${formatAmount(backingGap)} ${currency}` : "--"}</strong>
+      </div>
+    </div>
+  </div>
+);
+
+const ReceiverRoutePanel = ({ recipientStatus, cbsStatus, amount, currency, sendCapacity }) => {
+  const amountValue = parseAmount(amount);
+  const hasAmount = amountValue > 0;
+  const overCapacity = hasAmount && amountValue > sendCapacity;
+  const isRegistered = recipientStatus?.type === "registered";
+  const isUnregistered = recipientStatus?.type === "unregistered";
+  const cbsReady = cbsStatus?.type === "valid";
+
+  const routeState = !recipientStatus
+    ? "Check receiver"
+    : isRegistered
+      ? "Token transfer"
+      : cbsReady
+        ? "FIAT payout ready"
+        : "CBS check needed";
+
+  return (
+    <div className="receiver-route-panel">
+      <div className="receiver-route-head">
+        <div>
+          <div className="card-title">Receiver Route</div>
+          <div className="receiver-route-title">{routeState}</div>
+        </div>
+        <div className={overCapacity ? "route-cap route-warn" : "route-cap"}>
+          {hasAmount ? `${formatAmount(amountValue)} ${currency}` : "No amount"}
+        </div>
+      </div>
+      <div className="receiver-route-grid">
+        <div className={`route-step ${recipientStatus ? "route-done" : "route-active"}`}>
+          <span>1</span>
+          <strong>Check wallet</strong>
+          <small>{recipientStatus ? recipientStatus.message : "Confirm whether the receiver is registered."}</small>
+        </div>
+        <div className={`route-step ${isRegistered ? "route-done" : isUnregistered ? "route-warn" : ""}`}>
+          <span>2</span>
+          <strong>{isRegistered ? "Send DKT" : "Choose path"}</strong>
+          <small>
+            {isRegistered
+              ? "Registered receiver gets DKT directly."
+              : isUnregistered
+                ? "Unregistered receiver uses burn plus FIAT payout."
+                : "The route appears after wallet check."}
+          </small>
+        </div>
+        <div className={`route-step ${cbsReady ? "route-done" : isUnregistered ? "route-active" : ""}`}>
+          <span>3</span>
+          <strong>CBS account</strong>
+          <small>
+            {cbsReady
+              ? `Verified ${cbsStatus.accountInfo?.account_name || cbsStatus.accountNo || "receiver"}`
+              : isUnregistered
+                ? "Check receiver bank account before payout."
+                : "Only needed for unregistered receiver."}
+          </small>
+        </div>
+      </div>
+      {overCapacity && (
+        <div className="route-warning">
+          Amount is above current backed send capacity of {formatAmount(sendCapacity)} {currency}.
+        </div>
+      )}
+    </div>
+  );
+};
 
 const RoleWorkspace = ({ authorityRole, backendRole, backendStatus, onChainConfig, onSetup }) => {
   const mode = authorityRole === "Checker" || authorityRole === "Admin" ? "Review Queue" : "Mint Desk";
@@ -254,9 +427,15 @@ const FlowActionCard = ({ title, label, status, action, disabled, children }) =>
   </div>
 );
 
-const CheckerQueue = ({ items, canReviewMintRequest, loading, onApprove, onReject, onOpenSetup }) => (
+const CheckerQueue = ({ items, canReviewMintRequest, isOfficialMintActive, loading, onApprove, onReject, onOpenSetup }) => (
   <div className="card checker-queue-card">
     <div className="card-title">Checker Queue</div>
+    {!isOfficialMintActive && (
+      <div className="permission-note">
+        Approval is paused until Setup uses the official DKT mint.
+        <button className="inline-action" onClick={onOpenSetup}>Open Setup</button>
+      </div>
+    )}
     {!canReviewMintRequest && (
       <div className="permission-note">
         This wallet is not in the active on-chain checker list.
@@ -280,7 +459,7 @@ const CheckerQueue = ({ items, canReviewMintRequest, loading, onApprove, onRejec
             </div>
             <div className="review-side">
               <span className="review-amount">{item.amount.toLocaleString()} DKT</span>
-              <button className="btn-approve" onClick={() => onApprove(item.addr)} disabled={loading || !canReviewMintRequest}>
+              <button className="btn-approve" onClick={() => onApprove(item.addr)} disabled={loading || !isOfficialMintActive || !canReviewMintRequest}>
                 Approve
               </button>
               <button className="btn-reject" onClick={() => onReject(item.addr)} disabled={loading || !canReviewMintRequest}>
@@ -359,6 +538,16 @@ const sendAndConfirm = async (connection, wallet, transaction) => {
   return sig;
 };
 
+const getSolanaErrorMessage = (err) => {
+  const logs = err?.logs || err?.transactionLogs || err?.simulationResponse?.logs;
+  const anchorMessage = logs?.find((line) => line.includes("AnchorError"));
+  const programError = logs?.find((line) => line.includes("Error Message:"));
+  const customProgramError = logs?.find((line) => line.includes("custom program error"));
+  const message = err?.message || String(err);
+
+  return anchorMessage || programError || customProgramError || message;
+};
+
 /**
  * Polls until an on-chain account exists.
  * Used after ATA creation so the next instruction doesn't race.
@@ -433,6 +622,7 @@ export default function App() {
   const [requestAddress, setRequestAddress] = useState(null);
   const [requestStatus, setRequestStatus] = useState(null);
   const [tab, setTab] = useState("dashboard");
+  const [historyFilter, setHistoryFilter] = useState("all");
   const [bankTask, setBankTask] = useState("profile");
   const [userTask, setUserTask] = useState("profile");
   const [toasts, setToasts] = useState([]);
@@ -813,6 +1003,20 @@ export default function App() {
     setLoading(false);
   };
 
+  const requireOfficialDktMint = (action) => {
+    if (!mintAddress) {
+      toast("Admin must configure the official DKT mint first", "error");
+      return false;
+    }
+
+    if (mintAddress !== OFFICIAL_DKT_MINT) {
+      toast(`${action} is blocked because active mint is not the official DKT mint`, "error");
+      return false;
+    }
+
+    return true;
+  };
+
   const createBankMintRequest = async () => {
     if (!currentBank) {
       toast("Register this wallet as a bank first", "error");
@@ -826,6 +1030,7 @@ export default function App() {
       toast("Admin must create the mint first", "error");
       return;
     }
+    if (!requireOfficialDktMint("Bank mint request")) return;
     if (!bankMintAmount || isNaN(Number(bankMintAmount)) || Number(bankMintAmount) <= 0) {
       toast("Enter a valid mint amount", "error");
       return;
@@ -1080,6 +1285,7 @@ export default function App() {
         addr: recipientKey.toBase58(),
         amount: transferAmount,
         status: settlement.settlementType === "TOKEN" ? "Sent" : "Burned",
+        txSignature: settlement.txSignature,
         ts: Date.now(),
         type: settlement.settlementType === "TOKEN" ? "Transfer" : "Burn",
       },
@@ -1125,6 +1331,7 @@ export default function App() {
   const sendFromBank = async () => {
     if (!currentBank) { toast("Register this wallet as a bank first", "error"); return; }
     if (!mintAddress) { toast("No mint configured", "error"); return; }
+    if (!requireOfficialDktMint("Bank send")) return;
     if (!bankRecipient || !bankTransferAmount) { toast("Fill recipient and amount", "error"); return; }
     if (!Number.isFinite(Number(bankTransferAmount)) || Number(bankTransferAmount) <= 0) {
       toast("Enter a valid amount", "error");
@@ -1265,21 +1472,50 @@ export default function App() {
   /* ── metadata ── */
   const createTokenMetadata = async (mintPub) => {
     try {
+      if (!configPubkey) throw new Error("Initialize system before creating token metadata");
+      if (!wallet.publicKey) throw new Error("Connect admin wallet first");
       const mint = mintPub instanceof PublicKey ? mintPub : new PublicKey(mintPub);
-      const NAME = "DK Token"; const SYMBOL = "DKT";
-      const URI = "https://gateway.pinata.cloud/ipfs/bafkreifs63vvjazrnabs653zx3cmmqwewy3ndo3urxsue3ag2e3ajdmbry";
       const [metadataPDA] = PublicKey.findProgramAddressSync(
         [Buffer.from("metadata"), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
         METADATA_PROGRAM_ID
       );
-      const instruction = createCreateMetadataAccountV3Instruction(
-        { metadata: metadataPDA, mint, mintAuthority: wallet.publicKey, payer: wallet.publicKey, updateAuthority: wallet.publicKey },
-        { createMetadataAccountArgsV3: { data: { name: NAME, symbol: SYMBOL, uri: URI, sellerFeeBasisPoints: 0, creators: null, collection: null, uses: null }, isMutable: true, collectionDetails: null } }
-      );
-      const tx = new Transaction().add(instruction);
-      await sendAndConfirm(connection, wallet, tx);
+      const program = getProgram(wallet, connection);
+      const metadataInfo = await connection.getAccountInfo(metadataPDA);
+
+      if (metadataInfo) {
+        await program.methods
+          .updateMetadata(DKT_METADATA.name, DKT_METADATA.symbol, DKT_METADATA.uri)
+          .accounts({
+            config: configPubkey,
+            mint,
+            metadata: metadataPDA,
+            admin: wallet.publicKey,
+            metadataProgram: METADATA_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            sysvarInstructions: SYSVAR_INSTRUCTIONS_PUBKEY,
+          })
+          .rpc();
+        toast("DKT metadata updated");
+        return;
+      }
+
+      await program.methods
+        .createMetadata(DKT_METADATA.name, DKT_METADATA.symbol, DKT_METADATA.uri)
+        .accounts({
+          config: configPubkey,
+          mint,
+          metadata: metadataPDA,
+          admin: wallet.publicKey,
+          metadataProgram: METADATA_PROGRAM_ID,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          sysvarInstructions: SYSVAR_INSTRUCTIONS_PUBKEY,
+        })
+        .rpc();
+      toast("DKT metadata created");
     } catch (err) {
-      toast("Mint created but metadata failed: " + err.message, "error");
+      console.error("DKT metadata failed", err);
+      toast("Metadata failed: " + getSolanaErrorMessage(err), "error");
     }
   };
 
@@ -1340,6 +1576,7 @@ export default function App() {
    */
   const createMintRequest = async () => {
     if (!configPubkey) { toast("Initialize system first", "error"); return; }
+    if (!requireOfficialDktMint("Maker mint request")) return;
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) { toast("Enter a valid amount", "error"); return; }
     if (!wallet.publicKey) { toast("Connect wallet first", "error"); return; }
     setLoading(true);
@@ -1405,6 +1642,7 @@ export default function App() {
    */
   const approveRequest = async (targetAddress = requestAddress) => {
     if (!targetAddress) { toast("No request to approve", "error"); return; }
+    if (!requireOfficialDktMint("Checker approval")) return;
     if (!onChainConfig?.checkers.includes(wallet.publicKey?.toBase58())) {
       toast("This wallet is not an on-chain checker", "error");
       return;
@@ -1507,6 +1745,7 @@ export default function App() {
    */
   const transferTokens = async () => {
     if (!mintAddress) { toast("No mint configured", "error"); return; }
+    if (!requireOfficialDktMint("Token transfer")) return;
     if (!transferTo || !transferAmt) { toast("Fill in recipient and amount", "error"); return; }
     let recipientKey;
     try { recipientKey = new PublicKey(transferTo.trim()); }
@@ -1520,7 +1759,7 @@ export default function App() {
       const fromATA = await getOrCreateATA(connection, wallet, mint, wallet.publicKey);
       const toATA = await getOrCreateATA(connection, wallet, mint, recipientKey);
 
-      await program.methods.transferTokens(new anchor.BN(Number(transferAmt) * 1e6))
+      const txSignature = await program.methods.transferTokens(new anchor.BN(Number(transferAmt) * 1e6))
         .accounts({
           fromTokenAccount: fromATA,
           toTokenAccount: toATA,
@@ -1531,7 +1770,7 @@ export default function App() {
         .rpc();
 
       setHistory((h) => [
-        { addr: recipientKey.toBase58(), amount: Number(transferAmt), status: "Sent", ts: Date.now(), type: "Transfer" },
+        { addr: recipientKey.toBase58(), amount: Number(transferAmt), status: "Sent", txSignature, ts: Date.now(), type: "Transfer" },
         ...h,
       ]);
       setTransferTo(""); setTransferAmt("");
@@ -1545,6 +1784,7 @@ export default function App() {
   /* ── burn ── */
   const burnTokens = async () => {
     if (!mintAddress) { toast("No mint configured", "error"); return; }
+    if (!requireOfficialDktMint("Token burn")) return;
     if (!burnAmt || isNaN(Number(burnAmt)) || Number(burnAmt) <= 0) { toast("Enter a valid amount", "error"); return; }
     setLoading(true);
     try {
@@ -1552,7 +1792,7 @@ export default function App() {
       const mint = new PublicKey(mintAddress);
       const ata = await getOrCreateATA(connection, wallet, mint, wallet.publicKey);
 
-      await program.methods.burnTokens(new anchor.BN(Number(burnAmt) * 1e6))
+      const txSignature = await program.methods.burnTokens(new anchor.BN(Number(burnAmt) * 1e6))
         .accounts({
           mint,
           userTokenAccount: ata,
@@ -1562,7 +1802,7 @@ export default function App() {
         .rpc();
 
       setHistory((h) => [
-        { addr: wallet.publicKey.toBase58(), amount: Number(burnAmt), status: "Burned", ts: Date.now(), type: "Burn" },
+        { addr: wallet.publicKey.toBase58(), amount: Number(burnAmt), status: "Burned", txSignature, ts: Date.now(), type: "Burn" },
         ...h,
       ]);
       setBurnAmt("");
@@ -1595,6 +1835,7 @@ export default function App() {
   /* ── derived ── */
   const step1Done = !!configAddress;
   const step2Done = !!mintAddress;
+  const isOfficialMintActive = mintAddress === OFFICIAL_DKT_MINT;
   const pendingCount = history.filter((h) => h.status === "Pending").length;
   const walletAddress = wallet.publicKey?.toBase58();
   const canCreateMintRequest = !!walletAddress;
@@ -1620,6 +1861,71 @@ export default function App() {
   const bankHistory = currentBank
     ? history.filter((h) => h.type === "Mint" && h.bank?.id === currentBank.id)
     : [];
+  const bankFiatSettlements = bankSettlements.filter((settlement) => settlement.settlementType === "FIAT");
+  const bankFiatPaid = bankFiatSettlements
+    .filter((settlement) => settlement.status === "Fiat Transfer Sent" || settlement.bankApiStatus === "SUCCESS")
+    .reduce((total, settlement) => total + parseAmount(settlement.amount), 0);
+  const bankFiatPending = bankFiatSettlements
+    .filter((settlement) => settlement.status === "Fiat Transfer Queued")
+    .length;
+  const bankApprovedMinted = bankHistory
+    .filter((item) => item.status === "Approved")
+    .reduce((total, item) => total + parseAmount(item.amount), 0);
+  const reserveBackingGap = currentBank ? currentBankBtnAmount - currentBankDktAmount : 0;
+  const reserveCoveragePercent = currentBankBtnAmount > 0
+    ? Math.max(0, Math.min(100, (currentBankDktAmount / currentBankBtnAmount) * 100))
+    : 0;
+  const settlementHistoryEntries = [...bankSettlements, ...userSettlements].reduce((items, settlement) => {
+    const key = settlement.id || `${settlement.createdAt}-${settlement.senderWallet}-${settlement.recipientWallet}`;
+    if (items.has(key)) return items;
+
+    const isFiat = settlement.settlementType === "FIAT";
+    items.set(key, {
+      id: key,
+      addr: isFiat
+        ? settlement.receiverAccount || settlement.recipientWallet
+        : settlement.recipientWallet || settlement.senderWallet,
+      amount: parseAmount(settlement.amount),
+      currency: isFiat ? settlement.currency || "BTN" : "DKT",
+      status: settlement.status,
+      txSignature: settlement.txSignature,
+      ts: settlement.createdAt ? new Date(settlement.createdAt).getTime() : Date.now(),
+      type: isFiat ? "FIAT" : "Transfer",
+      note: isFiat
+        ? settlement.receiverName || settlement.bankTransactionId || "Bank payout"
+        : settlement.bank?.name || "Token settlement",
+    });
+    return items;
+  }, new Map());
+  const combinedHistory = [
+    ...history.map((item, index) => ({
+      ...item,
+      id: item.backendId || `${item.type}-${item.addr}-${item.ts}-${index}`,
+      currency: "DKT",
+    })),
+    ...Array.from(settlementHistoryEntries.values()),
+  ].sort((a, b) => b.ts - a.ts);
+  const filteredHistory = combinedHistory.filter((item) => {
+    const status = String(item.status || "").toLowerCase();
+    const type = String(item.type || "").toLowerCase();
+
+    if (historyFilter === "all") return true;
+    if (historyFilter === "pending") return status.includes("pending") || status.includes("queued");
+    if (historyFilter === "failed") return status.includes("failed") || status.includes("rejected");
+    return type === historyFilter;
+  });
+  const historyFilterCounts = HISTORY_FILTERS.reduce((counts, filter) => {
+    counts[filter.id] = combinedHistory.filter((item) => {
+      const status = String(item.status || "").toLowerCase();
+      const type = String(item.type || "").toLowerCase();
+
+      if (filter.id === "all") return true;
+      if (filter.id === "pending") return status.includes("pending") || status.includes("queued");
+      if (filter.id === "failed") return status.includes("failed") || status.includes("rejected");
+      return type === filter.id;
+    }).length;
+    return counts;
+  }, {});
   const reserveAfterMint =
     currentBank && bankMintAmount && !isNaN(Number(bankMintAmount))
       ? currentBank.fiatReserve - Number(bankMintAmount)
@@ -1668,8 +1974,8 @@ export default function App() {
     {
       label: "Mint",
       value: mintAddress ? shorten(mintAddress) : "Not configured",
-      state: mintAddress ? "ok" : "warn",
-      stateText: mintAddress ? "Ready" : "Setup",
+      state: isOfficialMintActive ? "ok" : mintAddress ? "bad" : "warn",
+      stateText: isOfficialMintActive ? "Official" : mintAddress ? "Wrong mint" : "Setup",
       action: () => setTab("setup"),
     },
     {
@@ -1702,8 +2008,8 @@ export default function App() {
     },
     {
       label: "Wallet and mint",
-      detail: walletAddress && mintAddress ? "Phantom is connected and DKT mint is configured." : "Connect Phantom and finish Setup.",
-      done: !!walletAddress && !!mintAddress,
+      detail: walletAddress && isOfficialMintActive ? "Phantom is connected and the official DKT mint is active." : "Connect Phantom and use the official DKT mint.",
+      done: !!walletAddress && isOfficialMintActive,
     },
     {
       label: "Bank capacity",
@@ -1826,7 +2132,7 @@ export default function App() {
         <StatCard label="Wallet DKT" value={connectedDktBalance !== null ? `${Number(connectedDktBalance).toLocaleString()}` : "—"} sub1="Phantom token balance" sub2={walletAddress ? shorten(walletAddress) : "connect wallet"} accent="val-accent" />
         <StatCard label="Bank BTN" value={currentBank ? `${formatAmount(currentBank.fiatReserve)}` : "—"} sub1="backend fiat reserve" sub2={currentBank ? currentBank.currency : "register bank"} accent="val-green" />
         <StatCard label="Pending Approvals" value={pendingCount} sub1="awaiting checker" sub2={`${history.filter(h => h.type === "Mint" && h.status === "Pending").length} mint · ${history.filter(h => h.type === "Burn" && h.status === "Pending").length} burn`} accent="val-amber" />
-        <StatCard label="Transactions" value={history.length} sub1="all operations" sub2="this session" accent="val-white" />
+        <StatCard label="Transactions" value={combinedHistory.length} sub1="operations and settlements" sub2={`${history.length} local · ${settlementHistoryEntries.size} bank`} accent="val-white" />
       </div>
 
       <RoleWorkspace
@@ -1848,7 +2154,7 @@ export default function App() {
           { id: "transfer", label: "Transfer" },
           { id: "burn", label: "Burn" },
           { id: "setup", label: "Setup" },
-          { id: "history", label: history.length ? `History (${history.length})` : "History" },
+          { id: "history", label: combinedHistory.length ? `History (${combinedHistory.length})` : "History" },
         ].map(({ id, label }) => (
           <button key={id} className={`tab-btn ${tab === id ? "tab-active" : ""}`} onClick={() => setTab(id)}>
             {label}
@@ -1895,10 +2201,32 @@ export default function App() {
           <CheckerQueue
             items={pendingReviewItems}
             canReviewMintRequest={canReviewMintRequest}
+            isOfficialMintActive={isOfficialMintActive}
             loading={loading}
             onApprove={approveRequest}
             onReject={rejectRequest}
             onOpenSetup={() => setTab("setup")}
+          />
+
+          <ReservePanel
+            currentBank={currentBank}
+            currency={currentBank?.currency || "BTN"}
+            fiatReserve={currentBankBtnAmount}
+            dktBalance={currentBankDktAmount}
+            sendCapacity={currentBankSendCapacity}
+            approvedMinted={bankApprovedMinted}
+            fiatPaid={bankFiatPaid}
+            fiatPending={bankFiatPending}
+            backingGap={reserveBackingGap}
+            coveragePercent={reserveCoveragePercent}
+            onOpenBank={() => {
+              setTab("bank");
+              setBankTask(currentBank ? "profile" : "mint");
+            }}
+            onOpenHistory={() => {
+              setTab(currentBank ? "bank" : "history");
+              if (currentBank) setBankTask("history");
+            }}
           />
 
           <DemoChecklist items={demoChecklistItems} />
@@ -2123,10 +2451,15 @@ export default function App() {
                     {reserveAfterMint === null ? "—" : `${formatAmount(reserveAfterMint)} ${currentBank.currency}`}
                   </strong>
                 </div>
-                <button className="btn btn-accent" onClick={createBankMintRequest} disabled={loading || !step2Done || !bankMintAmount}>
+                <button className="btn btn-accent" onClick={createBankMintRequest} disabled={loading || !step2Done || !isOfficialMintActive || !bankMintAmount}>
                   {loading ? "Submitting…" : "Submit to Checker"}
                 </button>
               </div>
+              {!isOfficialMintActive && (
+                <div className="permission-note">
+                  Bank mint requests are blocked until the active mint matches the official DKT mint.
+                </div>
+              )}
               {reserveAfterMint !== null && reserveAfterMint < 0 && (
                 <div className="permission-note">
                   This request is larger than the recorded fiat reserve. Backend will reject it.
@@ -2141,6 +2474,13 @@ export default function App() {
               <p className="card-desc">
                 Registered recipient wallets receive DKT. If the wallet is not registered, the bank burns DKT, checks the CBS account, and queues a bank payout.
               </p>
+              <ReceiverRoutePanel
+                recipientStatus={bankRecipientStatus}
+                cbsStatus={cbsAccountStatus}
+                amount={bankTransferAmount}
+                currency={currentBank.currency}
+                sendCapacity={currentBankSendCapacity}
+              />
               <div className="bank-transfer-grid">
                 <div>
                   <div className="addr-label">Recipient Wallet</div>
@@ -2174,7 +2514,7 @@ export default function App() {
                   <button className="btn" onClick={checkBankRecipient} disabled={loading || !bankRecipient}>
                     Check Receiver
                   </button>
-                  <button className="btn btn-accent" onClick={sendFromBank} disabled={loading || !step2Done || !bankRecipient || !bankTransferAmount}>
+                  <button className="btn btn-accent" onClick={sendFromBank} disabled={loading || !step2Done || !isOfficialMintActive || !bankRecipient || !bankTransferAmount}>
                     {loading ? "Processing…" : "Send Value"}
                   </button>
                 </div>
@@ -2295,9 +2635,10 @@ export default function App() {
                       key={s.id}
                       settlement={s}
                       perspective="bank"
-                      loading={loading}
-                      onRefreshStatus={refreshFiatSettlementStatus}
-                    />
+	                      loading={loading}
+	                      onRefreshStatus={refreshFiatSettlementStatus}
+	                      onCopyTx={copy}
+	                    />
                   ))}
                 </div>
               )}
@@ -2314,9 +2655,10 @@ export default function App() {
                         <span className="history-addr">{shorten(h.addr)}</span>
                       </div>
                       <div className="history-right">
-                        <span className="history-amount">{formatAmount(h.amount)} DKT</span>
-                        <StatusBadge status={h.status} />
-                      </div>
+	                        <span className="history-amount">{formatAmount(h.amount)} DKT</span>
+	                        <StatusBadge status={h.status} />
+	                        <TxActions signature={h.txSignature} onCopy={copy} />
+	                      </div>
                     </div>
                   ))}
                 </div>
@@ -2483,9 +2825,10 @@ export default function App() {
                       key={s.id}
                       settlement={s}
                       perspective="user"
-                      loading={loading}
-                      onRefreshStatus={refreshFiatSettlementStatus}
-                    />
+	                      loading={loading}
+	                      onRefreshStatus={refreshFiatSettlementStatus}
+	                      onCopyTx={copy}
+	                    />
                   ))}
                 </div>
               )}
@@ -2513,10 +2856,15 @@ export default function App() {
             <input className="input" type="number" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ maxWidth: 160, textAlign: "right" }} />
             <span className="amount-unit">DKT</span>
             <div style={{ flex: 1 }} />
-            <button className="btn btn-accent" onClick={createMintRequest} disabled={loading || !step2Done || !canCreateMintRequest}>
+            <button className="btn btn-accent" onClick={createMintRequest} disabled={loading || !step2Done || !isOfficialMintActive || !canCreateMintRequest}>
               {loading ? "Submitting…" : "Submit Request"}
             </button>
           </div>
+          {!isOfficialMintActive && (
+            <div className="permission-note">
+              Maker requests are blocked until Setup uses the official DKT mint.
+            </div>
+          )}
           {requestAddress && (
             <>
               <div className="divider" />
@@ -2537,7 +2885,7 @@ export default function App() {
                     </div>
                   )}
                   <div className="checker-btns">
-                    <button className="btn-approve" onClick={approveRequest} disabled={loading || !canReviewMintRequest}>{loading ? "Processing…" : "Approve →"}</button>
+                    <button className="btn-approve" onClick={approveRequest} disabled={loading || !isOfficialMintActive || !canReviewMintRequest}>{loading ? "Processing…" : "Approve →"}</button>
                     <button className="btn-reject" onClick={rejectRequest} disabled={loading || !canReviewMintRequest}>Reject ✕</button>
                   </div>
                 </div>
@@ -2556,8 +2904,13 @@ export default function App() {
             <input className="input" type="number" placeholder="0" value={transferAmt} onChange={(e) => setTransferAmt(e.target.value)} style={{ maxWidth: 160, textAlign: "right" }} />
             <span className="amount-unit">DKT</span>
             <div style={{ flex: 1 }} />
-            <button className="btn btn-accent" onClick={transferTokens} disabled={loading || !step2Done}>{loading ? "Sending…" : "Send →"}</button>
+            <button className="btn btn-accent" onClick={transferTokens} disabled={loading || !step2Done || !isOfficialMintActive}>{loading ? "Sending…" : "Send →"}</button>
           </div>
+          {!isOfficialMintActive && (
+            <div className="permission-note">
+              Transfers are blocked until Setup uses the official DKT mint.
+            </div>
+          )}
           <div className="divider" />
           <div className="balance-row">
             <div>
@@ -2577,8 +2930,13 @@ export default function App() {
             <input className="input" type="number" placeholder="0" value={burnAmt} onChange={(e) => setBurnAmt(e.target.value)} style={{ maxWidth: 160, textAlign: "right" }} />
             <span className="amount-unit">DKT</span>
             <div style={{ flex: 1 }} />
-            <button className="btn-burn" onClick={burnTokens} disabled={loading || !step2Done}>{loading ? "Burning…" : "Burn ✕"}</button>
+            <button className="btn-burn" onClick={burnTokens} disabled={loading || !step2Done || !isOfficialMintActive}>{loading ? "Burning…" : "Burn ✕"}</button>
           </div>
+          {!isOfficialMintActive && (
+            <div className="permission-note">
+              Burns are blocked until Setup uses the official DKT mint.
+            </div>
+          )}
           <div className="burn-warning">
             <span className="warn-icon">⚠</span>
             Burned tokens cannot be recovered. Confirm the amount before proceeding.
@@ -2683,14 +3041,33 @@ export default function App() {
               <button className={`step-btn ${step2Done ? "done" : step1Done ? "active" : ""}`} onClick={step1Done && !step2Done && !isCreatingMint ? createMint : undefined} disabled={!step1Done || isCreatingMint || (onChainConfig && !isOnChainAdmin)}>
                 {step2Done ? "2. Mint Created ✓" : isCreatingMint ? "2. Creating…" : "2. Create Mint"}
               </button>
+              <button className={`step-btn ${step2Done ? "active" : ""}`} onClick={() => createTokenMetadata(mintAddress)} disabled={!step2Done || !isOnChainAdmin || loading}>
+                3. Update Phantom Metadata
+              </button>
             </div>
             {onChainConfig && !isOnChainAdmin && !step2Done && (
               <div className="permission-note">
                 Only the on-chain admin can create the mint for this config.
               </div>
             )}
+            {step2Done && !isOnChainAdmin && (
+              <div className="permission-note">
+                Only the on-chain admin can create or repair the DKT metadata that Phantom reads.
+              </div>
+            )}
+            {step2Done && isOnChainAdmin && (
+              <div className="success-note">
+                If Phantom still shows Unknown, click Update Phantom Metadata once, then refresh Phantom or wait for wallet indexing.
+              </div>
+            )}
+            {step2Done && !isOfficialMintActive && (
+              <div className="permission-note">
+                Active mint does not match the official DKT mint. Mint requests, approvals, transfers, and burns are paused to avoid creating more test-token drift.
+              </div>
+            )}
             <div className="addr-grid">
               {[
+                { label: "Official DKT Mint", val: OFFICIAL_DKT_MINT },
                 { label: "Config Address", val: configAddress },
                 { label: "Mint Address", val: mintAddress },
               ].map(({ label, val }) => (
@@ -2715,22 +3092,46 @@ export default function App() {
 
       {tab === "history" && (
         <div className="card">
-          <div className="card-title">Request &amp; Operation History</div>
-          {history.length === 0 ? (
+          <div className="history-toolbar">
+            <div>
+              <div className="card-title">Request &amp; Operation History</div>
+              <div className="history-summary">
+                {filteredHistory.length} of {combinedHistory.length} records shown
+              </div>
+            </div>
+            <div className="history-filters" aria-label="History filters">
+              {HISTORY_FILTERS.map((filter) => (
+                <button
+                  key={filter.id}
+                  className={`history-filter ${historyFilter === filter.id ? "history-filter-active" : ""}`}
+                  onClick={() => setHistoryFilter(filter.id)}
+                  type="button"
+                >
+                  {filter.label}
+                  <span>{historyFilterCounts[filter.id] || 0}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {combinedHistory.length === 0 ? (
             <div className="history-empty">No operations recorded yet</div>
+          ) : filteredHistory.length === 0 ? (
+            <div className="history-empty">No records match this filter</div>
           ) : (
             <div className="history-list">
-              {history.map((h, i) => (
-                <div className="history-row" key={i}>
+              {filteredHistory.map((h) => (
+                <div className="history-row" key={h.id}>
                   <div className="history-left">
                     <span className={`history-type type-${h.type.toLowerCase()}`}>{h.type}</span>
                     <span className="history-addr">{shorten(h.addr)}</span>
+                    {h.note && <span className="history-note">{h.note}</span>}
                   </div>
                   <div className="history-right">
-                    <span className="history-amount">{h.amount} DKT</span>
-                    <StatusBadge status={h.status} />
-                    <span className="history-time">
-                      {new Date(h.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    <span className="history-amount">{formatAmount(h.amount)} {h.currency || "DKT"}</span>
+	                    <StatusBadge status={h.status} />
+	                    <TxActions signature={h.txSignature} onCopy={copy} />
+	                    <span className="history-time">
+                      {formatDateTime(h.ts)}
                     </span>
                   </div>
                 </div>
