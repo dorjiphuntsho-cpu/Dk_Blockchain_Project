@@ -85,6 +85,14 @@ function normalizePositiveAmount(value, fieldName) {
   return normalized.toFixed(10);
 }
 
+function convertDisplayAmountToRawAmount(value, decimals = 0) {
+  const normalized = String(value || '').trim();
+  const normalizedDecimals = Number.isInteger(decimals) && decimals >= 0 ? decimals : 0;
+  const [wholePart, fractionPart = ''] = normalized.split('.');
+  const paddedFraction = fractionPart.padEnd(normalizedDecimals, '0');
+  return `${wholePart}${paddedFraction.slice(0, normalizedDecimals)}`.replace(/^0+(?=\d)/, '') || '0';
+}
+
 function calculateFiatAmountFromTokenAmount(tokenAmount) {
   const referencePrice = Number(env.BTN_REFERENCE_PRICE);
 
@@ -2002,7 +2010,7 @@ async function initiateCustomerSellBtn(userId, options = {}) {
   const fiatAmount = calculateFiatAmountFromTokenAmount(tokenAmount);
   const payoutAccountNumber = String(options.payoutAccount || user.linkedBankAccountNumber).trim();
   const walletAvailableRawAmount = BigInt(String(walletBtnBalance?.rawAmount || '0'));
-  const requiredRawAmount = BigInt(String(Number(tokenAmount).toFixed(0)));
+  const requiredRawAmount = BigInt(convertDisplayAmountToRawAmount(tokenAmount, walletBtnBalance?.decimals ?? 0));
 
   if (payoutAccountNumber !== user.linkedBankAccountNumber) {
     throw new ApiError(400, 'Payout account must match the customer linked bank account');
@@ -2267,7 +2275,7 @@ async function initiateCustomerTransferBtn(userId, options = {}) {
   const tokenAmount = normalizePositiveAmount(options.amount, 'amount');
   const fiatAmount = calculateFiatAmountFromTokenAmount(tokenAmount);
   const walletAvailableRawAmount = BigInt(String(walletBtnBalance?.rawAmount || '0'));
-  const requiredRawAmount = BigInt(String(Number(tokenAmount).toFixed(0)));
+  const requiredRawAmount = BigInt(convertDisplayAmountToRawAmount(tokenAmount, walletBtnBalance?.decimals ?? 0));
 
   if (walletAvailableRawAmount < requiredRawAmount) {
     throw new ApiError(

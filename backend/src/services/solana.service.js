@@ -258,28 +258,38 @@ function parsePublicKey(value, label) {
   }
 }
 
-function toRawAmount(value) {
+function toRawAmount(value, decimals = 0) {
   const normalized = String(value).trim();
 
   if (!/^\d+(\.\d+)?$/.test(normalized)) {
     throw new ApiError(400, 'Token amount must be a valid positive number');
   }
 
-  const rounded = Math.round(Number(normalized));
+  const normalizedDecimals = Number.isInteger(decimals) && decimals >= 0 ? decimals : 0;
+  const [wholePart, fractionPart = ''] = normalized.split('.');
+  const paddedFraction = fractionPart.padEnd(normalizedDecimals, '0');
+  const truncatedFraction = paddedFraction.slice(0, normalizedDecimals);
+  const rawAmount = `${wholePart}${truncatedFraction}`.replace(/^0+(?=\d)/, '');
 
-  if (!Number.isFinite(rounded) || rounded < 0) {
+  if (!/^\d+$/.test(rawAmount)) {
     throw new ApiError(400, 'Token amount must be a valid positive number');
   }
 
-  return String(rounded);
+  return rawAmount || '0';
 }
 
-function toAnchorAmount(value) {
-  return new anchor.BN(toRawAmount(value));
+function toAnchorAmount(value, decimals = 0) {
+  return new anchor.BN(toRawAmount(value, decimals));
 }
 
-function toBigIntAmount(value) {
-  return BigInt(toRawAmount(value));
+function toBigIntAmount(value, decimals = 0) {
+  return BigInt(toRawAmount(value, decimals));
+}
+
+async function getMintDecimals(mintAddress) {
+  const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+  const mintAccount = await getMint(getConnection(), mintPublicKey, env.SOLANA_COMMITMENT);
+  return mintAccount.decimals ?? 0;
 }
 
 function getTokenAuthority(configAddress) {
@@ -881,6 +891,7 @@ async function transferFromBankDistributionToWallet({ bankId, mintAddress, amoun
   const distributionOwner = resolveTreasuryOwnerKeypair(distributionTokenAccount.treasuryWalletAddress);
   const payerKeypair = distributionOwner.keypair;
   const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+  const mintDecimals = await getMintDecimals(mintAddress);
   const sourceTokenAccount = parsePublicKey(
     distributionTokenAccount.tokenAccountAddress,
     'tokenAccountAddress',
@@ -894,7 +905,7 @@ async function transferFromBankDistributionToWallet({ bankId, mintAddress, amoun
   );
 
   const sourceAccount = await getAccount(getConnection(), sourceTokenAccount, env.SOLANA_COMMITMENT);
-  const rawAmount = toBigIntAmount(amount);
+  const rawAmount = toBigIntAmount(amount, mintDecimals);
 
   if (sourceAccount.amount < rawAmount) {
     throw new ApiError(
@@ -952,11 +963,12 @@ async function getCustomerSellDelegationStatus({ mintAddress, walletAddress, req
   }
 
   const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+  const mintDecimals = await getMintDecimals(mintAddress);
   const walletPublicKey = parsePublicKey(walletAddress, 'walletAddress');
   const sourceTokenAccount = getOwnerAta(mintPublicKey, walletPublicKey);
   const account = await getAccount(getConnection(), sourceTokenAccount, env.SOLANA_COMMITMENT);
   const delegatedAmount = account.delegatedAmount?.toString() || '0';
-  const requiredRawAmount = requiredAmount ? toRawAmount(requiredAmount) : null;
+  const requiredRawAmount = requiredAmount ? toRawAmount(requiredAmount, mintDecimals) : null;
   const active = account.delegate?.toBase58() === makerKeypair.publicKey.toBase58();
   const sufficient = active && (
     requiredRawAmount === null
@@ -983,13 +995,14 @@ async function transferFromCustomerWalletToDistribution({ bankId, mintAddress, a
 
   const distributionTokenAccount = await resolveBankDistributionTokenAccount(bankId, mintAddress);
   const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+  const mintDecimals = await getMintDecimals(mintAddress);
   const sourceWalletPublicKey = parsePublicKey(sourceWalletAddress, 'sourceWalletAddress');
   const sourceTokenAccount = getOwnerAta(mintPublicKey, sourceWalletPublicKey);
   const destinationTokenAccount = parsePublicKey(
     distributionTokenAccount.tokenAccountAddress,
     'distributionTokenAccountAddress',
   );
-  const rawAmount = toBigIntAmount(amount);
+  const rawAmount = toBigIntAmount(amount, mintDecimals);
   const sourceAccount = await getAccount(getConnection(), sourceTokenAccount, env.SOLANA_COMMITMENT);
 
   if (sourceAccount.amount < rawAmount) {
@@ -1047,9 +1060,10 @@ async function transferFromCustomerWalletToWallet({ mintAddress, amount, sourceW
   }
 
   const mintPublicKey = parsePublicKey(mintAddress, 'mintAddress');
+  const mintDecimals = await getMintDecimals(mintAddress);
   const sourceWalletPublicKey = parsePublicKey(sourceWalletAddress, 'sourceWalletAddress');
   const sourceTokenAccount = getOwnerAta(mintPublicKey, sourceWalletPublicKey);
-  const rawAmount = toBigIntAmount(amount);
+  const rawAmount = toBigIntAmount(amount, mintDecimals);
   const sourceAccount = await getAccount(getConnection(), sourceTokenAccount, env.SOLANA_COMMITMENT);
 
   if (sourceAccount.amount < rawAmount) {

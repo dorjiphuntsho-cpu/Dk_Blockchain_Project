@@ -12,6 +12,7 @@ import DashboardPage from '../pages/dashboard/DashboardPage';
 import PortalActionPage from '../pages/portal/PortalActionPage';
 import PortalHomePage from '../pages/portal/PortalHomePage';
 import PortalLoginPage from '../pages/portal/PortalLoginPage';
+import PortalWalletPage from '../pages/portal/PortalWalletPage';
 import UsersPage from '../pages/users/UsersPage';
 import UserCreatePage from '../pages/users/UserCreatePage';
 import UserDetailsPage from '../pages/users/UserDetailsPage';
@@ -60,6 +61,7 @@ const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate replace to="/portal/overview" /> },
           { path: 'overview', element: <PortalHomePage /> },
+          { path: 'wallet', element: <PortalWalletPage /> },
           { path: 'buy', element: <PortalActionPage mode="buy" /> },
           { path: 'sell', element: <PortalActionPage mode="sell" /> },
           { path: 'transfer', element: <PortalActionPage mode="transfer" /> },

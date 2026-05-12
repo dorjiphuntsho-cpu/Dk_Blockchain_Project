@@ -57,7 +57,7 @@ const envSchema = z.object({
   DEFAULT_CHECKER_PASSWORD: z.string().optional(),
   DEFAULT_EXECUTOR_EMAIL: z.string().email().optional(),
   DEFAULT_EXECUTOR_PASSWORD: z.string().optional(),
-  SOLANA_RPC_URL: z.string().url().default('http://127.0.0.1:8899'),
+  SOLANA_RPC_URL: z.string().url().default('https://api.devnet.solana.com'),
   SOLANA_COMMITMENT: z.enum(['processed', 'confirmed', 'finalized']).default('confirmed'),
   SOLANA_PROGRAM_ID: optionalNonEmptyString,
   SOLANA_PROGRAM_IDL_PATH: z.string().min(1).default('dk-token/target/idl/dk_token.json'),

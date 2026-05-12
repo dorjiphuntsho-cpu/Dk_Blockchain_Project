@@ -48,8 +48,8 @@ export const EXECUTION_MODES = {
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 export const ENABLE_MOCK_API = String(import.meta.env.VITE_ENABLE_MOCK_API ?? 'false') === 'true';
-export const SOLANA_CLUSTER = import.meta.env.VITE_SOLANA_CLUSTER || 'localnet';
-export const SOLANA_RPC_URL = import.meta.env.VITE_SOLANA_RPC_URL || 'http://127.0.0.1:8899';
+export const SOLANA_CLUSTER = import.meta.env.VITE_SOLANA_CLUSTER || 'devnet';
+export const SOLANA_RPC_URL = import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 
 export const ROLE_OPTIONS = Object.values(ROLES).map((role) => ({
   label: role,

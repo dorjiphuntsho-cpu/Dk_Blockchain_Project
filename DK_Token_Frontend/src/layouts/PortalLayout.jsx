@@ -3,6 +3,7 @@ import {
   BanknotesIcon,
   CurrencyDollarIcon,
   PowerIcon,
+  WalletIcon,
 } from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -15,6 +16,7 @@ import { formatAmount } from '../utils/format';
 
 const PORTAL_NAV_ITEMS = [
   { label: 'Overview', path: '/portal/overview', icon: BanknotesIcon },
+  { label: 'Wallet', path: '/portal/wallet', icon: WalletIcon },
   { label: 'Buy BTN', path: '/portal/buy', icon: CurrencyDollarIcon },
   { label: 'Sell BTN', path: '/portal/sell', icon: ArrowsRightLeftIcon },
   { label: 'Transfer BTN', path: '/portal/transfer', icon: ArrowsRightLeftIcon },
