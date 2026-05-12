@@ -276,6 +276,8 @@ Dk accounts
 100100364185 is the DK Bank reserve account. User fiat payments should flow into this account so the backend can treat them as reserve backing for BTN minting capacity.
 
 
+https://explorer.solana.com/address/8GcigsNHpxk7hwM5DChg699BnH89QgRNimZMEuWg6VZy/metadata?cluster=devnet
+
 6i6nZMGZdqNiyxHzqnHnJTkrP6QgmLd52yzLsntAyazb
 
 tandin@56PixelPC:/mnt/d/Office/Dk_Blockchain_Project/dk-token$ spl-token balance --address 6i6nZMGZdqNiyxHzqnHnJTkrP6QgmLd52yzLsntAyazb --url https://api.devnet.solana.com

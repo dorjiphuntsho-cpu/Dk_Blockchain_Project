@@ -2,6 +2,7 @@ const prisma = require('../config/prisma');
 const { tokenRequestInclude } = require('../models/tokenRequest.model');
 const { ROLE_NAMES, TOKEN_REQUEST_STATUSES } = require('../utils/enums');
 const cbsService = require('./cbs.service');
+const reserveService = require('./reserve.service');
 const solanaService = require('./solana.service');
 
 function formatTokenSupply(rawAmount, decimals) {
@@ -182,6 +183,7 @@ function getVisibleRequestWhere(user) {
 async function getDashboardOverview(user) {
   const visibleWhere = getVisibleRequestWhere(user);
   const includeSettlementSummary = user.roles.includes(ROLE_NAMES.ADMIN) || user.roles.includes(ROLE_NAMES.EXECUTOR);
+  const includeReserveFlowSummary = user.roles.includes(ROLE_NAMES.ADMIN);
 
   const [
     summaryCounts,
@@ -193,6 +195,7 @@ async function getDashboardOverview(user) {
     pendingSettlementReconciliation,
     issuerReserveBalance,
     tokenSummary,
+    reserveTransactions,
   ] = await Promise.all([
     prisma.tokenRequest.groupBy({
       by: ['status'],
@@ -291,6 +294,9 @@ async function getDashboardOverview(user) {
       inCirculationDisplay: null,
       warning: error.message,
     })),
+    includeReserveFlowSummary
+      ? reserveService.getReserveTransactions().catch(() => [])
+      : Promise.resolve([]),
   ]);
 
   const countByStatus = Object.fromEntries(
@@ -299,6 +305,29 @@ async function getDashboardOverview(user) {
   const onChainPendingRequests =
     (countByStatus[TOKEN_REQUEST_STATUSES.READY_FOR_EXECUTION] || 0) +
     (countByStatus[TOKEN_REQUEST_STATUSES.ON_CHAIN_PENDING] || 0);
+  const reserveFlowSummary = includeReserveFlowSummary
+    ? reserveTransactions.reduce((summary, item) => {
+        const amount = Number(item.amount || 0);
+
+        if (item.type === 'CREDIT') {
+          summary.incomingAmount += amount;
+          summary.incomingCount += 1;
+        }
+
+        if (item.type === 'DEBIT') {
+          summary.outgoingAmount += amount;
+          summary.outgoingCount += 1;
+        }
+
+        return summary;
+      }, {
+        incomingAmount: 0,
+        incomingCount: 0,
+        outgoingAmount: 0,
+        outgoingCount: 0,
+        currency: reserveTransactions[0]?.currency || 'BTN',
+      })
+    : null;
   const settlementSummary = includeSettlementSummary
     ? settlementCounts.reduce((summary, item) => {
         const count = item._count._all;
@@ -352,6 +381,7 @@ async function getDashboardOverview(user) {
     },
     tokenSummary,
     issuerReserveBalance,
+    reserveFlowSummary,
     settlementSummary,
     recentRequests,
     recentSettlements,

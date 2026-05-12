@@ -415,7 +415,7 @@ function PortalActionPage({ mode }) {
             <div className="mt-4">
               <Button
                 className="w-full"
-                disabled={isApprovingDelegation || !solanaWallet.available || !summary || !solanaWallet.connected}
+                disabled={isApprovingDelegation || !solanaWallet.available || !summary}
                 onClick={handleApproveSellDelegation}
                 type="button"
                 variant={sellDelegationReady ? 'outline' : 'secondary'}
@@ -426,7 +426,7 @@ function PortalActionPage({ mode }) {
                   : !summary
                     ? 'Loading wallet metadata...'
                     : !solanaWallet.connected
-                      ? 'Connect wallet first'
+                      ? 'Connect Wallet'
                       : sellDelegationReady
                         ? 'Refresh delegation'
                         : `Enable Automatic ${mode === 'sell' ? 'Sell' : 'Transfer'}`}

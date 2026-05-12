@@ -619,6 +619,16 @@ function buildMockDashboardTokenSummary(db) {
   };
 }
 
+function buildMockReserveFlowSummary() {
+  return {
+    incomingAmount: 12500,
+    incomingCount: 4,
+    outgoingAmount: 3180,
+    outgoingCount: 3,
+    currency: 'BTN',
+  };
+}
+
 export const mockAdapter = {
   auth: {
     login: async ({ email, password }) =>
@@ -1501,6 +1511,7 @@ export const mockAdapter = {
             failedRequests: visibleRequests.filter((request) => request.status === REQUEST_STATUSES.FAILED).length,
           },
           tokenSummary: buildMockDashboardTokenSummary(db),
+          reserveFlowSummary: actor.roles.includes(ROLES.ADMIN) ? buildMockReserveFlowSummary() : null,
           recentRequests: sortItems(visibleRequests, 'createdAt', 'desc').slice(0, 5),
           pendingApprovals: visibleRequests.filter((request) => request.status === REQUEST_STATUSES.PENDING_APPROVAL).slice(0, 5),
           auditTrail: db.auditLogs.slice(0, 5).map((log) => serializeAuditLog(db, log)),

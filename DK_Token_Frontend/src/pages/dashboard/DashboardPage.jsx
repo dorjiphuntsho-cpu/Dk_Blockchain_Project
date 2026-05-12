@@ -157,6 +157,7 @@ function DashboardPage() {
   const overview = state.overview;
   const settlementSummary = overview?.settlementSummary || null;
   const reserveSummary = overview?.issuerReserveBalance || null;
+  const reserveFlowSummary = overview?.reserveFlowSummary || null;
   const tokenSummary = overview?.tokenSummary || null;
   const tokenSymbol = tokenSummary?.symbol || 'BTN';
   const reserveBalanceMetricValue = reserveSummary?.inquiry?.availableBalance != null
@@ -167,6 +168,13 @@ function DashboardPage() {
     : 'Unavailable';
   const distributorMetricValue = tokenSummary?.distributionInventory?.displayAmount != null
     ? `${formatAmount(tokenSummary.distributionInventory.displayAmount)} ${tokenSymbol}`
+    : 'Unavailable';
+  const flowCurrency = reserveFlowSummary?.currency || tokenSymbol;
+  const incomingBtnMetricValue = reserveFlowSummary
+    ? `+${formatAmount(reserveFlowSummary.incomingAmount || 0)} ${flowCurrency}`
+    : 'Unavailable';
+  const outgoingBtnMetricValue = reserveFlowSummary
+    ? `-${formatAmount(reserveFlowSummary.outgoingAmount || 0)} ${flowCurrency}`
     : 'Unavailable';
 
   const pageCopy = useMemo(() => {
@@ -220,6 +228,8 @@ function DashboardPage() {
     switch (dashboardRole) {
       case ROLES.ADMIN:
         return [
+          metric('incoming-btn', 'Incoming BTN', incomingBtnMetricValue, `${reserveFlowSummary?.incomingCount ?? 0} successful inflow transactions`, <CheckCircleIcon className="size-4" />, 'success.main'),
+          metric('outgoing-btn', 'Outgoing BTN', outgoingBtnMetricValue, `${reserveFlowSummary?.outgoingCount ?? 0} successful outflow transactions`, <XCircleIcon className="size-4" />, 'error.main'),
           metric('circulation', 'In circulation', circulationMetricValue, 'Minted supply outside the distributor wallet', <CheckCircleIcon className="size-4" />, 'success.main'),
           metric('distributor', 'In distributor', distributorMetricValue, 'BTN currently parked in the distributor wallet', <ClipboardDocumentCheckIcon className="size-4" />, 'secondary.main'),
           metric('reserve', 'Reserve balance', reserveBalanceMetricValue, 'DK Bank issuer reserve account', <DocumentChartBarIcon className="size-4" />, 'success.main'),
@@ -260,7 +270,7 @@ function DashboardPage() {
       default:
         return [];
     }
-  }, [circulationMetricValue, dashboardRole, distributorMetricValue, overview, reserveBalanceMetricValue, state.draftCount, state.rejectedCount, state.reviewedCount]);
+  }, [circulationMetricValue, dashboardRole, distributorMetricValue, incomingBtnMetricValue, overview, outgoingBtnMetricValue, reserveBalanceMetricValue, reserveFlowSummary, state.draftCount, state.rejectedCount, state.reviewedCount]);
 
   const settlementMetrics = useMemo(() => {
     if (!(dashboardRole === ROLES.ADMIN || dashboardRole === ROLES.EXECUTOR) || !settlementSummary) {
