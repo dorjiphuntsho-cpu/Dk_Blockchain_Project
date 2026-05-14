@@ -19,15 +19,6 @@ async function outgoingTransfer(req, res) {
   });
 }
 
-async function processTransfer(req, res) {
-  const result = await bipsService.processTransfer(req.validated.body);
-
-  return successResponse(res, {
-    message: 'BIPS transfer flow processed',
-    data: result,
-  });
-}
-
 async function getPgStatus(req, res) {
   const result = await bipsService.getPgStatus(req.validated.query);
 
@@ -49,7 +40,6 @@ async function liveInquiry(req, res) {
 module.exports = {
   accountInquiry,
   outgoingTransfer,
-  processTransfer,
   getPgStatus,
   liveInquiry,
 };

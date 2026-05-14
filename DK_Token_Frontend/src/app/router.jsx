@@ -38,10 +38,16 @@ import ManagedTokensPage from '../pages/solana/ManagedTokensPage';
 import NotFoundPage from '../pages/notFound/NotFoundPage';
 import { ROLES } from '../utils/constants';
 
+import BipsTransferForm from '../components/bips/BipsTransferForm';
+
 const router = createBrowserRouter([
   {
     path: '/',
     element: <Navigate replace to="/portal/login" />,
+  },
+  {
+    path: '/bips-transfer',
+    element: <BipsTransferForm />,
   },
   {
     path: '/login',

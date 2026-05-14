@@ -125,20 +125,25 @@ function PortalActionPage({ mode }) {
       return;
     }
 
-    const defaultLinkedAccount = (customer?.linkedBankAccounts || []).find((account) => account.isPrimary)
-      || customer?.linkedBankAccounts?.[0]
+    const defaultLinkedAccount = linkedBankAccounts.find((account) => account.isPrimary)
+      || linkedBankAccounts[0]
       || null;
+    const defaultAccountNumber = defaultLinkedAccount?.accountNumber || customer?.linkedBankAccountNumber || '';
 
-    if (!defaultLinkedAccount?.accountNumber && !customer?.linkedBankAccountNumber) {
+    if (!defaultAccountNumber) {
       return;
     }
 
     setValues((current) => ({
       ...current,
-      debitAccount: current.debitAccount || defaultLinkedAccount?.accountNumber || customer.linkedBankAccountNumber,
-      payoutAccount: current.payoutAccount || defaultLinkedAccount?.accountNumber || customer.linkedBankAccountNumber,
+      debitAccount: linkedBankAccounts.some((account) => account.accountNumber === current.debitAccount)
+        ? current.debitAccount
+        : defaultAccountNumber,
+      payoutAccount: linkedBankAccounts.some((account) => account.accountNumber === current.payoutAccount)
+        ? current.payoutAccount
+        : defaultAccountNumber,
     }));
-  }, [customer?.linkedBankAccountNumber, customer?.linkedBankAccounts, mode]);
+  }, [customer?.linkedBankAccountNumber, linkedBankAccounts, mode]);
 
   const handleChange = (fieldName, nextValue) => {
     setValues((current) => ({
@@ -322,9 +327,17 @@ function PortalActionPage({ mode }) {
     ? [
       { label: 'Payment reference', value: paymentDetails.paymentReference },
       { label: 'Payout status', value: paymentDetails.status || '-' },
+      { label: 'Payout rail', value: paymentDetails.parsedPayload?.payoutRail || paymentDetails.gatewayName || '-' },
       { label: 'Payout amount', value: `${paymentDetails.currency || 'BTN'} ${formatAmount(paymentDetails.amount)}` },
       { label: 'Customer reference', value: truncateMiddle(paymentDetails.customerReference, 12, 8) },
+      {
+        label: 'Payout bank',
+        value: paymentDetails.parsedPayload?.payoutBankName
+          || paymentDetails.parsedPayload?.payoutBankCode
+          || '-',
+      },
       { label: 'Reserve payout account', value: paymentDetails.payerAccount || '-' },
+      { label: 'Beneficiary payout account', value: paymentDetails.parsedPayload?.payoutAccountNumber || '-' },
       { label: 'Token return status', value: paymentDetails.parsedPayload?.fulfillment?.status || 'Waiting for payout confirmation' },
       {
         label: 'Return destination wallet',
@@ -475,6 +488,9 @@ function PortalActionPage({ mode }) {
 
               {((mode === 'buy' && field.name === 'debitAccount') || (mode === 'sell' && field.name === 'payoutAccount')) && linkedBankAccounts.length ? (
                 <Select disabled={isSubmitting} name={field.name} onChange={(event) => handleChange(field.name, event.target.value)} value={values[field.name] ?? ''}>
+                  <option value="" disabled>
+                    {mode === 'buy' ? 'Select funding account' : 'Select payout account'}
+                  </option>
                   {linkedBankAccounts.map((account) => (
                     <option key={`${account.bankId || 'legacy'}-${account.accountNumber}`} value={account.accountNumber}>
                       {`${account.bankName || 'Bank'}${account.bankCode ? ` (${account.bankCode})` : ''} - ${account.accountNumber}`}

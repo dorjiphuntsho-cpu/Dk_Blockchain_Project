@@ -5,10 +5,14 @@ const jwt = require('jsonwebtoken');
 const ApiError = require('../utils/ApiError');
 const logger = require('../utils/logger');
 const cbsService = require('./cbs.service');
+const bipsService = require('./bips.service');
 const { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } = require('../utils/enums');
 const auditLogService = require('./auditLog.service');
 const reserveService = require('./reserve.service');
 const solanaService = require('./solana.service');
+const { normalizeLinkedBankAccounts } = require('../models/user.model');
+const { assessBipsReconciliationResult } = require('./settlementPolicy.service');
+const { resolveBipsError, isBipsRecordNotFound } = require('../utils/helpers');
 const {
   normalizePaymentPayload,
   isSuccessfulPaymentStatus,
@@ -24,6 +28,82 @@ const CUSTOMER_BTN_PAYMENT_PREFIXES = {
   SELL: 'BTNSELL',
   TRANSFER: 'BTNTRANSFER',
 };
+const BIPS_GATEWAY_NAME = 'BIPS';
+
+function getLinkedBankAccounts(user) {
+  return normalizeLinkedBankAccounts(user);
+}
+
+function findLinkedBankAccount(user, accountNumber) {
+  const normalizedAccountNumber = String(accountNumber || '').trim();
+  return getLinkedBankAccounts(user).find((account) => account.accountNumber === normalizedAccountNumber) || null;
+}
+
+function extractBipsResponseCode(payload) {
+  return getFirstNonEmptyValue(payload, ['response_code', 'responseCode'])
+    || getFirstNonEmptyValue(payload?.parsedResponse, ['responseCode'])
+    || getFirstNonEmptyValue(payload?.parsedResponse?.embeddedResponse, ['ResponseCode'])
+    || null;
+}
+
+function extractBipsResponseMessage(payload) {
+  return getFirstNonEmptyValue(payload, ['response_description', 'response_message', 'message'])
+    || getFirstNonEmptyValue(payload?.parsedResponse, ['responseText', 'responseMessage'])
+    || getFirstNonEmptyValue(payload?.parsedResponse?.embeddedResponse, ['ResponseDesc', 'ResponseMessage'])
+    || null;
+}
+
+function extractBipsReferenceNumber(payload) {
+  return getFirstNonEmptyValue(payload, ['reference_number', 'referenceNumber'])
+    || getFirstNonEmptyValue(payload?.response_data, ['reference_number', 'referenceNumber'])
+    || getFirstNonEmptyValue(payload?.parsedResponse?.embeddedResponse, ['RetrievalReferenceNumber'])
+    || null;
+}
+
+function extractBipsTransactionId(payload) {
+  return getFirstNonEmptyValue(payload, ['rr_number', 'msgRefNo', 'transaction_id', 'transactionId'])
+    || getFirstNonEmptyValue(payload?.response_data, ['rr_number', 'msgRefNo', 'transaction_id', 'transactionId'])
+    || getFirstNonEmptyValue(payload?.parsedResponse, ['msgRefNo', 'transactionId'])
+    || null;
+}
+
+function extractBipsBeneficiaryAccountName(payload) {
+  return getFirstNonEmptyValue(payload, ['beneficiary_account_name', 'beneficiaryAccountName'])
+    || getFirstNonEmptyValue(payload?.response_data, ['beneficiary_account_name', 'beneficiaryAccountName'])
+    || getFirstNonEmptyValue(payload?.parsedResponse, ['beneficiaryAccountName'])
+    || null;
+}
+
+function normalizeBipsPaymentStatus(payload, fallbackStatus = 'INITIATED') {
+  const responseCode = extractBipsResponseCode(payload);
+  if (responseCode === '0000') {
+    return 'COMPLETED';
+  }
+
+  if (isBipsRecordNotFound(responseCode)) {
+    return fallbackStatus;
+  }
+
+  const resolved = responseCode ? resolveBipsError(responseCode) : null;
+  if (resolved && resolved.httpStatus >= 400) {
+    return 'FAILED';
+  }
+
+  const assessment = assessBipsReconciliationResult(
+    payload?.parsedResponse ? payload : { parsedResponse: payload || {} },
+    'BIPS_STATUS_VERIFY',
+  );
+
+  if (assessment.outcome === 'SUCCESS') {
+    return 'COMPLETED';
+  }
+
+  if (assessment.outcome === 'FAILED') {
+    return 'FAILED';
+  }
+
+  return fallbackStatus;
+}
 
 function getFirstNonEmptyValue(source, keys) {
   for (const key of keys) {
@@ -184,6 +264,24 @@ async function getCustomerBuyContext(userId) {
           { isPrimary: 'desc' },
           { createdAt: 'asc' },
         ],
+      },
+      customerBankAccounts: {
+        where: {
+          isActive: true,
+        },
+        orderBy: [
+          { isPrimary: 'desc' },
+          { createdAt: 'asc' },
+        ],
+        include: {
+          bank: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+            },
+          },
+        },
       },
     },
   });
@@ -1199,6 +1297,115 @@ async function verifyPaymentStatus(paymentReference) {
     throw new ApiError(404, 'Payment transaction not found');
   }
 
+  if (
+    existingTransaction.gatewayName === BIPS_GATEWAY_NAME
+    || existingTransaction.parsedPayload?.payoutRail === BIPS_GATEWAY_NAME
+  ) {
+    const bipsTransactionId =
+      existingTransaction.gatewayTransactionId
+      || existingTransaction.parsedPayload?.bipsTransactionId
+      || existingTransaction.parsedPayload?.rrNumber
+      || null;
+
+    if (!bipsTransactionId) {
+      const transaction = await prisma.paymentTransaction.update({
+        where: {
+          paymentReference,
+        },
+        data: {
+          lastVerifiedAt: new Date(),
+          statusMessage: existingTransaction.statusMessage || 'BIPS payout initiated. Final status is not available yet.',
+        },
+      });
+
+      return {
+        transaction,
+        reserveSync: {
+          reserveLedger: await reserveService.findReserveByPaymentReference(paymentReference),
+          created: false,
+          skipped: true,
+          reason: 'BIPS status verification is pending because no transaction id is available yet.',
+        },
+        verification: {
+          pending: true,
+          mode: 'BIPS_STATUS_CHECK',
+          responses: [],
+        },
+      };
+    }
+
+    const statusPayload = await bipsService.checkTransactionStatus(bipsTransactionId);
+    const nextStatus = normalizeBipsPaymentStatus(statusPayload, existingTransaction.status || 'INITIATED');
+    const responseCode = extractBipsResponseCode(statusPayload);
+    const resolved = resolveBipsError(responseCode);
+    const assessment = assessBipsReconciliationResult(
+      statusPayload?.parsedResponse ? statusPayload : { parsedResponse: statusPayload || {} },
+      'BIPS_STATUS_CHECK',
+    );
+    const statusMessage =
+      extractBipsResponseMessage(statusPayload)
+      || (isBipsRecordNotFound(responseCode) ? 'BIPS payout was initiated successfully. Final status is not available yet.' : null)
+      || resolved.message
+      || (nextStatus === 'COMPLETED'
+        ? 'BIPS payout completed successfully.'
+        : nextStatus === 'FAILED'
+          ? 'BIPS payout failed and requires review.'
+          : 'BIPS payout is still pending confirmation.');
+
+    const { transaction, created, previousStatus } = await upsertPaymentTransaction({
+      normalized: {
+        gatewayName: existingTransaction.gatewayName || BIPS_GATEWAY_NAME,
+        paymentReference: existingTransaction.paymentReference,
+        gatewayTransactionId: bipsTransactionId,
+        customerReference: existingTransaction.customerReference,
+        payerName: existingTransaction.payerName,
+        payerAccount: existingTransaction.payerAccount,
+        amount: String(existingTransaction.amount),
+        currency: existingTransaction.currency,
+        status: nextStatus,
+        statusMessage,
+        confirmedAt: nextStatus === 'COMPLETED' ? new Date() : existingTransaction.confirmedAt,
+      },
+      rawStatusResponse: {
+        mode: 'BIPS_STATUS_CHECK',
+        payload: statusPayload,
+      },
+      parsedStatus: {
+        bipsStatusVerification: {
+          assessment,
+          transactionId: bipsTransactionId,
+          payload: statusPayload,
+        },
+      },
+      markVerified: true,
+    });
+
+    await recordPaymentTransactionAudit({
+      transaction,
+      created,
+      previousStatus,
+      source: 'PAYMENT_STATUS_VERIFY',
+    });
+
+    const reserveSync = await syncPaymentOutcome(transaction, 'PAYMENT_STATUS_VERIFY');
+
+    return {
+      transaction,
+      reserveSync,
+      verification: {
+        mode: 'BIPS_STATUS_CHECK',
+        payload: statusPayload,
+        responses: [
+          {
+            mode: 'BIPS_STATUS_CHECK',
+            assessment,
+            payload: statusPayload,
+          },
+        ],
+      },
+    };
+  }
+
   const verificationAttempts = [
     {
       mode: 'CURRENT_DAY',
@@ -2029,11 +2236,16 @@ async function initiateCustomerSellBtn(userId, options = {}) {
   const tokenAmount = normalizePositiveAmount(options.amount, 'amount');
   const fiatAmount = calculateFiatAmountFromTokenAmount(tokenAmount);
   const payoutAccountNumber = String(options.payoutAccount || user.linkedBankAccountNumber).trim();
+  const selectedPayoutAccount = findLinkedBankAccount(user, payoutAccountNumber);
   const walletAvailableRawAmount = BigInt(String(walletBtnBalance?.rawAmount || '0'));
   const requiredRawAmount = BigInt(convertDisplayAmountToRawAmount(tokenAmount, walletBtnBalance?.decimals ?? 0));
 
   if (!getLinkedBankAccountNumbers(user).includes(payoutAccountNumber)) {
     throw new ApiError(400, 'Payout account must match one of the customer linked bank accounts');
+  }
+
+  if (!selectedPayoutAccount) {
+    throw new ApiError(400, 'Selected payout account metadata could not be resolved');
   }
 
   if (walletAvailableRawAmount < requiredRawAmount) {
@@ -2060,60 +2272,284 @@ async function initiateCustomerSellBtn(userId, options = {}) {
     issuerBank.id,
     managedToken.mintAddress,
   );
+  const payoutBankCode = String(selectedPayoutAccount.bankCode || issuerBank.code || '').trim();
+  const payoutBankName = selectedPayoutAccount.bankName || issuerBank.name;
+  const payoutRail = payoutBankCode === issuerBank.code ? env.PAYMENT_GATEWAY_NAME : BIPS_GATEWAY_NAME;
   const paymentReference = buildCustomerPaymentReference(CUSTOMER_BTN_PAYMENT_PREFIXES.SELL);
   const customerReference = buildCustomerSellReference(user.id);
   const requestId = generateGatewayRequestId();
   const transactionTimestamp = formatGatewayTimestamp();
   const purpose = 'Sell BTN for fiat payout to customer';
-  const beneficiaryInquiryPayload = {
-    request_id: requestId,
-    source_app: env.PAYMENT_GATEWAY_SOURCE_APP,
-    amount: fiatAmount,
-    currency: env.BTN_REFERENCE_PRICE_CURRENCY,
-    source_account_name: reserveAccount.accountName,
-    source_account_number: reserveAccount.accountNumber,
-    soure_account_number: reserveAccount.accountNumber,
-    bene_account_number: payoutAccountNumber,
-    bene_bank_code: issuerBank.code,
-  };
-  const beneficiaryInquiryResult = await beneficiaryAccountInquiry({
-    payload: beneficiaryInquiryPayload,
-  });
-  const inquiryId = extractGatewayInquiryId(beneficiaryInquiryResult.payload);
 
-  if (!inquiryId) {
-    throw new ApiError(502, 'Payment gateway beneficiary inquiry did not return an inquiry id');
+  if (payoutRail === env.PAYMENT_GATEWAY_NAME) {
+    const beneficiaryInquiryPayload = {
+      request_id: requestId,
+      source_app: env.PAYMENT_GATEWAY_SOURCE_APP,
+      amount: fiatAmount,
+      currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+      source_account_name: reserveAccount.accountName,
+      source_account_number: reserveAccount.accountNumber,
+      soure_account_number: reserveAccount.accountNumber,
+      bene_account_number: payoutAccountNumber,
+      bene_bank_code: issuerBank.code,
+    };
+    const beneficiaryInquiryResult = await beneficiaryAccountInquiry({
+      payload: beneficiaryInquiryPayload,
+    });
+    const inquiryId = extractGatewayInquiryId(beneficiaryInquiryResult.payload);
+
+    if (!inquiryId) {
+      throw new ApiError(502, 'Payment gateway beneficiary inquiry did not return an inquiry id');
+    }
+
+    const requestPayload = {
+      request_id: requestId,
+      transaction_datetime: transactionTimestamp,
+      source_app: env.PAYMENT_GATEWAY_SOURCE_APP,
+      transaction_amount: fiatAmount,
+      payment_type: 'INTRA',
+      source_account_name: reserveAccount.accountName,
+      source_account_number: reserveAccount.accountNumber,
+      bene_cust_name: user.fullName,
+      bene_account_number: payoutAccountNumber,
+      bene_bank_code: issuerBank.code,
+      inquiry_id: inquiryId,
+      narration: purpose,
+      payment_reference: paymentReference,
+      customer_reference: customerReference,
+      amount: fiatAmount,
+      currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+      payer_name: reserveAccount.accountName,
+      payer_account: reserveAccount.accountNumber,
+      purpose,
+      remarks: purpose,
+      source_wallet_address: primaryWallet.walletAddress,
+      token_amount: tokenAmount,
+      token_symbol: 'BTN',
+      mint_address: managedToken.mintAddress,
+      issuer_bank_code: issuerBank.code,
+      issuer_bank_name: issuerBank.name,
+      distribution_wallet_address: distributionTokenAccount.treasuryWalletAddress,
+      distribution_token_account_address: distributionTokenAccount.tokenAccountAddress,
+      payout_bank_code: payoutBankCode,
+      payout_bank_name: payoutBankName,
+      payout_rail: payoutRail,
+    };
+
+    await prisma.paymentTransaction.upsert({
+      where: {
+        paymentReference,
+      },
+      create: {
+        gatewayName: env.PAYMENT_GATEWAY_NAME,
+        paymentReference,
+        customerReference,
+        payerName: reserveAccount.accountName,
+        payerAccount: reserveAccount.accountNumber,
+        amount: fiatAmount,
+        currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+        status: 'INITIATED',
+        statusMessage: 'Customer BTN sell payout initiated from portal.',
+        parsedPayload: {
+          initiatedBy: 'CUSTOMER_PORTAL',
+          customerId: user.id,
+          customerCid: user.cid,
+          sourceWalletAddress: primaryWallet.walletAddress,
+          issuerBankId: issuerBank.id,
+          reserveAccountNumber: reserveAccount.accountNumber,
+          reserveAccountName: reserveAccount.accountName,
+          statusBeneficiaryAccountNumber: payoutAccountNumber,
+          payoutAccountNumber,
+          payoutBankCode,
+          payoutBankName,
+          payoutRail,
+          distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
+          distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
+          requestId,
+          inquiryId,
+          tokenAmount,
+          fiatAmount,
+          mintAddress: managedToken.mintAddress,
+          beneficiaryInquiryPayload,
+          beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+          requestPayload,
+        },
+      },
+      update: {
+        customerReference,
+        payerName: reserveAccount.accountName,
+        payerAccount: reserveAccount.accountNumber,
+        amount: fiatAmount,
+        currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+        status: 'INITIATED',
+        statusMessage: 'Customer BTN sell payout re-initiated from portal.',
+        parsedPayload: {
+          initiatedBy: 'CUSTOMER_PORTAL',
+          customerId: user.id,
+          customerCid: user.cid,
+          sourceWalletAddress: primaryWallet.walletAddress,
+          issuerBankId: issuerBank.id,
+          reserveAccountNumber: reserveAccount.accountNumber,
+          reserveAccountName: reserveAccount.accountName,
+          statusBeneficiaryAccountNumber: payoutAccountNumber,
+          payoutAccountNumber,
+          payoutBankCode,
+          payoutBankName,
+          payoutRail,
+          distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
+          distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
+          requestId,
+          inquiryId,
+          tokenAmount,
+          fiatAmount,
+          mintAddress: managedToken.mintAddress,
+          beneficiaryInquiryPayload,
+          beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+          requestPayload,
+        },
+      },
+    });
+
+    const gatewayResult = await initiateIntraTransaction({
+      payload: requestPayload,
+    });
+
+    const normalizedGatewayResponse = normalizePaymentPayload(gatewayResult.payload, paymentReference, env.PAYMENT_GATEWAY_NAME);
+
+    await prisma.paymentTransaction.update({
+      where: {
+        paymentReference,
+      },
+      data: {
+        parsedPayload: {
+          initiatedBy: 'CUSTOMER_PORTAL',
+          customerId: user.id,
+          customerCid: user.cid,
+          sourceWalletAddress: primaryWallet.walletAddress,
+          issuerBankId: issuerBank.id,
+          reserveAccountNumber: reserveAccount.accountNumber,
+          reserveAccountName: reserveAccount.accountName,
+          statusBeneficiaryAccountNumber: payoutAccountNumber,
+          payoutAccountNumber,
+          payoutBankCode,
+          payoutBankName,
+          payoutRail,
+          distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
+          distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
+          requestId,
+          inquiryId,
+          tokenAmount,
+          fiatAmount,
+          mintAddress: managedToken.mintAddress,
+          beneficiaryInquiryPayload,
+          beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+          requestPayload,
+          gatewayInitiationResponse: gatewayResult.payload,
+        },
+      },
+    });
+
+    if (normalizedGatewayResponse) {
+      await upsertPaymentTransaction({
+        normalized: {
+          ...normalizedGatewayResponse,
+          customerReference,
+          payerName: normalizedGatewayResponse.payerName || reserveAccount.accountName,
+          payerAccount: normalizedGatewayResponse.payerAccount || reserveAccount.accountNumber,
+        },
+        parsedPayload: {
+          initiatedBy: 'CUSTOMER_PORTAL',
+          customerId: user.id,
+          customerCid: user.cid,
+          sourceWalletAddress: primaryWallet.walletAddress,
+          issuerBankId: issuerBank.id,
+          reserveAccountNumber: reserveAccount.accountNumber,
+          reserveAccountName: reserveAccount.accountName,
+          statusBeneficiaryAccountNumber: payoutAccountNumber,
+          payoutAccountNumber,
+          payoutBankCode,
+          payoutBankName,
+          payoutRail,
+          distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
+          distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
+          requestId,
+          inquiryId,
+          tokenAmount,
+          fiatAmount,
+          mintAddress: managedToken.mintAddress,
+          beneficiaryInquiryPayload,
+          beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+          requestPayload,
+          gatewayInitiationResponse: gatewayResult.payload,
+        },
+      });
+    }
+
+    return {
+      paymentReference,
+      customerReference,
+      tokenAmount,
+      fiatAmount,
+      currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+      payoutRail,
+      customer: {
+        id: user.id,
+        fullName: user.fullName,
+        cid: user.cid,
+        primaryWalletAddress: primaryWallet.walletAddress,
+        linkedBankAccountNumber: user.linkedBankAccountNumber,
+      },
+      payout: {
+        issuerBankId: issuerBank.id,
+        issuerBankName: issuerBank.name,
+        issuerBankCode: issuerBank.code,
+        reserveAccountNumber: reserveAccount.accountNumber,
+        reserveAccountName: reserveAccount.accountName,
+        beneficiaryAccountNumber: payoutAccountNumber,
+        beneficiaryBankCode: payoutBankCode,
+        beneficiaryBankName: payoutBankName,
+        beneficiaryName: user.fullName,
+      },
+      tokenReturn: {
+        mintAddress: managedToken.mintAddress,
+        sourceWalletAddress: primaryWallet.walletAddress,
+        distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
+        distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
+      },
+      gateway: gatewayResult,
+    };
   }
 
-  const requestPayload = {
+  const beneficiaryInquiryPayload = {
+    Amount: fiatAmount,
+    BeneficiaryAccountNumber: payoutAccountNumber,
+    BeneficiaryBankCode: payoutBankCode,
+    SourceAccountName: reserveAccount.accountName,
+    SourceAccountNumber: reserveAccount.accountNumber,
+    SourceBankCode: issuerBank.code,
+    TransferPurpose: purpose,
     request_id: requestId,
-    transaction_datetime: transactionTimestamp,
-    source_app: env.PAYMENT_GATEWAY_SOURCE_APP,
-    transaction_amount: fiatAmount,
-    payment_type: 'INTRA',
-    source_account_name: reserveAccount.accountName,
-    source_account_number: reserveAccount.accountNumber,
-    bene_cust_name: user.fullName,
-    bene_account_number: payoutAccountNumber,
-    bene_bank_code: issuerBank.code,
-    inquiry_id: inquiryId,
-    narration: purpose,
-    payment_reference: paymentReference,
-    customer_reference: customerReference,
-    amount: fiatAmount,
-    currency: env.BTN_REFERENCE_PRICE_CURRENCY,
-    payer_name: reserveAccount.accountName,
-    payer_account: reserveAccount.accountNumber,
-    purpose,
-    remarks: purpose,
-    source_wallet_address: primaryWallet.walletAddress,
-    token_amount: tokenAmount,
-    token_symbol: 'BTN',
-    mint_address: managedToken.mintAddress,
-    issuer_bank_code: issuerBank.code,
-    issuer_bank_name: issuerBank.name,
-    distribution_wallet_address: distributionTokenAccount.treasuryWalletAddress,
-    distribution_token_account_address: distributionTokenAccount.tokenAccountAddress,
+  };
+  const beneficiaryInquiryResult = await bipsService.accountInquiry(beneficiaryInquiryPayload);
+  const inquiryResponseCode = extractBipsResponseCode(beneficiaryInquiryResult);
+  const inquiryError = resolveBipsError(inquiryResponseCode);
+
+  if (inquiryResponseCode !== '0000') {
+    throw new ApiError(502, extractBipsResponseMessage(beneficiaryInquiryResult) || inquiryError.message);
+  }
+
+  const referenceNumber = extractBipsReferenceNumber(beneficiaryInquiryResult);
+  if (!referenceNumber) {
+    throw new ApiError(502, 'BIPS account inquiry did not return a reference number');
+  }
+
+  const beneficiaryAccountName = extractBipsBeneficiaryAccountName(beneficiaryInquiryResult)
+    || selectedPayoutAccount.accountName
+    || user.fullName;
+  const requestPayload = {
+    ...beneficiaryInquiryPayload,
+    BeneficiaryAccountName: beneficiaryAccountName,
+    reference_number: referenceNumber,
   };
 
   await prisma.paymentTransaction.upsert({
@@ -2121,7 +2557,7 @@ async function initiateCustomerSellBtn(userId, options = {}) {
       paymentReference,
     },
     create: {
-      gatewayName: env.PAYMENT_GATEWAY_NAME,
+      gatewayName: BIPS_GATEWAY_NAME,
       paymentReference,
       customerReference,
       payerName: reserveAccount.accountName,
@@ -2129,125 +2565,149 @@ async function initiateCustomerSellBtn(userId, options = {}) {
       amount: fiatAmount,
       currency: env.BTN_REFERENCE_PRICE_CURRENCY,
       status: 'INITIATED',
-      statusMessage: 'Customer BTN sell payout initiated from portal.',
+      statusMessage: 'Customer BTN sell payout initiated through BIPS.',
       parsedPayload: {
         initiatedBy: 'CUSTOMER_PORTAL',
         customerId: user.id,
         customerCid: user.cid,
         sourceWalletAddress: primaryWallet.walletAddress,
+        issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
         reserveAccountName: reserveAccount.accountName,
         statusBeneficiaryAccountNumber: payoutAccountNumber,
         payoutAccountNumber,
+        payoutBankCode,
+        payoutBankName,
+        payoutRail,
         distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
         distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
         requestId,
-        inquiryId,
+        referenceNumber,
         tokenAmount,
         fiatAmount,
         mintAddress: managedToken.mintAddress,
         beneficiaryInquiryPayload,
-        beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+        beneficiaryInquiryResponse: beneficiaryInquiryResult,
         requestPayload,
       },
     },
     update: {
+      gatewayName: BIPS_GATEWAY_NAME,
       customerReference,
       payerName: reserveAccount.accountName,
       payerAccount: reserveAccount.accountNumber,
       amount: fiatAmount,
       currency: env.BTN_REFERENCE_PRICE_CURRENCY,
       status: 'INITIATED',
-      statusMessage: 'Customer BTN sell payout re-initiated from portal.',
+      statusMessage: 'Customer BTN sell payout re-initiated through BIPS.',
       parsedPayload: {
         initiatedBy: 'CUSTOMER_PORTAL',
         customerId: user.id,
         customerCid: user.cid,
         sourceWalletAddress: primaryWallet.walletAddress,
+        issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
         reserveAccountName: reserveAccount.accountName,
         statusBeneficiaryAccountNumber: payoutAccountNumber,
         payoutAccountNumber,
+        payoutBankCode,
+        payoutBankName,
+        payoutRail,
         distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
         distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
         requestId,
-        inquiryId,
+        referenceNumber,
         tokenAmount,
         fiatAmount,
         mintAddress: managedToken.mintAddress,
         beneficiaryInquiryPayload,
-        beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+        beneficiaryInquiryResponse: beneficiaryInquiryResult,
         requestPayload,
       },
     },
   });
 
-  const gatewayResult = await initiateIntraTransaction({
-    payload: requestPayload,
-  });
+  const outgoingResult = await bipsService.outgoingTransfer(requestPayload);
+  const bipsTransactionId = extractBipsTransactionId(outgoingResult);
+  let statusVerification = null;
 
-  const normalizedGatewayResponse = normalizePaymentPayload(gatewayResult.payload, paymentReference, env.PAYMENT_GATEWAY_NAME);
-
-  await prisma.paymentTransaction.update({
-    where: {
-      paymentReference,
-    },
-    data: {
-      parsedPayload: {
-        initiatedBy: 'CUSTOMER_PORTAL',
-        customerId: user.id,
-        customerCid: user.cid,
-        sourceWalletAddress: primaryWallet.walletAddress,
-        reserveAccountNumber: reserveAccount.accountNumber,
-        reserveAccountName: reserveAccount.accountName,
-        statusBeneficiaryAccountNumber: payoutAccountNumber,
-        payoutAccountNumber,
-        distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
-        distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
-        requestId,
-        inquiryId,
-        tokenAmount,
-        fiatAmount,
-        mintAddress: managedToken.mintAddress,
-        beneficiaryInquiryPayload,
-        beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
-        requestPayload,
-        gatewayInitiationResponse: gatewayResult.payload,
-      },
-    },
-  });
-
-  if (normalizedGatewayResponse) {
-    await upsertPaymentTransaction({
-      normalized: {
-        ...normalizedGatewayResponse,
-        customerReference,
-        payerName: normalizedGatewayResponse.payerName || reserveAccount.accountName,
-        payerAccount: normalizedGatewayResponse.payerAccount || reserveAccount.accountNumber,
-      },
-      parsedPayload: {
-        initiatedBy: 'CUSTOMER_PORTAL',
-        customerId: user.id,
-        customerCid: user.cid,
-        sourceWalletAddress: primaryWallet.walletAddress,
-        reserveAccountNumber: reserveAccount.accountNumber,
-        reserveAccountName: reserveAccount.accountName,
-        statusBeneficiaryAccountNumber: payoutAccountNumber,
-        payoutAccountNumber,
-        distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
-        distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
-        requestId,
-        inquiryId,
-        tokenAmount,
-        fiatAmount,
-        mintAddress: managedToken.mintAddress,
-        beneficiaryInquiryPayload,
-        beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
-        requestPayload,
-        gatewayInitiationResponse: gatewayResult.payload,
-      },
-    });
+  if (bipsTransactionId) {
+    try {
+      statusVerification = await bipsService.checkTransactionStatus(bipsTransactionId);
+    } catch (error) {
+      statusVerification = {
+        response_code: '3001',
+        response_message: error.message,
+        response_description: error.message,
+      };
+    }
   }
+
+  const nextStatus = normalizeBipsPaymentStatus(statusVerification || outgoingResult, 'INITIATED');
+  const statusResponseCode = extractBipsResponseCode(statusVerification || outgoingResult);
+  const resolved = resolveBipsError(statusResponseCode);
+  const statusMessage = statusVerification?.error
+    || extractBipsResponseMessage(statusVerification)
+    || extractBipsResponseMessage(outgoingResult)
+    || (isBipsRecordNotFound(statusResponseCode) ? 'BIPS payout was initiated successfully. Final status is not available yet.' : null)
+    || resolved.message
+    || (nextStatus === 'COMPLETED'
+      ? 'BIPS payout completed successfully.'
+      : 'BIPS payout initiated and awaiting confirmation.');
+
+  await upsertPaymentTransaction({
+    normalized: {
+      gatewayName: BIPS_GATEWAY_NAME,
+      paymentReference,
+      gatewayTransactionId: bipsTransactionId,
+      customerReference,
+      payerName: reserveAccount.accountName,
+      payerAccount: reserveAccount.accountNumber,
+      amount: fiatAmount,
+      currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+      status: nextStatus,
+      statusMessage,
+      confirmedAt: nextStatus === 'COMPLETED' ? new Date() : null,
+    },
+    parsedPayload: {
+      initiatedBy: 'CUSTOMER_PORTAL',
+      customerId: user.id,
+      customerCid: user.cid,
+      sourceWalletAddress: primaryWallet.walletAddress,
+      issuerBankId: issuerBank.id,
+      reserveAccountNumber: reserveAccount.accountNumber,
+      reserveAccountName: reserveAccount.accountName,
+      statusBeneficiaryAccountNumber: payoutAccountNumber,
+      payoutAccountNumber,
+      payoutBankCode,
+      payoutBankName,
+      payoutRail,
+      distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
+      distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
+      requestId,
+      referenceNumber,
+      rrNumber: bipsTransactionId,
+      tokenAmount,
+      fiatAmount,
+      mintAddress: managedToken.mintAddress,
+      beneficiaryInquiryPayload,
+      beneficiaryInquiryResponse: beneficiaryInquiryResult,
+      requestPayload,
+      bipsOutgoingResponse: outgoingResult,
+      bipsStatusVerification: statusVerification,
+    },
+    rawStatusResponse: statusVerification
+      ? {
+        mode: 'BIPS_STATUS_CHECK',
+        payload: statusVerification,
+      }
+      : undefined,
+    parsedStatus: statusVerification
+      ? {
+        bipsStatusVerification: statusVerification,
+      }
+      : undefined,
+  });
 
   return {
     paymentReference,
@@ -2255,6 +2715,7 @@ async function initiateCustomerSellBtn(userId, options = {}) {
     tokenAmount,
     fiatAmount,
     currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+    payoutRail,
     customer: {
       id: user.id,
       fullName: user.fullName,
@@ -2269,7 +2730,9 @@ async function initiateCustomerSellBtn(userId, options = {}) {
       reserveAccountNumber: reserveAccount.accountNumber,
       reserveAccountName: reserveAccount.accountName,
       beneficiaryAccountNumber: payoutAccountNumber,
-      beneficiaryName: user.fullName,
+      beneficiaryBankCode: payoutBankCode,
+      beneficiaryBankName: payoutBankName,
+      beneficiaryName: beneficiaryAccountName,
     },
     tokenReturn: {
       mintAddress: managedToken.mintAddress,
@@ -2277,7 +2740,11 @@ async function initiateCustomerSellBtn(userId, options = {}) {
       distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
       distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
     },
-    gateway: gatewayResult,
+    bips: {
+      inquiry: beneficiaryInquiryResult,
+      outgoing: outgoingResult,
+      statusVerification,
+    },
   };
 }
 
