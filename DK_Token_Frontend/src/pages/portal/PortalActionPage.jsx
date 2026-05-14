@@ -6,6 +6,7 @@ import { createApproveInstruction } from '@solana/spl-token';
 import Button from '../../components/ui/Button';
 import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
+import Select from '../../components/ui/Select';
 import usePortalAuth from '../../hooks/usePortalAuth';
 import useSolanaWallet from '../../hooks/useSolanaWallet';
 import { portalApi } from '../../modules/portal/portal.api';
@@ -83,6 +84,7 @@ function PortalActionPage({ mode }) {
   const { enqueueSnackbar } = useSnackbar();
   const { token, customer } = usePortalAuth();
   const solanaWallet = useSolanaWallet();
+  const linkedBankAccounts = summary?.customer?.linkedBankAccounts || customer?.linkedBankAccounts || [];
 
   useEffect(() => {
     setValues(buildInitialValues(ACTION_CONFIG[mode].fields));
@@ -123,16 +125,20 @@ function PortalActionPage({ mode }) {
       return;
     }
 
-    if (!customer?.linkedBankAccountNumber) {
+    const defaultLinkedAccount = (customer?.linkedBankAccounts || []).find((account) => account.isPrimary)
+      || customer?.linkedBankAccounts?.[0]
+      || null;
+
+    if (!defaultLinkedAccount?.accountNumber && !customer?.linkedBankAccountNumber) {
       return;
     }
 
     setValues((current) => ({
       ...current,
-      debitAccount: current.debitAccount || customer.linkedBankAccountNumber,
-      payoutAccount: current.payoutAccount || customer.linkedBankAccountNumber,
+      debitAccount: current.debitAccount || defaultLinkedAccount?.accountNumber || customer.linkedBankAccountNumber,
+      payoutAccount: current.payoutAccount || defaultLinkedAccount?.accountNumber || customer.linkedBankAccountNumber,
     }));
-  }, [customer?.linkedBankAccountNumber, mode]);
+  }, [customer?.linkedBankAccountNumber, customer?.linkedBankAccounts, mode]);
 
   const handleChange = (fieldName, nextValue) => {
     setValues((current) => ({
@@ -385,12 +391,23 @@ function PortalActionPage({ mode }) {
         <h2 className="mt-4 text-3xl font-semibold tracking-tight text-white">{config.summary}</h2>
         <p className="mt-4 text-sm leading-7 text-zinc-400">{config.helper}</p>
 
-        {(mode === 'buy' || mode === 'sell') && customer?.linkedBankAccountNumber ? (
+        {(mode === 'buy' || mode === 'sell') && linkedBankAccounts.length ? (
           <div className="mt-6 rounded-[1.25rem] border border-emerald-400/15 bg-emerald-400/[0.06] p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-emerald-300">
-              {mode === 'buy' ? 'Linked funding account' : 'Linked payout account'}
+              {mode === 'buy' ? 'Available funding accounts' : 'Available payout accounts'}
             </p>
-            <p className="mt-2 font-mono text-white">{customer.linkedBankAccountNumber}</p>
+            <div className="mt-3 grid gap-2">
+              {linkedBankAccounts.map((account) => (
+                <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2" key={`${account.bankId || 'legacy'}-${account.accountNumber}`}>
+                  <p className="text-sm text-white">
+                    {account.bankName || 'Bank'}
+                    {account.bankCode ? ` (${account.bankCode})` : ''}
+                    {account.isPrimary ? ' - Primary' : ''}
+                  </p>
+                  <p className="mt-1 font-mono text-sm text-zinc-300">{account.accountNumber}</p>
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
 
@@ -456,12 +473,22 @@ function PortalActionPage({ mode }) {
             <label className="grid gap-2" key={field.name}>
               <span className="text-sm font-medium text-zinc-200">{field.label}</span>
 
-              <Input
-                disabled={isSubmitting}
-                onChange={(event) => handleChange(field.name, event.target.value)}
-                placeholder={field.placeholder}
-                value={values[field.name] ?? ""}
-              />
+              {((mode === 'buy' && field.name === 'debitAccount') || (mode === 'sell' && field.name === 'payoutAccount')) && linkedBankAccounts.length ? (
+                <Select disabled={isSubmitting} name={field.name} onChange={(event) => handleChange(field.name, event.target.value)} value={values[field.name] ?? ''}>
+                  {linkedBankAccounts.map((account) => (
+                    <option key={`${account.bankId || 'legacy'}-${account.accountNumber}`} value={account.accountNumber}>
+                      {`${account.bankName || 'Bank'}${account.bankCode ? ` (${account.bankCode})` : ''} - ${account.accountNumber}`}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Input
+                  disabled={isSubmitting}
+                  onChange={(event) => handleChange(field.name, event.target.value)}
+                  placeholder={field.placeholder}
+                  value={values[field.name] ?? ""}
+                />
+              )}
             </label>
 
           ))}

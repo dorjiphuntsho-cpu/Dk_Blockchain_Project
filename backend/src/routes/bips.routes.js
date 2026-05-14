@@ -8,6 +8,7 @@ const bipsController = require('../controllers/bips.controller');
 const {
   accountInquirySchema,
   outgoingSchema,
+  transferFlowSchema,
   pgStatusQuerySchema,
   liveInquiryQuerySchema,
 } = require('../validators/bips.validation');
@@ -19,6 +20,7 @@ router.use(authorize(ROLE_NAMES.ADMIN));
 
 router.post('/account-inquiry', validate(accountInquirySchema), asyncHandler(bipsController.accountInquiry));
 router.post('/outgoing', validate(outgoingSchema), asyncHandler(bipsController.outgoingTransfer));
+router.post('/transfer', validate(transferFlowSchema), asyncHandler(bipsController.processTransfer));
 router.get('/status', validate(pgStatusQuerySchema), asyncHandler(bipsController.getPgStatus));
 router.get('/live-inquiry', validate(liveInquiryQuerySchema), asyncHandler(bipsController.liveInquiry));
 

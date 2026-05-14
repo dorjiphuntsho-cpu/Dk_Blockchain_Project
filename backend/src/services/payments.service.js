@@ -41,6 +41,22 @@ function getFirstNonEmptyValue(source, keys) {
   return null;
 }
 
+function getLinkedBankAccountNumbers(user) {
+  const normalized = [];
+  const seen = new Set();
+
+  for (const value of [user.linkedBankAccountNumber, ...(user.linkedBankAccountNumbers || [])]) {
+    const accountNumber = String(value || '').trim();
+    if (!accountNumber || seen.has(accountNumber)) {
+      continue;
+    }
+    seen.add(accountNumber);
+    normalized.push(accountNumber);
+  }
+
+  return normalized;
+}
+
 function buildResponsePreview(responseText, maxLength = 300) {
   const normalized = String(responseText || '').replace(/\s+/g, ' ').trim();
 
@@ -176,7 +192,9 @@ async function getCustomerBuyContext(userId) {
     throw new ApiError(404, 'Customer not found');
   }
 
-  if (!user.linkedBankAccountNumber) {
+  const linkedBankAccountNumbers = getLinkedBankAccountNumbers(user);
+
+  if (linkedBankAccountNumbers.length === 0) {
     throw new ApiError(400, 'Customer does not have a linked bank account');
   }
 
@@ -217,6 +235,7 @@ async function getCustomerBuyContext(userId) {
 
   return {
     user,
+    linkedBankAccountNumbers,
     primaryWallet,
     issuerBank,
     reserveAccount,
@@ -1789,8 +1808,8 @@ async function initiateCustomerBuyBtn(userId, options = {}) {
   const fiatAmount = calculateFiatAmountFromTokenAmount(tokenAmount);
   const sourceAccountNumber = String(options.debitAccount || user.linkedBankAccountNumber).trim();
 
-  if (sourceAccountNumber !== user.linkedBankAccountNumber) {
-    throw new ApiError(400, 'Debit account must match the customer linked bank account');
+  if (!getLinkedBankAccountNumbers(user).includes(sourceAccountNumber)) {
+    throw new ApiError(400, 'Debit account must match one of the customer linked bank accounts');
   }
 
   const paymentReference = buildCustomerPaymentReference();
@@ -1985,6 +2004,7 @@ async function initiateCustomerBuyBtn(userId, options = {}) {
       cid: user.cid,
       primaryWalletAddress: primaryWallet.walletAddress,
       linkedBankAccountNumber: user.linkedBankAccountNumber,
+      linkedBankAccountNumbers: getLinkedBankAccountNumbers(user),
     },
     destination: {
       issuerBankId: issuerBank.id,
@@ -2012,8 +2032,8 @@ async function initiateCustomerSellBtn(userId, options = {}) {
   const walletAvailableRawAmount = BigInt(String(walletBtnBalance?.rawAmount || '0'));
   const requiredRawAmount = BigInt(convertDisplayAmountToRawAmount(tokenAmount, walletBtnBalance?.decimals ?? 0));
 
-  if (payoutAccountNumber !== user.linkedBankAccountNumber) {
-    throw new ApiError(400, 'Payout account must match the customer linked bank account');
+  if (!getLinkedBankAccountNumbers(user).includes(payoutAccountNumber)) {
+    throw new ApiError(400, 'Payout account must match one of the customer linked bank accounts');
   }
 
   if (walletAvailableRawAmount < requiredRawAmount) {
@@ -2276,6 +2296,8 @@ async function initiateCustomerTransferBtn(userId, options = {}) {
   const fiatAmount = calculateFiatAmountFromTokenAmount(tokenAmount);
   const walletAvailableRawAmount = BigInt(String(walletBtnBalance?.rawAmount || '0'));
   const requiredRawAmount = BigInt(convertDisplayAmountToRawAmount(tokenAmount, walletBtnBalance?.decimals ?? 0));
+  const recipientLinkedBankAccountNumbers = getLinkedBankAccountNumbers(recipientUser);
+  const recipientLinkedBankAccountNumber = recipientLinkedBankAccountNumbers[0] || null;
 
   if (walletAvailableRawAmount < requiredRawAmount) {
     throw new ApiError(
@@ -2362,12 +2384,13 @@ async function initiateCustomerTransferBtn(userId, options = {}) {
         cid: recipientUser.cid,
         primaryWalletAddress: recipientPrimaryWallet.walletAddress,
         linkedBankAccountNumber: recipientUser.linkedBankAccountNumber,
+        linkedBankAccountNumbers: recipientLinkedBankAccountNumbers,
       },
       transaction,
     };
   }
 
-  if (!recipientUser.linkedBankAccountNumber) {
+  if (!recipientLinkedBankAccountNumber) {
     throw new ApiError(400, 'Recipient customer has neither an active wallet nor a linked bank account');
   }
 
@@ -2386,7 +2409,7 @@ async function initiateCustomerTransferBtn(userId, options = {}) {
     source_account_name: reserveAccount.accountName,
     source_account_number: reserveAccount.accountNumber,
     soure_account_number: reserveAccount.accountNumber,
-    bene_account_number: recipientUser.linkedBankAccountNumber,
+    bene_account_number: recipientLinkedBankAccountNumber,
     bene_bank_code: issuerBank.code,
   };
   const beneficiaryInquiryResult = await beneficiaryAccountInquiry({
@@ -2407,7 +2430,7 @@ async function initiateCustomerTransferBtn(userId, options = {}) {
     source_account_name: reserveAccount.accountName,
     source_account_number: reserveAccount.accountNumber,
     bene_cust_name: recipientUser.fullName,
-    bene_account_number: recipientUser.linkedBankAccountNumber,
+    bene_account_number: recipientLinkedBankAccountNumber,
     bene_bank_code: issuerBank.code,
     inquiry_id: inquiryId,
     narration: purpose,
@@ -2456,8 +2479,8 @@ async function initiateCustomerTransferBtn(userId, options = {}) {
         issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
         reserveAccountName: reserveAccount.accountName,
-        statusBeneficiaryAccountNumber: recipientUser.linkedBankAccountNumber,
-        payoutAccountNumber: recipientUser.linkedBankAccountNumber,
+        statusBeneficiaryAccountNumber: recipientLinkedBankAccountNumber,
+        payoutAccountNumber: recipientLinkedBankAccountNumber,
         distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
         distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
         requestId,
@@ -2490,8 +2513,8 @@ async function initiateCustomerTransferBtn(userId, options = {}) {
         issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
         reserveAccountName: reserveAccount.accountName,
-        statusBeneficiaryAccountNumber: recipientUser.linkedBankAccountNumber,
-        payoutAccountNumber: recipientUser.linkedBankAccountNumber,
+        statusBeneficiaryAccountNumber: recipientLinkedBankAccountNumber,
+        payoutAccountNumber: recipientLinkedBankAccountNumber,
         distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
         distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
         requestId,
@@ -2528,8 +2551,8 @@ async function initiateCustomerTransferBtn(userId, options = {}) {
         issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
         reserveAccountName: reserveAccount.accountName,
-        statusBeneficiaryAccountNumber: recipientUser.linkedBankAccountNumber,
-        payoutAccountNumber: recipientUser.linkedBankAccountNumber,
+        statusBeneficiaryAccountNumber: recipientLinkedBankAccountNumber,
+        payoutAccountNumber: recipientLinkedBankAccountNumber,
         distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
         distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
         requestId,
@@ -2565,8 +2588,8 @@ async function initiateCustomerTransferBtn(userId, options = {}) {
         issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
         reserveAccountName: reserveAccount.accountName,
-        statusBeneficiaryAccountNumber: recipientUser.linkedBankAccountNumber,
-        payoutAccountNumber: recipientUser.linkedBankAccountNumber,
+        statusBeneficiaryAccountNumber: recipientLinkedBankAccountNumber,
+        payoutAccountNumber: recipientLinkedBankAccountNumber,
         distributionWalletAddress: distributionTokenAccount.treasuryWalletAddress,
         distributionTokenAccountAddress: distributionTokenAccount.tokenAccountAddress,
         requestId,
@@ -2595,16 +2618,18 @@ async function initiateCustomerTransferBtn(userId, options = {}) {
       cid: user.cid,
       primaryWalletAddress: primaryWallet.walletAddress,
       linkedBankAccountNumber: user.linkedBankAccountNumber,
+      linkedBankAccountNumbers: getLinkedBankAccountNumbers(user),
     },
     recipient: {
       id: recipientUser.id,
       fullName: recipientUser.fullName,
       cid: recipientUser.cid,
       primaryWalletAddress: null,
-      linkedBankAccountNumber: recipientUser.linkedBankAccountNumber,
+      linkedBankAccountNumber: recipientLinkedBankAccountNumber,
+      linkedBankAccountNumbers: recipientLinkedBankAccountNumbers,
     },
     payout: {
-      beneficiaryAccountNumber: recipientUser.linkedBankAccountNumber,
+      beneficiaryAccountNumber: recipientLinkedBankAccountNumber,
       beneficiaryName: recipientUser.fullName,
     },
     tokenReturn: {

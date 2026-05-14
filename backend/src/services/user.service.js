@@ -5,8 +5,45 @@ const env = require('../config/env');
 const ApiError = require('../utils/ApiError');
 const { buildPagination, getPagination, getSortOptions } = require('../utils/pagination');
 const { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } = require('../utils/enums');
-const { userInclude, serializeUser } = require('../models/user.model');
+const { normalizeLinkedBankAccountNumbers, userInclude, serializeUser } = require('../models/user.model');
 const auditLogService = require('./auditLog.service');
+
+function resolveLinkedBankAccounts(payload, existingUser = null) {
+  const requestedPrimary = payload.linkedBankAccountNumber;
+  const requestedAccounts = payload.linkedBankAccountNumbers;
+
+  if (requestedPrimary === undefined && requestedAccounts === undefined) {
+    return null;
+  }
+
+  const merged = [];
+  const seen = new Set();
+  const pushAccount = (value) => {
+    const accountNumber = String(value || '').trim();
+    if (!accountNumber || seen.has(accountNumber)) {
+      return;
+    }
+    seen.add(accountNumber);
+    merged.push(accountNumber);
+  };
+
+  if (requestedPrimary !== undefined && requestedPrimary !== null) {
+    pushAccount(requestedPrimary);
+  }
+  if (Array.isArray(requestedAccounts)) {
+    requestedAccounts.forEach(pushAccount);
+  } else if (existingUser?.linkedBankAccountNumbers?.length) {
+    existingUser.linkedBankAccountNumbers.forEach(pushAccount);
+  }
+  if (requestedPrimary === undefined && existingUser?.linkedBankAccountNumber) {
+    pushAccount(existingUser.linkedBankAccountNumber);
+  }
+
+  return {
+    linkedBankAccountNumber: merged[0] || null,
+    linkedBankAccountNumbers: merged,
+  };
+}
 
 async function getRoleRecords(roleNames, tx = prisma) {
   const roles = await tx.role.findMany({
@@ -28,6 +65,10 @@ async function createUser(payload, actorUserId) {
   const roleNames = payload.roles || [];
   const passwordHash = await bcrypt.hash(payload.password, env.BCRYPT_SALT_ROUNDS);
   const mpinHash = payload.mpin ? await bcrypt.hash(payload.mpin, env.BCRYPT_SALT_ROUNDS) : null;
+  const linkedAccounts = resolveLinkedBankAccounts(payload) || {
+    linkedBankAccountNumber: payload.linkedBankAccountNumber || null,
+    linkedBankAccountNumbers: payload.linkedBankAccountNumber ? [payload.linkedBankAccountNumber] : [],
+  };
 
   const user = await prisma.$transaction(async (tx) => {
     const roles = roleNames.length ? await getRoleRecords(roleNames, tx) : [];
@@ -39,7 +80,8 @@ async function createUser(payload, actorUserId) {
         passwordHash,
         cid: payload.cid || null,
         customerType: payload.customerType || null,
-        linkedBankAccountNumber: payload.linkedBankAccountNumber || null,
+        linkedBankAccountNumber: linkedAccounts.linkedBankAccountNumber,
+        linkedBankAccountNumbers: linkedAccounts.linkedBankAccountNumbers,
         mpinHash,
         roles: roles.length
           ? {
@@ -64,6 +106,7 @@ async function createUser(payload, actorUserId) {
           cid: createdUser.cid,
           customerType: createdUser.customerType,
           linkedBankAccountNumber: createdUser.linkedBankAccountNumber,
+          linkedBankAccountNumbers: createdUser.linkedBankAccountNumbers,
           roles: roleNames,
         },
       },
@@ -215,12 +258,20 @@ async function updateUser(id, payload, actorUserId) {
 
   if (
     payload.linkedBankAccountNumber !== undefined
-    && payload.linkedBankAccountNumber !== existingUser.linkedBankAccountNumber
+    || payload.linkedBankAccountNumbers !== undefined
   ) {
-    updateData.linkedBankAccountNumber = payload.linkedBankAccountNumber;
+    const linkedAccounts = resolveLinkedBankAccounts(payload, existingUser);
+    const previousAccounts = normalizeLinkedBankAccountNumbers(existingUser);
+
+    updateData.linkedBankAccountNumber = linkedAccounts.linkedBankAccountNumber;
+    updateData.linkedBankAccountNumbers = linkedAccounts.linkedBankAccountNumbers;
     changedFields.linkedBankAccountNumber = {
       previous: existingUser.linkedBankAccountNumber,
-      current: payload.linkedBankAccountNumber,
+      current: linkedAccounts.linkedBankAccountNumber,
+    };
+    changedFields.linkedBankAccountNumbers = {
+      previous: previousAccounts,
+      current: linkedAccounts.linkedBankAccountNumbers,
     };
   }
 

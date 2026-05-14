@@ -37,9 +37,29 @@ async function customerPortalSummary(req, res) {
   });
 }
 
+async function customerBankOptions(req, res) {
+  const banks = await authService.getCustomerBankOptions();
+
+  return successResponse(res, {
+    message: 'Customer bank options fetched successfully',
+    data: banks,
+  });
+}
+
+async function updateCustomerBankAccounts(req, res) {
+  const result = await authService.updateCustomerBankAccounts(req.user.id, req.validated.body);
+
+  return successResponse(res, {
+    message: 'Customer linked bank accounts updated successfully',
+    data: result,
+  });
+}
+
 module.exports = {
+  customerBankOptions,
   customerLogin,
   customerPortalSummary,
   login,
   me,
+  updateCustomerBankAccounts,
 };

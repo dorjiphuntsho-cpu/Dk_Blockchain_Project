@@ -23,6 +23,14 @@ export const portalApi = {
     const response = await portalClient.get('/auth/customer-portal-summary', authHeaders(token));
     return response.data;
   },
+  getBankOptions: async (token) => {
+    const response = await portalClient.get('/auth/customer-bank-options', authHeaders(token));
+    return response.data;
+  },
+  updateBankAccounts: async (token, payload) => {
+    const response = await portalClient.patch('/auth/customer-bank-accounts', payload, authHeaders(token));
+    return response.data;
+  },
   buyBtn: async (token, payload) => {
     const response = await portalClient.post('/payments/customer/buy-btn', payload, authHeaders(token));
     return response.data;

@@ -1,8 +1,9 @@
+const path = require('path');
 const dotenv = require('dotenv');
 const { z } = require('zod');
 const { applyDatabaseUrl } = require('../utils/databaseUrl');
 
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 applyDatabaseUrl(process.env);
 
 const optionalNonEmptyString = z.preprocess((value) => {
@@ -109,6 +110,7 @@ const envSchema = z.object({
   BIPS_SOURCE_BANK_CODE: optionalNonEmptyString,
   BIPS_SOURCE_BIN_NUMBER: optionalNonEmptyString,
   BIPS_SOURCE_PAN_NUMBER: optionalNonEmptyString,
+  BIPS_SOURCE_PRIMARY_ACCOUNT_NUMBER: optionalNonEmptyString,
   BIPS_RECONCILE_BATCH_LIMIT: z.coerce.number().int().positive().max(100).default(20),
   BIPS_RECONCILE_INCLUDE_MANUAL_REVIEW: z.preprocess((value) => {
     if (value === undefined) {

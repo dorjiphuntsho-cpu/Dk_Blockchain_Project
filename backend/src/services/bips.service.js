@@ -63,6 +63,25 @@ function extractAllSimpleTags(xml) {
   return values;
 }
 
+function parseTlvFields(value) {
+  const input = String(value || '');
+  const fields = {};
+  let index = 0;
+
+  while (index + 6 <= input.length) {
+    const tag = input.slice(index, index + 3);
+    const length = Number(input.slice(index + 3, index + 6));
+    index += 6;
+    if (!Number.isInteger(length) || length < 0 || index + length > input.length) {
+      break;
+    }
+    fields[tag] = input.slice(index, index + length);
+    index += length;
+  }
+
+  return fields;
+}
+
 function buildTimestampParts(now = new Date()) {
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -92,16 +111,46 @@ function toMinorUnits(amount) {
   return String(Math.round(numeric * 100)).padStart(12, '0');
 }
 
+function encodeTlvField(tag, value, length = 3) {
+  const normalized = String(value ?? '');
+  return `${String(tag).padStart(3, '0')}${String(normalized.length).padStart(length, '0')}${normalized}`;
+}
+
+function buildInquiryAccountIdentifier(prefix, accountNumber) {
+  return `${prefix}${String(accountNumber || '').replace(/\D/g, '')}`;
+}
+
+function buildInquiryPrimaryAccountNumber() {
+  if (env.BIPS_SOURCE_PRIMARY_ACCOUNT_NUMBER) {
+    return env.BIPS_SOURCE_PRIMARY_ACCOUNT_NUMBER;
+  }
+
+  return env.BIPS_SOURCE_PAN_NUMBER || `${env.BIPS_SOURCE_BIN_NUMBER}999999999`;
+}
+
+function buildAcqInstitutionIdCode() {
+  const bin = String(env.BIPS_SOURCE_BIN_NUMBER || '').replace(/\D/g, '');
+  if (!bin) {
+    return '';
+  }
+
+  return `0${bin[0]}${bin}`;
+}
+
 function buildSupportingInformationForInquiry(payload, requestMeta) {
+  const sourceName = String(payload.sourceAccountName || '');
+  const transferPurpose = String(payload.transferPurpose || '');
+  const sourceBankCode = String(payload.sourceBankCode || env.BIPS_SOURCE_BANK_CODE || '');
+  const beneficiaryBankCode = String(payload.beneficiaryBankCode || '');
+
   return [
-    `SRC_NAME:${payload.sourceAccountName}`,
-    `SRC_ACCT:${payload.sourceAccountNumber}`,
-    `SRC_BANK:${payload.sourceBankCode || env.BIPS_SOURCE_BANK_CODE}`,
-    `DEST_BANK:${payload.beneficiaryBankCode}`,
-    `PURPOSE:${payload.transferPurpose}`,
-    `REQ:${payload.requestId}`,
-    `REF:${requestMeta.retrievalReferenceNumber}`,
-  ].join('|').slice(0, 199);
+    '113001003003002006MOBILE',
+    `003${String(sourceName.length).padStart(3, '0')}${sourceName}`,
+    `004000005${String(transferPurpose.length).padStart(3, '0')}${transferPurpose}`,
+    `006012${requestMeta.retrievalReferenceNumber}`,
+    `007000008004${sourceBankCode}`,
+    `009004${beneficiaryBankCode}`,
+  ].join('').slice(0, 199);
 }
 
 function buildSupportingInformationForOutgoing(payload) {
@@ -118,9 +167,12 @@ function buildSupportingInformationForOutgoing(payload) {
 }
 
 function buildAccountInquiryRequestXml(payload, requestMeta) {
+  const primaryAccountNumber = buildInquiryPrimaryAccountNumber();
+  const sourceAccountIdentifier = buildInquiryAccountIdentifier('12', payload.sourceAccountNumber);
+  const beneficiaryAccountIdentifier = buildInquiryAccountIdentifier('13', payload.beneficiaryAccountNumber);
   return [
     '<RequestXml>',
-    `<PrimaryAccountNumber>${env.BIPS_SOURCE_BIN_NUMBER}999999999</PrimaryAccountNumber>`,
+    `<PrimaryAccountNumber>${primaryAccountNumber}</PrimaryAccountNumber>`,
     '<ProcessingCode>350000</ProcessingCode>',
     `<TxnAmount>${toMinorUnits(payload.amount)}</TxnAmount>`,
     `<TxnDateAndTime>${requestMeta.txnDateAndTime}</TxnDateAndTime>`,
@@ -132,14 +184,14 @@ function buildAccountInquiryRequestXml(payload, requestMeta) {
     '<PosEntryMode>900</PosEntryMode>',
     '<PosConditionCode>00</PosConditionCode>',
     '<TxnFeeAmount>D00000000</TxnFeeAmount>',
-    `<AcqInstitutionIdCode>0${env.BIPS_SOURCE_BIN_NUMBER}</AcqInstitutionIdCode>`,
+    `<AcqInstitutionIdCode>${buildAcqInstitutionIdCode()}</AcqInstitutionIdCode>`,
     `<RetrievalReferenceNumber>${requestMeta.retrievalReferenceNumber}</RetrievalReferenceNumber>`,
     '<CardAcceptorTerminalId>00000000</CardAcceptorTerminalId>',
     '<CardAcquirerId>000000000000000</CardAcquirerId>',
     '<AcceptorNameAndLocation>DK Thimphu000000000000000000000000000000</AcceptorNameAndLocation>',
     '<TxnCurrencyCode>064</TxnCurrencyCode>',
-    `<AccountIdentification1>${payload.sourceAccountNumber}</AccountIdentification1>`,
-    `<AccountIdentification2>${payload.beneficiaryAccountNumber}</AccountIdentification2>`,
+    `<AccountIdentification1>${sourceAccountIdentifier}</AccountIdentification1>`,
+    `<AccountIdentification2>${beneficiaryAccountIdentifier}</AccountIdentification2>`,
     `<SupportingInformation>${escapeXml(buildSupportingInformationForInquiry(payload, requestMeta))}</SupportingInformation>`,
     '</RequestXml>',
   ].join('');
@@ -148,8 +200,8 @@ function buildAccountInquiryRequestXml(payload, requestMeta) {
 function buildOutgoingRequestXml(payload, requestMeta) {
   return [
     '<RequestXml>',
-    `<PrimaryAccountNumber>${env.BIPS_SOURCE_BIN_NUMBER}999999999</PrimaryAccountNumber>`,
-    '<ProcessingCode>260000</ProcessingCode>',
+    `<PrimaryAccountNumber>${env.BIPS_SOURCE_PRIMARY_ACCOUNT_NUMBER}</PrimaryAccountNumber>`,
+    '<ProcessingCode>350000</ProcessingCode>',
     `<TxnAmount>${toMinorUnits(payload.amount)}</TxnAmount>`,
     `<TxnDateAndTime>${requestMeta.txnDateAndTime}</TxnDateAndTime>`,
     `<TraceAuditNumber>${requestMeta.traceAuditNumber}</TraceAuditNumber>`,
@@ -199,6 +251,19 @@ function buildSoapEnvelope({ apiKey, requestXml, requestMeta }) {
 </soapenv:Envelope>`;
 }
 
+function buildNaradaJsonPayload({ apiKey, requestXml, requestMeta, payload }) {
+  return {
+    Amount: Number(payload.amount),
+    BeneficiaryAccountNumber: payload.beneficiaryAccountNumber,
+    BeneficiaryBankCode: payload.beneficiaryBankCode,
+    SourceAccountName: payload.sourceAccountName,
+    SourceAccountNumber: payload.sourceAccountNumber,
+    SourceBankCode: payload.sourceBankCode || env.BIPS_SOURCE_BANK_CODE,
+    TransferPurpose: payload.transferPurpose,
+    request_id: payload.requestId,
+  };
+}
+
 async function fetchWithTimeout(url, options = {}, timeoutMs = env.BIPS_TIMEOUT_MS) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -211,6 +276,28 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = env.BIPS_TIMEOUT_
   } catch (error) {
     if (error.name === 'AbortError') {
       throw new ApiError(408, 'BIPS request timed out');
+    }
+    if (error?.cause?.code === 'ENOTFOUND') {
+      const hostname = new URL(url).hostname;
+      throw new ApiError(502, `BIPS host could not be resolved: ${hostname}`);
+    }
+    if (error?.cause?.code === 'ECONNREFUSED') {
+      throw new ApiError(502, 'BIPS connection was refused by the remote host');
+    }
+    if (error?.cause?.code === 'ETIMEDOUT') {
+      throw new ApiError(504, 'BIPS connection timed out');
+    }
+    if (error?.cause?.code === 'ECONNRESET') {
+      throw new ApiError(502, 'BIPS connection was reset by the remote host');
+    }
+    const causeCode = error?.cause?.code;
+    const causeMessage = error?.cause?.message || error?.message;
+
+    if (causeCode && /CERT|TLS|SSL/i.test(causeCode)) {
+      throw new ApiError(502, `BIPS TLS error: ${causeCode}${causeMessage ? ` - ${causeMessage}` : ''}`);
+    }
+    if (causeMessage) {
+      throw new ApiError(502, `BIPS request failed: ${causeCode ? `${causeCode} - ` : ''}${causeMessage}`);
     }
     throw error;
   } finally {
@@ -232,6 +319,7 @@ async function updateLog(id, data) {
 }
 
 function parseSoapResponse(responseText) {
+
   const responseBody = extractFirstTagValue(responseText, 'response');
   const decodedResponseBody = responseBody ? decodeXmlEntities(responseBody) : null;
   const embeddedResponse = decodedResponseBody ? extractAllSimpleTags(decodedResponseBody) : {};
@@ -246,6 +334,60 @@ function parseSoapResponse(responseText) {
   };
 }
 
+function normalizeAccountInquiryResponse(parsedResponse) {
+
+  if (parsedResponse?.response_code) {
+    return {
+      response_code: parsedResponse.response_code,
+      response_data: parsedResponse.response_data ?? null,
+      response_description: parsedResponse.response_description ?? null,
+      response_message: parsedResponse.response_message ?? null,
+      response_time: parsedResponse.response_time || parsedResponse.responsetime || null,
+    };
+  }
+
+  const embedded = parsedResponse?.embeddedResponse || {};
+  const additionalData = parseTlvFields(embedded.AdditionalData);
+  const responseCode = embedded.ResponseCode || parsedResponse?.responseCode;
+
+  if (!responseCode) {
+    return parsedResponse;
+  }
+
+  return {
+    response_code: responseCode === '00' ? '0000' : responseCode,
+    response_data: {
+      account_type: additionalData['002'] || null,
+      beneficiary_account_name: additionalData['001'] || null,
+      reference_number: embedded.RetrievalReferenceNumber || null,
+      status: additionalData['003'] || null,
+    },
+    response_description: parsedResponse?.responseText || null,
+    response_message: parsedResponse?.responseText || null,
+    response_time: parsedResponse?.msgTimeStamp || null,
+  };
+}
+
+function extractBipsResponseCode(parsedResponse) {
+  return parsedResponse?.response_code
+    || parsedResponse?.embeddedResponse?.ResponseCode
+    || parsedResponse?.responseCode
+    || null;
+}
+
+function extractBipsResponseMessage(parsedResponse) {
+  return parsedResponse?.response_message
+    || parsedResponse?.response_description
+    || parsedResponse?.responseText
+    || null;
+}
+
+function extractInquiryReferenceNumber(parsedResponse) {
+  return parsedResponse?.response_data?.reference_number
+    || parsedResponse?.embeddedResponse?.RetrievalReferenceNumber
+    || null;
+}
+
 async function executeSoapRequest({
   requestType,
   apiPath,
@@ -258,7 +400,6 @@ async function executeSoapRequest({
   referenceNumber = null,
 }) {
   ensureConfigured();
-
   const envelope = buildSoapEnvelope({ apiKey, requestXml, requestMeta });
   const url = `${env.BIPS_BASE_URL}${apiPath}`;
   const logEntry = await createLog({
@@ -310,6 +451,96 @@ async function executeSoapRequest({
       httpStatus: response.status,
       rawResponse: responseText,
       parsedResponse: parsed,
+    };
+  } catch (error) {
+    await updateLog(logEntry.id, {
+      responseStatus: 'ERROR',
+      responseMessage: error.message,
+      rawResponse: {
+        error: error.message,
+      },
+    });
+    logger.error(`BIPS ${requestType} failed`, error);
+    throw error;
+  }
+}
+
+async function executeJsonRequest({
+  requestType,
+  apiPath,
+  apiKey,
+  requestPayload,
+  requestMeta,
+  requestXml,
+  settlementRequestId = null,
+  requestId = null,
+  referenceNumber = null,
+}) {
+  ensureConfigured();
+
+  const payload = buildNaradaJsonPayload({ apiKey, requestXml, requestMeta, payload: requestPayload });
+  const url = `${env.BIPS_BASE_URL}${apiPath}`;
+  const logEntry = await createLog({
+    settlementRequestId,
+    requestType,
+    requestId,
+    referenceNumber,
+    rawRequest: {
+      url,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: payload,
+    },
+    parsedRequest: {
+      payload: requestPayload,
+      requestMeta,
+      requestXml,
+    },
+  });
+
+  try {
+    const response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/plain, */*',
+      },
+      body: JSON.stringify(payload),
+    });
+    const responseText = await response.text();
+    let parsedResponse;
+    try {
+      parsedResponse = JSON.parse(responseText);
+    } catch {
+      parsedResponse = parseSoapResponse(responseText);
+    }
+    const normalizedResponse =
+      requestType === 'ACCOUNT_INQUIRY' ? normalizeAccountInquiryResponse(parsedResponse) : parsedResponse;
+
+    await updateLog(logEntry.id, {
+      transactionId: parsedResponse.msgRefNo || normalizedResponse?.response_data?.reference_number || null,
+      rawResponse: {
+        status: response.status,
+        statusText: response.statusText,
+        body: responseText,
+      },
+      parsedResponse: normalizedResponse,
+      responseStatus:
+        normalizedResponse.responseCode || normalizedResponse.response_code || String(response.status),
+      responseMessage:
+        normalizedResponse.responseText
+        || normalizedResponse.response_message
+        || normalizedResponse.response_detail
+        || response.statusText,
+    });
+
+    return {
+      logId: logEntry.id,
+      httpStatus: response.status,
+      rawResponse: responseText,
+      parsedResponse: normalizedResponse,
     };
   } catch (error) {
     await updateLog(logEntry.id, {
@@ -403,7 +634,7 @@ async function executeGetRequest({
 async function accountInquiry(payload) {
   const requestMeta = buildTimestampParts();
   const requestXml = buildAccountInquiryRequestXml(payload, requestMeta);
-  return executeSoapRequest({
+  return executeJsonRequest({
     requestType: 'ACCOUNT_INQUIRY',
     apiPath: '/api/bips/account-inquery',
     apiKey: env.BIPS_ACCINQ_API_KEY,
@@ -430,6 +661,61 @@ async function outgoingTransfer(payload) {
     requestId: payload.requestId,
     referenceNumber: payload.referenceNumber,
   });
+}
+
+async function processTransfer(payload) {
+  const inquiryResult = await accountInquiry(payload);
+  const inquiryCode = extractBipsResponseCode(inquiryResult.parsedResponse);
+  const inquiryMessage = extractBipsResponseMessage(inquiryResult.parsedResponse);
+  const referenceNumber = extractInquiryReferenceNumber(inquiryResult.parsedResponse);
+  const inquirySucceeded = ['00', '0000'].includes(String(inquiryCode || ''));
+
+  if (!inquirySucceeded) {
+    return {
+      completed: false,
+      stage: 'ACCOUNT_INQUIRY',
+      status: 'STOPPED',
+      requestId: payload.requestId,
+      inquiry: {
+        responseCode: inquiryCode,
+        responseMessage: inquiryMessage,
+        referenceNumber,
+        result: inquiryResult,
+      },
+      outgoing: null,
+    };
+  }
+
+  if (!referenceNumber) {
+    throw new ApiError(502, 'BIPS inquiry succeeded but did not return reference_number');
+  }
+
+  const outgoingResult = await outgoingTransfer({
+    ...payload,
+    referenceNumber,
+  });
+  const outgoingCode = extractBipsResponseCode(outgoingResult.parsedResponse);
+  const outgoingMessage = extractBipsResponseMessage(outgoingResult.parsedResponse);
+  const outgoingSucceeded = ['00', '0000'].includes(String(outgoingCode || ''));
+
+  return {
+    completed: outgoingSucceeded,
+    stage: 'OUTGOING',
+    status: outgoingSucceeded ? 'COMPLETED' : 'OUTGOING_FAILED',
+    requestId: payload.requestId,
+    inquiry: {
+      responseCode: inquiryCode,
+      responseMessage: inquiryMessage,
+      referenceNumber,
+      result: inquiryResult,
+    },
+    outgoing: {
+      responseCode: outgoingCode,
+      responseMessage: outgoingMessage,
+      referenceNumber,
+      result: outgoingResult,
+    },
+  };
 }
 
 async function getPgStatus(query) {
@@ -464,6 +750,7 @@ async function liveInquiry(query) {
 module.exports = {
   accountInquiry,
   outgoingTransfer,
+  processTransfer,
   getPgStatus,
   liveInquiry,
 };

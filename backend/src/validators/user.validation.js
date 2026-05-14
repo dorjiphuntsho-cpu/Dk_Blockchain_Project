@@ -17,6 +17,7 @@ const createUserSchema = z.object({
     cid: requiredTrimmedString.regex(/^\d{11}$/, 'CID must be 11 digits').optional(),
     customerType: requiredTrimmedString.optional(),
     linkedBankAccountNumber: requiredTrimmedString.optional(),
+    linkedBankAccountNumbers: z.array(requiredTrimmedString).optional(),
     mpin: requiredTrimmedString.regex(/^\d{4,6}$/, 'MPIN must be 4 to 6 digits').optional(),
     roles: z
       .array(roleEnum)
@@ -60,6 +61,7 @@ const updateUserSchema = z.object({
       cid: requiredTrimmedString.regex(/^\d{11}$/, 'CID must be 11 digits').nullable().optional(),
       customerType: requiredTrimmedString.nullable().optional(),
       linkedBankAccountNumber: requiredTrimmedString.nullable().optional(),
+      linkedBankAccountNumbers: z.array(requiredTrimmedString).optional(),
       mpin: requiredTrimmedString.regex(/^\d{4,6}$/, 'MPIN must be 4 to 6 digits').optional(),
     })
     .refine((data) => Object.keys(data).length > 0, {

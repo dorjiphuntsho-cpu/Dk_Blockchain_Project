@@ -18,7 +18,23 @@ const customerLoginSchema = z.object({
   params: z.object({}).optional(),
 });
 
+const customerBankAccountItemSchema = z.object({
+  bankId: requiredTrimmedString.uuid('Invalid bank id'),
+  accountNumber: requiredTrimmedString,
+  accountName: requiredTrimmedString.optional(),
+  isPrimary: z.boolean().optional(),
+});
+
+const updateCustomerBankAccountsSchema = z.object({
+  body: z.object({
+    accounts: z.array(customerBankAccountItemSchema).min(1, 'At least one bank account is required'),
+  }),
+  query: z.object({}).optional(),
+  params: z.object({}).optional(),
+});
+
 module.exports = {
   customerLoginSchema,
   loginSchema,
+  updateCustomerBankAccountsSchema,
 };

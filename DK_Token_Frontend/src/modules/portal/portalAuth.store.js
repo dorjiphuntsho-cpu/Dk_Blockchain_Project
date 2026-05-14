@@ -9,6 +9,7 @@ const usePortalAuthStore = create(
       token: null,
       customer: null,
       isLoading: false,
+      setCustomer: (customer) => set({ customer }),
       login: async ({ cid, mpin }) => {
         set({ isLoading: true });
 

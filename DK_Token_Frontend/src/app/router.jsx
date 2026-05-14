@@ -10,6 +10,7 @@ import PortalLayout from '../layouts/PortalLayout';
 import LoginPage from '../pages/auth/LoginPage';
 import DashboardPage from '../pages/dashboard/DashboardPage';
 import PortalActionPage from '../pages/portal/PortalActionPage';
+import PortalBankAccountsPage from '../pages/portal/PortalBankAccountsPage';
 import PortalHomePage from '../pages/portal/PortalHomePage';
 import PortalLoginPage from '../pages/portal/PortalLoginPage';
 import PortalWalletPage from '../pages/portal/PortalWalletPage';
@@ -61,6 +62,7 @@ const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate replace to="/portal/overview" /> },
           { path: 'overview', element: <PortalHomePage /> },
+          { path: 'bank-accounts', element: <PortalBankAccountsPage /> },
           { path: 'wallet', element: <PortalWalletPage /> },
           { path: 'buy', element: <PortalActionPage mode="buy" /> },
           { path: 'sell', element: <PortalActionPage mode="sell" /> },

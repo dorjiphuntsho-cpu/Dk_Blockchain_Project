@@ -91,6 +91,7 @@ function PortalHomePage() {
   const tokenSummary = summary?.token;
   const linkedBank = summary?.linkedBank;
   const linkedAccount = summary?.linkedAccount;
+  const linkedBankAccounts = summary?.linkedBankAccounts || summary?.customer?.linkedBankAccounts || [];
   const tokenName = tokenSummary?.name || 'BTN Token';
   const tokenSymbol = tokenSummary?.symbol || 'BTN';
   const walletAddress = summary?.customer?.primaryWalletAddress || customer?.wallets?.[0]?.walletAddress || 'Not linked'; // eslint-disable-line no-unused-vars
@@ -141,6 +142,7 @@ function PortalHomePage() {
             <div className="rounded-[1.25rem] border border-white/10 bg-black/20 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-zinc-300">Fiat account</p>
               <p className="mt-3 font-mono text-lg text-white">{linkedBankAccountNumber}</p>
+              <p className="mt-2 text-sm text-zinc-300">{linkedBankAccounts.length} linked bank account{linkedBankAccounts.length === 1 ? '' : 's'}</p>
             </div>
           </div>
         </div>

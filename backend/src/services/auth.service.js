@@ -6,8 +6,59 @@ const env = require('../config/env');
 const ApiError = require('../utils/ApiError');
 const cbsService = require('./cbs.service');
 const solanaService = require('./solana.service');
+const { normalizeLinkedBankAccounts, normalizeLinkedBankAccountNumbers } = require('../models/user.model');
+
+function userProfileInclude() {
+  return {
+    roles: {
+      include: {
+        role: true,
+      },
+    },
+    wallets: true,
+    customerBankAccounts: {
+      where: {
+        isActive: true,
+      },
+      orderBy: [
+        { isPrimary: 'desc' },
+        { createdAt: 'asc' },
+      ],
+      include: {
+        bank: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+          },
+        },
+      },
+    },
+  };
+}
+
+function resolvePortalLinkedBankAccounts(user) {
+  const structured = normalizeLinkedBankAccounts(user);
+
+  if (structured.length > 0) {
+    return structured;
+  }
+
+  return normalizeLinkedBankAccountNumbers(user).map((accountNumber, index) => ({
+    id: `legacy-${index}-${accountNumber}`,
+    bankId: null,
+    bankCode: null,
+    bankName: null,
+    accountNumber,
+    accountName: null,
+    isPrimary: index === 0,
+    isActive: true,
+  }));
+}
 
 function mapUserProfile(user) {
+  const linkedBankAccountNumbers = normalizeLinkedBankAccountNumbers(user);
+  const linkedBankAccounts = resolvePortalLinkedBankAccounts(user);
   return {
     id: user.id,
     fullName: user.fullName,
@@ -15,6 +66,8 @@ function mapUserProfile(user) {
     cid: user.cid,
     customerType: user.customerType,
     linkedBankAccountNumber: user.linkedBankAccountNumber,
+    linkedBankAccountNumbers,
+    linkedBankAccounts,
     isActive: user.isActive,
     roles: user.roles.map((item) => item.role.name),
     wallets: user.wallets.map((wallet) => ({
@@ -67,14 +120,7 @@ function selectPortalManagedToken(tokens) {
 async function login({ email, password }) {
   const user = await prisma.user.findUnique({
     where: { email: email.toLowerCase() },
-    include: {
-      roles: {
-        include: {
-          role: true,
-        },
-      },
-      wallets: true,
-    },
+    include: userProfileInclude(),
   });
 
   if (!user || !user.isActive) {
@@ -106,14 +152,7 @@ async function login({ email, password }) {
 async function customerLogin({ cid, mpin }) {
   const user = await prisma.user.findUnique({
     where: { cid },
-    include: {
-      roles: {
-        include: {
-          role: true,
-        },
-      },
-      wallets: true,
-    },
+    include: userProfileInclude(),
   });
 
   if (!user || !user.isActive || !user.mpinHash) {
@@ -145,14 +184,7 @@ async function customerLogin({ cid, mpin }) {
 async function getCurrentUser(userId) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: {
-      roles: {
-        include: {
-          role: true,
-        },
-      },
-      wallets: true,
-    },
+    include: userProfileInclude(),
   });
 
   if (!user) {
@@ -174,6 +206,24 @@ async function getCustomerPortalSummary(userId) {
           { isPrimary: 'desc' },
           { createdAt: 'asc' },
         ],
+      },
+      customerBankAccounts: {
+        where: {
+          isActive: true,
+        },
+        orderBy: [
+          { isPrimary: 'desc' },
+          { createdAt: 'asc' },
+        ],
+        include: {
+          bank: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+            },
+          },
+        },
       },
     },
   });
@@ -325,17 +375,18 @@ async function getCustomerPortalSummary(userId) {
     ],
     take: 10,
   });
-  let linkedAccount = null;
-
-  if (user.linkedBankAccountNumber) {
+  const linkedBankAccounts = await Promise.all(resolvePortalLinkedBankAccounts(user).map(async (account) => {
     try {
-      const inquiryResult = await cbsService.accountInquiry({
-        accountNumber: user.linkedBankAccountNumber,
-      });
-
-      linkedAccount = {
-        accountNumber: inquiryResult.summary.accountNumber || user.linkedBankAccountNumber,
-        accountName: inquiryResult.summary.accountName,
+      const inquiryResult = await cbsService.accountInquiry({ accountNumber: account.accountNumber });
+      return {
+        id: account.id,
+        bankId: account.bankId,
+        bankCode: account.bankCode,
+        bankName: account.bankName,
+        accountNumber: inquiryResult.summary.accountNumber || account.accountNumber,
+        accountName: inquiryResult.summary.accountName || account.accountName,
+        isPrimary: Boolean(account.isPrimary),
+        isActive: Boolean(account.isActive),
         productType: inquiryResult.summary.productType,
         currencyCode: inquiryResult.summary.currencyCode,
         availableBalance: inquiryResult.summary.availableBalance,
@@ -347,9 +398,15 @@ async function getCustomerPortalSummary(userId) {
         warning: null,
       };
     } catch (error) {
-      linkedAccount = {
-        accountNumber: user.linkedBankAccountNumber,
-        accountName: null,
+      return {
+        id: account.id,
+        bankId: account.bankId,
+        bankCode: account.bankCode,
+        bankName: account.bankName,
+        accountNumber: account.accountNumber,
+        accountName: account.accountName || null,
+        isPrimary: Boolean(account.isPrimary),
+        isActive: Boolean(account.isActive),
         productType: null,
         currencyCode: 'BTN',
         availableBalance: null,
@@ -361,7 +418,9 @@ async function getCustomerPortalSummary(userId) {
         warning: error.message,
       };
     }
-  }
+  }));
+  const linkedBankAccountNumbers = linkedBankAccounts.map((account) => account.accountNumber);
+  const primaryLinkedAccount = linkedBankAccounts.find((account) => account.isPrimary) || linkedBankAccounts[0] || null;
 
   return {
     customer: {
@@ -369,13 +428,16 @@ async function getCustomerPortalSummary(userId) {
       fullName: user.fullName,
       cid: user.cid,
       linkedBankAccountNumber: user.linkedBankAccountNumber,
+      linkedBankAccountNumbers,
+      linkedBankAccounts,
       primaryWalletAddress: primaryWallet?.walletAddress || null,
       btnBalance: btnWalletBalance?.amount || '0',
       btnBalanceRaw: btnWalletBalance?.rawAmount || '0',
-      primaryAccountNumber: user.linkedBankAccountNumber || null,
+      primaryAccountNumber: primaryLinkedAccount?.accountNumber || user.linkedBankAccountNumber || null,
       sellDelegation,
     },
-    linkedAccount,
+    linkedAccount: primaryLinkedAccount,
+    linkedBankAccounts,
     walletBalances,
     token,
     recentPayments: recentPayments.map((payment) => ({
@@ -406,9 +468,103 @@ async function getCustomerPortalSummary(userId) {
   };
 }
 
+async function getCustomerBankOptions() {
+  return prisma.bank.findMany({
+    where: {
+      isActive: true,
+    },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      supportsBtn: true,
+      supportsBipsSettlement: true,
+    },
+    orderBy: [
+      { name: 'asc' },
+    ],
+  });
+}
+
+async function updateCustomerBankAccounts(userId, payload) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      customerBankAccounts: true,
+    },
+  });
+
+  if (!user || !user.isActive) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  const requestedAccounts = payload.accounts.map((account, index) => ({
+    ...account,
+    accountNumber: String(account.accountNumber || '').trim(),
+    accountName: account.accountName ? String(account.accountName).trim() : null,
+    isPrimary: account.isPrimary === true || index === 0,
+  }));
+  const uniqueKeys = new Set();
+
+  for (const account of requestedAccounts) {
+    const uniqueKey = `${account.bankId}:${account.accountNumber}`;
+    if (uniqueKeys.has(uniqueKey)) {
+      throw new ApiError(400, 'Duplicate bank accounts are not allowed');
+    }
+    uniqueKeys.add(uniqueKey);
+  }
+
+  const banks = await prisma.bank.findMany({
+    where: {
+      id: {
+        in: [...new Set(requestedAccounts.map((account) => account.bankId))],
+      },
+      isActive: true,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (banks.length !== new Set(requestedAccounts.map((account) => account.bankId)).size) {
+    throw new ApiError(400, 'One or more selected banks are invalid');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.customerBankAccount.deleteMany({
+      where: {
+        userId,
+      },
+    });
+
+    await tx.customerBankAccount.createMany({
+      data: requestedAccounts.map((account, index) => ({
+        userId,
+        bankId: account.bankId,
+        accountNumber: account.accountNumber,
+        accountName: account.accountName,
+        isPrimary: account.isPrimary === true || index === 0,
+        isActive: true,
+      })),
+    });
+
+    await tx.user.update({
+      where: { id: userId },
+      data: {
+        linkedBankAccountNumber: requestedAccounts[0]?.accountNumber || null,
+        linkedBankAccountNumbers: requestedAccounts.map((account) => account.accountNumber),
+      },
+    });
+  });
+
+  return getCurrentUser(userId);
+}
+
 module.exports = {
   customerLogin,
+  getCustomerBankOptions,
   login,
   getCurrentUser,
   getCustomerPortalSummary,
+  updateCustomerBankAccounts,
 };

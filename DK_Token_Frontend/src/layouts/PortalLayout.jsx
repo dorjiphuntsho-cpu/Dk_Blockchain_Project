@@ -2,6 +2,7 @@ import {
   ArrowsRightLeftIcon,
   BanknotesIcon,
   CurrencyDollarIcon,
+  BuildingLibraryIcon,
   PowerIcon,
   WalletIcon,
 } from '@heroicons/react/24/outline';
@@ -16,6 +17,7 @@ import { formatAmount } from '../utils/format';
 
 const PORTAL_NAV_ITEMS = [
   { label: 'Overview', path: '/portal/overview', icon: BanknotesIcon },
+  { label: 'Bank Accounts', path: '/portal/bank-accounts', icon: BuildingLibraryIcon },
   { label: 'Wallet', path: '/portal/wallet', icon: WalletIcon },
   { label: 'Buy BTN', path: '/portal/buy', icon: CurrencyDollarIcon },
   { label: 'Sell BTN', path: '/portal/sell', icon: ArrowsRightLeftIcon },
