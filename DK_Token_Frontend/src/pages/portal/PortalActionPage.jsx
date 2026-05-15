@@ -31,6 +31,7 @@ const ACTION_CONFIG = {
     fields: [
       { name: 'amount', label: 'BTN Coin Amount', placeholder: '250.00' },
       { name: 'debitAccount', label: 'Account Number', placeholder: '100100365856' },
+      { name: 'phoneNumber', label: 'Phone Number', placeholder: '17811440' },
     ],
   },
   sell: {
@@ -69,6 +70,10 @@ const ACTION_CONFIG = {
 
 function buildInitialValues(fields) {
   return fields.reduce((accumulator, field) => ({ ...accumulator, [field.name]: '' }), {});
+}
+
+function getAccountByNumber(accounts, accountNumber) {
+  return accounts.find((account) => account.accountNumber === accountNumber) || null;
 }
 
 function PortalActionPage({ mode }) {
@@ -151,6 +156,17 @@ function PortalActionPage({ mode }) {
       [fieldName]: nextValue,
     }));
   };
+
+  const selectedBuyAccount = mode === 'buy' ? getAccountByNumber(linkedBankAccounts, values.debitAccount) : null;
+  const issuerBankCode = summary?.linkedBank?.code || null;
+  const requiresBuyPhoneNumber = mode === 'buy'
+    && Boolean(selectedBuyAccount?.bankCode)
+    && Boolean(issuerBankCode)
+    && selectedBuyAccount.bankCode !== issuerBankCode;
+
+  const visibleFields = config.fields.filter((field) => (
+    !(mode === 'buy' && field.name === 'phoneNumber' && !requiresBuyPhoneNumber)
+  ));
 
   const loadPaymentDetails = async (paymentReference) => {
     const response = await portalApi.getCustomerPayment(token, paymentReference);
@@ -258,10 +274,14 @@ function PortalActionPage({ mode }) {
 
       let response;
       if (mode === 'buy') {
-        response = await portalApi.buyBtn(token, {
+        const payload = {
           amount: values.amount,
           debitAccount: values.debitAccount,
-        });
+        };
+        if (requiresBuyPhoneNumber) {
+          payload.phoneNumber = values.phoneNumber;
+        }
+        response = await portalApi.buyBtn(token, payload);
       } else if (mode === 'sell') {
         response = await portalApi.sellBtn(token, {
           amount: values.amount,
@@ -276,7 +296,11 @@ function PortalActionPage({ mode }) {
 
       const transaction = response.data;
       await loadPaymentDetails(transaction.paymentReference);
-      if (transaction.mode === 'FIAT_FALLBACK' || mode === 'buy' || mode === 'sell') {
+      if (
+        transaction.mode === 'FIAT_FALLBACK'
+        || mode === 'sell'
+        || (mode === 'buy' && transaction.transaction?.parsedPayload?.buyRail !== 'PULL_PAYMENT')
+      ) {
         await verifyAndReloadPaymentDetails(transaction.paymentReference);
       } else {
         await loadPaymentDetails(transaction.paymentReference);
@@ -284,7 +308,7 @@ function PortalActionPage({ mode }) {
       await refreshSummary();
       enqueueSnackbar(
         mode === 'buy'
-          ? 'BTN buy request submitted successfully'
+          ? 'BTN buy authorization submitted successfully'
           : mode === 'sell'
             ? 'BTN sell request submitted successfully'
             : 'BTN transfer request submitted successfully',
@@ -315,7 +339,9 @@ function PortalActionPage({ mode }) {
         label: 'Token delivery',
         value:
           paymentDetails.parsedPayload?.fulfillment?.status
-          || (paymentDetails.status === 'INITIATED' ? 'Waiting for payment confirmation' : 'Not started'),
+          || (paymentDetails.status === 'INITIATED'
+              ? 'Waiting for payment confirmation'
+              : 'Not started'),
       },
       {
         label: 'Delivery message',
@@ -482,7 +508,7 @@ function PortalActionPage({ mode }) {
         ) : null}
 
         <form className="mt-8 grid gap-5" onSubmit={handleSubmit}>
-          {config.fields.map((field) => (
+          {visibleFields.map((field) => (
             <label className="grid gap-2" key={field.name}>
               <span className="text-sm font-medium text-zinc-200">{field.label}</span>
 
@@ -518,6 +544,7 @@ function PortalActionPage({ mode }) {
             </Button>
           </div>
         </form>
+
       </Card>
 
       <div className="grid gap-6">

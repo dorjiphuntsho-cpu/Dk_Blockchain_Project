@@ -14,6 +14,22 @@ const RESERVE_STATUSES = {
 const PAYMENT_GATEWAY_REFERENCE_TYPE = 'PAYMENT_GATEWAY';
 const DK_BANK_CODE = '1060';
 
+function extractFundingBankDetails(paymentTransaction) {
+  return {
+    fundingBankId: paymentTransaction?.parsedPayload?.fundingBankId || null,
+    fundingBankCode: paymentTransaction?.parsedPayload?.fundingBankCode || paymentTransaction?.parsedPayload?.remitterBankId || null,
+    fundingBankName: paymentTransaction?.parsedPayload?.fundingBankName || null,
+  };
+}
+
+function formatFundingBankLabel({ fundingBankName, fundingBankCode }) {
+  if (fundingBankName && fundingBankCode) {
+    return `${fundingBankName} (${fundingBankCode})`;
+  }
+
+  return fundingBankName || fundingBankCode || null;
+}
+
 async function createReserveAuditLog({ actorUserId = null, entityId, action, metadata }, tx = prisma) {
   await auditLogService.createAuditLog(
     {
@@ -178,6 +194,9 @@ async function getReserveTransactions() {
       currency: transaction.currency,
       source: isBuy ? 'BUY' : (isSell ? 'SELL' : 'TRANSFER'),
       referenceId: transaction.paymentReference,
+      fundingBankId: transaction.parsedPayload?.fundingBankId || null,
+      fundingBankCode: transaction.parsedPayload?.fundingBankCode || transaction.parsedPayload?.remitterBankId || null,
+      fundingBankName: transaction.parsedPayload?.fundingBankName || null,
       createdAt: transaction.confirmedAt || transaction.createdAt,
     }];
   }).sort((left, right) => (
@@ -299,6 +318,7 @@ async function syncReserveFromPaymentTransaction(paymentTransaction, actorUserId
 
   return prisma.$transaction(async (tx) => {
     const issuerBank = await getIssuerBank(tx);
+    const fundingBank = extractFundingBankDetails(paymentTransaction);
 
     const existingReserve = await tx.reserveLedger.findUnique({
       where: {
@@ -344,6 +364,7 @@ async function syncReserveFromPaymentTransaction(paymentTransaction, actorUserId
           `Created from ${paymentTransaction.gatewayName} payment confirmation`,
           paymentTransaction.customerReference ? `Customer ref: ${paymentTransaction.customerReference}` : null,
           paymentTransaction.gatewayTransactionId ? `Gateway tx: ${paymentTransaction.gatewayTransactionId}` : null,
+          formatFundingBankLabel(fundingBank) ? `Funding bank: ${formatFundingBankLabel(fundingBank)}` : null,
         ].filter(Boolean).join(' | '),
       },
     });
@@ -360,6 +381,9 @@ async function syncReserveFromPaymentTransaction(paymentTransaction, actorUserId
         amount: paymentTransaction.amount,
         currency: paymentTransaction.currency,
         status: reserveLedger.status,
+        fundingBankId: fundingBank.fundingBankId,
+        fundingBankCode: fundingBank.fundingBankCode,
+        fundingBankName: fundingBank.fundingBankName,
       },
     }, tx);
 

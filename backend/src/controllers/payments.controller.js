@@ -195,6 +195,19 @@ async function initiateCustomerBuyBtn(req, res) {
   });
 }
 
+async function confirmCustomerBuyBtn(req, res) {
+  const result = await paymentsService.confirmCustomerBuyBtn(
+    req.user.id,
+    req.params.paymentReference,
+    req.validated.body,
+  );
+
+  return successResponse(res, {
+    message: 'Customer BTN purchase payment confirmed successfully',
+    data: result,
+  });
+}
+
 async function initiateCustomerSellBtn(req, res) {
   const result = await paymentsService.initiateCustomerSellBtn(req.user.id, req.validated.body);
 
@@ -245,6 +258,7 @@ module.exports = {
   getGatewayTransactionStatusForHistory,
   getGatewayTransactionStatusForToday,
   getCurrentPaymentStatus,
+  confirmCustomerBuyBtn,
   getCustomerPaymentTransaction,
   getHistoricalPaymentStatus,
   ingestPaymentCallback,

@@ -73,6 +73,21 @@ function ReservesPage() {
       label: 'Source',
     },
     {
+      key: 'fundingBank',
+      label: 'Funding Bank',
+      render: (row) => {
+        if (row.source !== 'BUY') {
+          return '-';
+        }
+
+        if (row.fundingBankName && row.fundingBankCode) {
+          return `${row.fundingBankName} (${row.fundingBankCode})`;
+        }
+
+        return row.fundingBankName || row.fundingBankCode || '-';
+      },
+    },
+    {
       key: 'referenceId',
       label: 'Reference',
       render: (row) => row.referenceId || '-',

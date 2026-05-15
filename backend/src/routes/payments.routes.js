@@ -7,6 +7,7 @@ const { ROLE_NAMES } = require('../utils/enums');
 const paymentsController = require('../controllers/payments.controller');
 const {
   customerBuyBtnSchema,
+  customerBuyBtnConfirmSchema,
   customerSellBtnSchema,
   customerTransferBtnSchema,
   customerPaymentReferenceParamSchema,
@@ -89,6 +90,12 @@ router.post(
   '/customer/buy-btn',
   validate(customerBuyBtnSchema),
   asyncHandler(paymentsController.initiateCustomerBuyBtn),
+);
+
+router.post(
+  '/customer/:paymentReference/confirm-buy',
+  validate(customerBuyBtnConfirmSchema),
+  asyncHandler(paymentsController.confirmCustomerBuyBtn),
 );
 
 router.post(

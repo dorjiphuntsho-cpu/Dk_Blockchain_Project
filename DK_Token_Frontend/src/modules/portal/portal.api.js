@@ -35,6 +35,14 @@ export const portalApi = {
     const response = await portalClient.post('/payments/customer/buy-btn', payload, authHeaders(token));
     return response.data;
   },
+  confirmBuyBtn: async (token, paymentReference, payload) => {
+    const response = await portalClient.post(
+      `/payments/customer/${paymentReference}/confirm-buy`,
+      payload,
+      authHeaders(token),
+    );
+    return response.data;
+  },
   sellBtn: async (token, payload) => {
     const response = await portalClient.post('/payments/customer/sell-btn', payload, authHeaders(token));
     return response.data;

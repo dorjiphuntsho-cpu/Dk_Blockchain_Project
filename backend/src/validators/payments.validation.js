@@ -177,8 +177,21 @@ const customerBuyBtnSchema = z.object({
   body: z.object({
     amount: numericStringSchema,
     debitAccount: optionalTrimmedString,
+    phoneNumber: optionalTrimmedString,
   }),
   params: z.object({}).optional(),
+  query: z.object({}).optional(),
+});
+
+const customerBuyBtnConfirmSchema = z.object({
+  body: z.object({
+    otp: requiredTrimmedString,
+    orderNo: optionalTrimmedString,
+    requestId: optionalTrimmedString,
+  }),
+  params: z.object({
+    paymentReference: z.preprocess(emptyStringToUndefined, requiredTrimmedString),
+  }),
   query: z.object({}).optional(),
 });
 
@@ -210,6 +223,7 @@ const customerPaymentReferenceParamSchema = z.object({
 
 module.exports = {
   customerBuyBtnSchema,
+  customerBuyBtnConfirmSchema,
   customerSellBtnSchema,
   customerTransferBtnSchema,
   customerPaymentReferenceParamSchema,

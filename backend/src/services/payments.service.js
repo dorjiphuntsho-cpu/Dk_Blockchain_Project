@@ -22,6 +22,7 @@ const {
 const PAYMENT_GATEWAY_TOKEN_CACHE_BUFFER_MS = 30 * 1000;
 const PAYMENT_GATEWAY_TOKEN_RETRY_DELAY_MS = 500;
 const PAYMENT_GATEWAY_TOKEN_MAX_ATTEMPTS = 2;
+const PAYMENT_GATEWAY_PULL_PAYMENT_TEST_OTP = '123456';
 const paymentGatewayTokenCache = new Map();
 const CUSTOMER_BTN_PAYMENT_PREFIXES = {
   BUY: 'BTNBUY',
@@ -72,6 +73,18 @@ function extractBipsBeneficiaryAccountName(payload) {
     || getFirstNonEmptyValue(payload?.response_data, ['beneficiary_account_name', 'beneficiaryAccountName'])
     || getFirstNonEmptyValue(payload?.parsedResponse, ['beneficiaryAccountName'])
     || null;
+}
+
+function buildGatewayFailureMessage(payload, fallbackMessage) {
+  const baseMessage = extractBipsResponseMessage(payload) || fallbackMessage || 'Gateway request failed.';
+  const detailCode = getFirstNonEmptyValue(payload?.response_data, ['code']);
+  const detailDescription = getFirstNonEmptyValue(payload?.response_data, ['description']);
+
+  if (!detailCode && !detailDescription) {
+    return baseMessage;
+  }
+
+  return `${baseMessage} (${[detailCode, detailDescription].filter(Boolean).join(': ')})`;
 }
 
 function normalizeBipsPaymentStatus(payload, fallbackStatus = 'INITIATED') {
@@ -632,6 +645,15 @@ function formatGatewayBusinessDate(value = new Date()) {
   }
 
   return date.toISOString().slice(0, 10);
+}
+
+function generateGatewayStanNumber(sourceApp = env.PAYMENT_GATEWAY_SOURCE_APP, date = new Date()) {
+  const sourceSuffix = String(sourceApp || '').replace(/\D/g, '').slice(-4).padStart(4, '0');
+  const hh = String(date.getUTCHours()).padStart(2, '0');
+  const mm = String(date.getUTCMinutes()).padStart(2, '0');
+  const ss = String(date.getUTCSeconds()).padStart(2, '0');
+  const cs = String(Math.floor(date.getUTCMilliseconds() / 10)).padStart(2, '0');
+  return `${sourceSuffix}${hh}${mm}${ss}${cs}`;
 }
 
 function sortObjectKeys(value) {
@@ -1295,6 +1317,40 @@ async function verifyPaymentStatus(paymentReference) {
 
   if (!existingTransaction) {
     throw new ApiError(404, 'Payment transaction not found');
+  }
+
+  if (
+    isCustomerBuyTransaction(existingTransaction)
+    && existingTransaction.parsedPayload?.buyRail === 'PULL_PAYMENT'
+  ) {
+    const transaction = await prisma.paymentTransaction.update({
+      where: {
+        paymentReference,
+      },
+      data: {
+        lastVerifiedAt: new Date(),
+        rawStatusResponse: {
+          mode: 'PULL_PAYMENT_DEBIT',
+          skippedVerification: true,
+        },
+        statusMessage: existingTransaction.statusMessage || 'Pull-payment debit already confirmed.',
+      },
+    });
+
+    return {
+      transaction,
+      reserveSync: {
+        reserveLedger: await reserveService.findReserveByPaymentReference(paymentReference),
+        created: false,
+        skipped: true,
+        reason: 'Pull-payment buy transactions are finalized from debit confirmation and do not use gateway transfer status verification.',
+      },
+      verification: {
+        mode: 'PULL_PAYMENT_DEBIT',
+        skipped: true,
+        responses: [],
+      },
+    };
   }
 
   if (
@@ -2014,69 +2070,291 @@ async function initiateCustomerBuyBtn(userId, options = {}) {
   const tokenAmount = normalizePositiveAmount(options.amount, 'amount');
   const fiatAmount = calculateFiatAmountFromTokenAmount(tokenAmount);
   const sourceAccountNumber = String(options.debitAccount || user.linkedBankAccountNumber).trim();
+  const selectedDebitAccount = findLinkedBankAccount(user, sourceAccountNumber);
 
+  // Routing table:
+  // - other bank -> DK reserve: pull-payment authorize + debit
+  // - DK -> DK reserve: intra gateway transfer
+  // - DK -> other bank: not used for buy; outbound payout is handled by sell flow
   if (!getLinkedBankAccountNumbers(user).includes(sourceAccountNumber)) {
     throw new ApiError(400, 'Debit account must match one of the customer linked bank accounts');
+  }
+
+  if (!selectedDebitAccount) {
+    throw new ApiError(400, 'Selected debit account metadata could not be resolved');
   }
 
   const paymentReference = buildCustomerPaymentReference();
   const customerReference = buildCustomerBuyReference(user.id);
   const requestId = generateGatewayRequestId();
-  const transactionTimestamp = formatGatewayTimestamp();
+  const transactionDate = new Date();
+  const transactionTimestamp = formatGatewayTimestamp(transactionDate);
+  const stanNumber = generateGatewayStanNumber(env.PAYMENT_GATEWAY_SOURCE_APP, transactionDate);
   const purpose = 'Buy BTN for customer wallet funding';
-  const sourceAccountInquiry = await cbsService.accountInquiry({
-    accountNumber: sourceAccountNumber,
-  });
-  const sourceAccountName = sourceAccountInquiry.summary.accountName || user.fullName;
+  const remitterBankId = String(selectedDebitAccount.bankCode || '').trim();
+  const phoneNumber = String(options.phoneNumber || '').trim();
 
-  const beneficiaryInquiryPayload = {
-    request_id: requestId,
-    source_app: env.PAYMENT_GATEWAY_SOURCE_APP,
-    amount: fiatAmount,
-    currency: env.BTN_REFERENCE_PRICE_CURRENCY,
-    source_account_number: sourceAccountNumber,
-    soure_account_number: sourceAccountNumber,
-    bene_account_number: reserveAccount.accountNumber,
-    bene_bank_code: issuerBank.code,
-  };
-  const beneficiaryInquiryResult = await beneficiaryAccountInquiry({
-    payload: beneficiaryInquiryPayload,
-  });
-  const inquiryId = extractGatewayInquiryId(beneficiaryInquiryResult.payload);
-
-  if (!inquiryId) {
-    throw new ApiError(502, 'Payment gateway beneficiary inquiry did not return an inquiry id');
+  if (!remitterBankId) {
+    throw new ApiError(400, 'Selected debit account bank code is missing');
   }
 
-  const requestPayload = {
-    request_id: requestId,
+  let sourceAccountName = selectedDebitAccount.accountName || user.fullName;
+  if (remitterBankId === issuerBank.code) {
+    const sourceAccountInquiry = await cbsService.accountInquiry({
+      accountNumber: sourceAccountNumber,
+    });
+    sourceAccountName = sourceAccountInquiry.summary.accountName || sourceAccountName;
+  }
+
+  if (remitterBankId === issuerBank.code) {
+    const beneficiaryInquiryPayload = {
+      request_id: requestId,
+      source_app: env.PAYMENT_GATEWAY_SOURCE_APP,
+      amount: fiatAmount,
+      currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+      source_account_number: sourceAccountNumber,
+      soure_account_number: sourceAccountNumber,
+      bene_account_number: reserveAccount.accountNumber,
+      bene_bank_code: issuerBank.code,
+    };
+    const beneficiaryInquiryResult = await beneficiaryAccountInquiry({
+      payload: beneficiaryInquiryPayload,
+    });
+    const inquiryId = extractGatewayInquiryId(beneficiaryInquiryResult.payload);
+
+    if (!inquiryId) {
+      throw new ApiError(502, 'Payment gateway beneficiary inquiry did not return an inquiry id');
+    }
+
+    const requestPayload = {
+      request_id: requestId,
+      transaction_datetime: transactionTimestamp,
+      source_app: env.PAYMENT_GATEWAY_SOURCE_APP,
+      transaction_amount: fiatAmount,
+      payment_type: 'INTRA',
+      source_account_name: sourceAccountName,
+      bene_cust_name: reserveAccount.accountName,
+      bene_account_number: reserveAccount.accountNumber,
+      bene_bank_code: issuerBank.code,
+      inquiry_id: inquiryId,
+      narration: purpose,
+      payment_reference: paymentReference,
+      customer_reference: customerReference,
+      amount: fiatAmount,
+      currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+      source_account_number: sourceAccountNumber,
+      beneficiary_account_number: reserveAccount.accountNumber,
+      beneficiary_account_name: reserveAccount.accountName,
+      payer_name: user.fullName,
+      payer_account: sourceAccountNumber,
+      purpose,
+      remarks: purpose,
+      source_wallet_address: primaryWallet.walletAddress,
+      token_amount: tokenAmount,
+      token_symbol: 'BTN',
+      issuer_bank_code: issuerBank.code,
+      issuer_bank_name: issuerBank.name,
+    };
+
+    await prisma.paymentTransaction.upsert({
+      where: {
+        paymentReference,
+      },
+      create: {
+        gatewayName: env.PAYMENT_GATEWAY_NAME,
+        paymentReference,
+        customerReference,
+        payerName: user.fullName,
+        payerAccount: sourceAccountNumber,
+        amount: fiatAmount,
+        currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+        status: 'INITIATED',
+        statusMessage: 'Customer BTN purchase payment initiated from portal.',
+        parsedPayload: {
+          initiatedBy: 'CUSTOMER_PORTAL',
+          customerId: user.id,
+          customerCid: user.cid,
+          sourceWalletAddress: primaryWallet.walletAddress,
+          issuerBankId: issuerBank.id,
+          reserveAccountNumber: reserveAccount.accountNumber,
+          reserveAccountName: reserveAccount.accountName,
+          requestId,
+          inquiryId,
+          sourceAccountName,
+          tokenAmount,
+          fiatAmount,
+          buyRail: 'INTRA_GATEWAY',
+          beneficiaryInquiryPayload,
+          beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+          requestPayload,
+        },
+      },
+      update: {
+        customerReference,
+        payerName: user.fullName,
+        payerAccount: sourceAccountNumber,
+        amount: fiatAmount,
+        currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+        status: 'INITIATED',
+        statusMessage: 'Customer BTN purchase payment re-initiated from portal.',
+        parsedPayload: {
+          initiatedBy: 'CUSTOMER_PORTAL',
+          customerId: user.id,
+          customerCid: user.cid,
+          sourceWalletAddress: primaryWallet.walletAddress,
+          issuerBankId: issuerBank.id,
+          reserveAccountNumber: reserveAccount.accountNumber,
+          reserveAccountName: reserveAccount.accountName,
+          requestId,
+          inquiryId,
+          sourceAccountName,
+          tokenAmount,
+          fiatAmount,
+          buyRail: 'INTRA_GATEWAY',
+          beneficiaryInquiryPayload,
+          beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+          requestPayload,
+        },
+      },
+    });
+
+    const gatewayResult = await initiateIntraTransaction({
+      payload: requestPayload,
+    });
+
+    const normalizedGatewayResponse = normalizePaymentPayload(gatewayResult.payload, paymentReference, env.PAYMENT_GATEWAY_NAME);
+
+    await prisma.paymentTransaction.update({
+      where: {
+        paymentReference,
+      },
+      data: {
+        parsedPayload: {
+          initiatedBy: 'CUSTOMER_PORTAL',
+          customerId: user.id,
+          customerCid: user.cid,
+          sourceWalletAddress: primaryWallet.walletAddress,
+          issuerBankId: issuerBank.id,
+          reserveAccountNumber: reserveAccount.accountNumber,
+          reserveAccountName: reserveAccount.accountName,
+          requestId,
+          inquiryId,
+          sourceAccountName,
+          tokenAmount,
+          fiatAmount,
+          buyRail: 'INTRA_GATEWAY',
+          beneficiaryInquiryPayload,
+          beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+          requestPayload,
+          gatewayInitiationResponse: gatewayResult.payload,
+        },
+      },
+    });
+
+    if (normalizedGatewayResponse) {
+      await upsertPaymentTransaction({
+        normalized: {
+          ...normalizedGatewayResponse,
+          customerReference,
+          payerName: normalizedGatewayResponse.payerName || user.fullName,
+          payerAccount: normalizedGatewayResponse.payerAccount || sourceAccountNumber,
+        },
+        parsedPayload: {
+          initiatedBy: 'CUSTOMER_PORTAL',
+          customerId: user.id,
+          customerCid: user.cid,
+          sourceWalletAddress: primaryWallet.walletAddress,
+          issuerBankId: issuerBank.id,
+          reserveAccountNumber: reserveAccount.accountNumber,
+          reserveAccountName: reserveAccount.accountName,
+          requestId,
+          inquiryId,
+          sourceAccountName,
+          tokenAmount,
+          fiatAmount,
+          buyRail: 'INTRA_GATEWAY',
+          beneficiaryInquiryPayload,
+          beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
+          requestPayload,
+          gatewayInitiationResponse: gatewayResult.payload,
+        },
+      });
+    }
+
+    return {
+      paymentReference,
+      customerReference,
+      tokenAmount,
+      fiatAmount,
+      currency: env.BTN_REFERENCE_PRICE_CURRENCY,
+      customer: {
+        id: user.id,
+        fullName: user.fullName,
+        cid: user.cid,
+        primaryWalletAddress: primaryWallet.walletAddress,
+        linkedBankAccountNumber: user.linkedBankAccountNumber,
+        linkedBankAccountNumbers: getLinkedBankAccountNumbers(user),
+      },
+      destination: {
+        issuerBankId: issuerBank.id,
+        issuerBankName: issuerBank.name,
+        issuerBankCode: issuerBank.code,
+        reserveAccountNumber: reserveAccount.accountNumber,
+        reserveAccountName: reserveAccount.accountName,
+      },
+      gateway: gatewayResult,
+    };
+  }
+
+  if (!phoneNumber) {
+    throw new ApiError(400, 'phoneNumber is required for non-DK funding accounts');
+  }
+
+  let reserveAccountName = reserveAccount.accountName;
+  try {
+    const reserveAccountInquiry = await cbsService.accountInquiry({
+      accountNumber: reserveAccount.accountNumber,
+    });
+    reserveAccountName = reserveAccountInquiry.summary.accountName || reserveAccountName;
+  } catch (error) {
+    logger.warn('Unable to resolve reserve account name from CBS for non-DK buy flow', {
+      reserveAccountNumber: reserveAccount.accountNumber,
+      fallbackAccountName: reserveAccount.accountName,
+      errorMessage: error.message,
+    });
+  }
+
+  const authorizationPayload = {
     transaction_datetime: transactionTimestamp,
-    source_app: env.PAYMENT_GATEWAY_SOURCE_APP,
-    transaction_amount: fiatAmount,
-    payment_type: 'INTRA',
-    source_account_name: sourceAccountName,
-    bene_cust_name: reserveAccount.accountName,
-    bene_account_number: reserveAccount.accountNumber,
-    bene_bank_code: issuerBank.code,
-    inquiry_id: inquiryId,
-    narration: purpose,
-    payment_reference: paymentReference,
-    customer_reference: customerReference,
+    stan_number: stanNumber,
+    transaction_amount: Number(fiatAmount),
+    transaction_fee: 0,
+    payment_desc: purpose,
+    account_number: reserveAccount.accountNumber,
+    account_name: reserveAccountName,
+    email_id: user.email,
+    name: user.fullName,
+    remitter_account_number: sourceAccountNumber,
+    remitter_account_name: sourceAccountName,
+    remitter_bank_id: remitterBankId,
+    ...(phoneNumber ? { phone_number: phoneNumber } : {}),
+  };
+
+  logger.info('Customer BTN buy pull-payment authorization payload prepared', {
+    paymentReference,
+    requestId,
+    stanNumber,
+    fundingBankId: selectedDebitAccount.bankId || null,
+    fundingBankCode: selectedDebitAccount.bankCode || null,
+    fundingBankName: selectedDebitAccount.bankName || null,
+    remitterBankId,
+    remitterAccountNumber: sourceAccountNumber,
+    remitterAccountName: sourceAccountName,
+    beneficiaryAccountNumber: reserveAccount.accountNumber,
+    beneficiaryAccountName: reserveAccountName,
     amount: fiatAmount,
     currency: env.BTN_REFERENCE_PRICE_CURRENCY,
-    source_account_number: sourceAccountNumber,
-    beneficiary_account_number: reserveAccount.accountNumber,
-    beneficiary_account_name: reserveAccount.accountName,
-    payer_name: user.fullName,
-    payer_account: sourceAccountNumber,
-    purpose,
-    remarks: purpose,
-    source_wallet_address: primaryWallet.walletAddress,
-    token_amount: tokenAmount,
-    token_symbol: 'BTN',
-    issuer_bank_code: issuerBank.code,
-    issuer_bank_name: issuerBank.name,
-  };
+  });
 
   await prisma.paymentTransaction.upsert({
     where: {
@@ -2099,15 +2377,19 @@ async function initiateCustomerBuyBtn(userId, options = {}) {
         sourceWalletAddress: primaryWallet.walletAddress,
         issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
-        reserveAccountName: reserveAccount.accountName,
+        reserveAccountName,
         requestId,
-        inquiryId,
+        stanNumber,
+        phoneNumber,
+        fundingBankId: selectedDebitAccount.bankId || null,
+        fundingBankCode: selectedDebitAccount.bankCode || null,
+        fundingBankName: selectedDebitAccount.bankName || null,
+        remitterBankId,
         sourceAccountName,
         tokenAmount,
         fiatAmount,
-        beneficiaryInquiryPayload,
-        beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
-        requestPayload,
+        buyRail: 'PULL_PAYMENT',
+        authorizationPayload,
       },
     },
     update: {
@@ -2125,30 +2407,39 @@ async function initiateCustomerBuyBtn(userId, options = {}) {
         sourceWalletAddress: primaryWallet.walletAddress,
         issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
-        reserveAccountName: reserveAccount.accountName,
+        reserveAccountName,
         requestId,
-        inquiryId,
+        stanNumber,
+        phoneNumber,
+        fundingBankId: selectedDebitAccount.bankId || null,
+        fundingBankCode: selectedDebitAccount.bankCode || null,
+        fundingBankName: selectedDebitAccount.bankName || null,
+        remitterBankId,
         sourceAccountName,
         tokenAmount,
         fiatAmount,
-        beneficiaryInquiryPayload,
-        beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
-        requestPayload,
+        buyRail: 'PULL_PAYMENT',
+        authorizationPayload,
       },
     },
   });
 
-  const gatewayResult = await initiateIntraTransaction({
-    payload: requestPayload,
+  const gatewayResult = await authorizePullPayment({
+    payload: authorizationPayload,
   });
-
-  const normalizedGatewayResponse = normalizePaymentPayload(gatewayResult.payload, paymentReference, env.PAYMENT_GATEWAY_NAME);
+  const responseCode = extractBipsResponseCode(gatewayResult.payload);
+  const bfsTxnId = getFirstNonEmptyValue(gatewayResult.payload?.response_data, ['bfs_txn_id']);
 
   await prisma.paymentTransaction.update({
     where: {
       paymentReference,
     },
     data: {
+      gatewayTransactionId: bfsTxnId,
+      status: responseCode === '0000' ? 'OTP_PENDING' : 'FAILED',
+      statusMessage: responseCode === '0000'
+        ? 'Payment authorized. OTP has been sent to the remitter for confirmation.'
+        : (extractBipsResponseMessage(gatewayResult.payload) || 'Payment authorization failed.'),
       parsedPayload: {
         initiatedBy: 'CUSTOMER_PORTAL',
         customerId: user.id,
@@ -2156,46 +2447,30 @@ async function initiateCustomerBuyBtn(userId, options = {}) {
         sourceWalletAddress: primaryWallet.walletAddress,
         issuerBankId: issuerBank.id,
         reserveAccountNumber: reserveAccount.accountNumber,
-        reserveAccountName: reserveAccount.accountName,
+        reserveAccountName,
         requestId,
-        inquiryId,
+        stanNumber,
+        phoneNumber,
+        fundingBankId: selectedDebitAccount.bankId || null,
+        fundingBankCode: selectedDebitAccount.bankCode || null,
+        fundingBankName: selectedDebitAccount.bankName || null,
+        remitterBankId,
         sourceAccountName,
         tokenAmount,
         fiatAmount,
-        beneficiaryInquiryPayload,
-        beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
-        requestPayload,
-        gatewayInitiationResponse: gatewayResult.payload,
+        buyRail: 'PULL_PAYMENT',
+        authorizationPayload,
+        gatewayAuthorizationResponse: gatewayResult.payload,
+        bfsTxnId,
       },
     },
   });
 
-  if (normalizedGatewayResponse) {
-    await upsertPaymentTransaction({
-      normalized: {
-        ...normalizedGatewayResponse,
-        customerReference,
-        payerName: normalizedGatewayResponse.payerName || user.fullName,
-        payerAccount: normalizedGatewayResponse.payerAccount || sourceAccountNumber,
-      },
-      parsedPayload: {
-        initiatedBy: 'CUSTOMER_PORTAL',
-        customerId: user.id,
-        customerCid: user.cid,
-        sourceWalletAddress: primaryWallet.walletAddress,
-        issuerBankId: issuerBank.id,
-        reserveAccountNumber: reserveAccount.accountNumber,
-        reserveAccountName: reserveAccount.accountName,
-        requestId,
-        inquiryId,
-        sourceAccountName,
-        tokenAmount,
-        fiatAmount,
-        beneficiaryInquiryPayload,
-        beneficiaryInquiryResponse: beneficiaryInquiryResult.payload,
-        requestPayload,
-        gatewayInitiationResponse: gatewayResult.payload,
-      },
+  let autoDebitResult = null;
+  if (responseCode === '0000') {
+    autoDebitResult = await confirmCustomerBuyBtn(userId, paymentReference, {
+      otp: PAYMENT_GATEWAY_PULL_PAYMENT_TEST_OTP,
+      orderNo: paymentReference,
     });
   }
 
@@ -2213,14 +2488,105 @@ async function initiateCustomerBuyBtn(userId, options = {}) {
       linkedBankAccountNumber: user.linkedBankAccountNumber,
       linkedBankAccountNumbers: getLinkedBankAccountNumbers(user),
     },
-    destination: {
-      issuerBankId: issuerBank.id,
-      issuerBankName: issuerBank.name,
-      issuerBankCode: issuerBank.code,
-      reserveAccountNumber: reserveAccount.accountNumber,
-      reserveAccountName: reserveAccount.accountName,
+      destination: {
+        issuerBankId: issuerBank.id,
+        issuerBankName: issuerBank.name,
+        issuerBankCode: issuerBank.code,
+        reserveAccountNumber: reserveAccount.accountNumber,
+        reserveAccountName,
+      },
+    authorization: {
+      otpRequired: false,
+      bfsTxnId,
+      stanNumber,
+      response: gatewayResult,
     },
-    gateway: gatewayResult,
+    autoDebit: autoDebitResult?.debit || null,
+    transaction: autoDebitResult?.transaction || null,
+  };
+}
+
+async function confirmCustomerBuyBtn(userId, paymentReference, options = {}) {
+  const transaction = await getCustomerPaymentTransaction(userId, paymentReference);
+
+  if (!isCustomerBuyTransaction(transaction)) {
+    throw new ApiError(400, 'Payment transaction is not a customer BTN buy request');
+  }
+
+  if (transaction.parsedPayload?.buyRail !== 'PULL_PAYMENT') {
+    throw new ApiError(400, 'OTP confirmation is only available for non-DK pull-payment buy requests');
+  }
+
+  const bfsTxnId = transaction.gatewayTransactionId || transaction.parsedPayload?.bfsTxnId;
+  if (!bfsTxnId) {
+    throw new ApiError(400, 'Payment transaction is missing the gateway authorization id');
+  }
+
+  const debitPayload = {
+    request_id: options.requestId || generateGatewayRequestId(),
+    bfs_TxnId: bfsTxnId,
+    bfs_bfsTxnId: bfsTxnId,
+    bfs_remitter_Otp: String(options.otp || '').trim(),
+    bfs_orderNo: options.orderNo || paymentReference,
+  };
+  const gatewayResult = await debitPullPayment({
+    payload: debitPayload,
+  });
+  const responseCode = extractBipsResponseCode(gatewayResult.payload);
+  const isSuccessful = responseCode === '0000';
+  const nextStatus = isSuccessful ? 'COMPLETED' : 'FAILED';
+  const nextStatusMessage = isSuccessful
+    ? 'Payment completed successfully and BTN delivery is being processed.'
+    : buildGatewayFailureMessage(gatewayResult.payload, 'Payment debit failed.');
+
+  logger.info('Customer BTN buy pull-payment debit response received', {
+    paymentReference,
+    bfsTxnId,
+    fundingBankId: transaction.parsedPayload?.fundingBankId || null,
+    fundingBankCode: transaction.parsedPayload?.fundingBankCode || transaction.parsedPayload?.remitterBankId || null,
+    fundingBankName: transaction.parsedPayload?.fundingBankName || null,
+    remitterAccountNumber: transaction.payerAccount || transaction.parsedPayload?.authorizationPayload?.remitter_account_number || null,
+    responseCode,
+    gatewayCode: getFirstNonEmptyValue(gatewayResult.payload?.response_data, ['code']),
+    gatewayDescription: getFirstNonEmptyValue(gatewayResult.payload?.response_data, ['description']),
+    responseMessage: extractBipsResponseMessage(gatewayResult.payload),
+  });
+
+  const updatedTransaction = await prisma.paymentTransaction.update({
+    where: {
+      paymentReference,
+    },
+    data: {
+      status: nextStatus,
+      statusMessage: nextStatusMessage,
+      confirmedAt: isSuccessful ? new Date() : null,
+      parsedPayload: mergeJsonObjects(transaction.parsedPayload, {
+        debitPayload,
+        gatewayDebitResponse: gatewayResult.payload,
+        fulfillment: {
+          status: isSuccessful ? 'DELIVERY_PENDING' : 'FAILED',
+          updatedAt: new Date().toISOString(),
+          statusMessage: nextStatusMessage,
+        },
+      }),
+      rawStatusResponse: {
+        mode: 'PULL_PAYMENT_DEBIT',
+        payload: gatewayResult.payload,
+      },
+      parsedStatus: {
+        responseCode,
+        debitResult: gatewayResult.payload,
+      },
+      lastVerifiedAt: new Date(),
+    },
+  });
+
+  const reserveSync = await syncPaymentOutcome(updatedTransaction, 'PULL_PAYMENT_DEBIT');
+
+  return {
+    transaction: await getCustomerPaymentTransaction(userId, paymentReference),
+    reserveSync,
+    debit: gatewayResult,
   };
 }
 
@@ -3212,6 +3578,7 @@ module.exports = {
   authorizeGatewayPullPayment,
   authorizePullPayment,
   beneficiaryAccountInquiry,
+  confirmCustomerBuyBtn,
   createGatewayDebitRequest,
   debitPullPayment,
   fetchGatewayAuthorizationToken,
