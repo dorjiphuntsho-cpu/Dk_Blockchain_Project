@@ -1,11 +1,12 @@
 import { useState, useCallback } from "react";
+import { API_BASE_URL } from "../utils/constants";
 
 // Generates a unique request_id on the frontend as required by BIPS spec
 const generateRequestId = () => {
     return `${Date.now()}${Math.floor(Math.random() * 10000).toString().padStart(4, "0")}`;
 };
 
-const API_BASE = "http://localhost:5000/api/bips"; // proxied through your Express server
+const API_BASE = `${API_BASE_URL}/bips`;
 
 /**
  * useBipsTransfer
@@ -134,7 +135,6 @@ export const useBankCodes = () => {
         try {
             const res = await fetch(`${API_BASE}/bank-codes`);
             const json = await res.json();
-            console.log(json);
             if (json.success) setBanks(json.data);
         } catch (err) {
             console.error("Failed to load bank codes:", err);
