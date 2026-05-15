@@ -64,11 +64,11 @@ function PortalWalletPage() {
   const mintExplorerUrl = tokenSummary?.mintAddress ? buildExplorerAddressUrl(tokenSummary.mintAddress) : null;
 
   return (
-    <div className="grid gap-6">
-      <Card className="rounded-[1.75rem] border-white/10 bg-zinc-950/70">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">Customer wallet</p>
-        <h2 className="mt-4 text-3xl font-semibold tracking-tight text-white">Wallet balance and token accounts</h2>
-        <p className="mt-4 text-sm leading-7 text-zinc-400">
+    <div className="grid gap-4">
+      <Card className="border-white/8 bg-[#14151A]">
+        <p className="fintech-label text-[#F0B90B]">Customer wallet</p>
+        <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white">Wallet balance and token accounts</h2>
+        <p className="mt-2 text-sm text-[#848E9C]">
           Review the linked wallet address, current BTN holdings, and token accounts currently visible to the portal.
         </p>
 
@@ -78,8 +78,8 @@ function PortalWalletPage() {
           </div>
         ) : null}
 
-        <div className="mt-8 grid gap-4 md:grid-cols-3">
-          <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4">
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-white/8 bg-[#1B1F24] p-3">
             <p className="text-xs uppercase tracking-[0.18em] text-zinc-400">Primary wallet</p>
             <p className="mt-3 break-all text-sm font-medium text-white">
               {loading ? 'Loading...' : (primaryWalletAddress || 'Not linked')}
@@ -92,20 +92,20 @@ function PortalWalletPage() {
               </div>
             ) : null}
           </div>
-          <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4">
+          <div className="rounded-xl border border-white/8 bg-[#1B1F24] p-3">
             <p className="text-xs uppercase tracking-[0.18em] text-zinc-400">BTN held</p>
             <p className="mt-3 text-2xl font-semibold text-white">{loading ? 'Loading...' : btnBalance}</p>
           </div>
-          <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4">
+          <div className="rounded-xl border border-white/8 bg-[#1B1F24] p-3">
             <p className="text-xs uppercase tracking-[0.18em] text-zinc-400">Tracked token accounts</p>
             <p className="mt-3 text-2xl font-semibold text-white">{loading ? 'Loading...' : walletBalances.length}</p>
           </div>
         </div>
       </Card>
 
-      <Card className="rounded-[1.75rem] border-white/10 bg-zinc-950/70">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">Token holdings</p>
-        <h3 className="mt-3 text-2xl font-semibold tracking-tight text-white">Wallet token inventory</h3>
+      <Card className="border-white/8 bg-[#14151A]">
+        <p className="fintech-label">Token holdings</p>
+        <h3 className="mt-1 text-lg font-semibold tracking-tight text-white">Wallet token inventory</h3>
         {mintExplorerUrl ? (
           <div className="mt-4">
             <Button as="a" href={mintExplorerUrl} rel="noreferrer" size="sm" target="_blank" variant="outline">
@@ -117,9 +117,9 @@ function PortalWalletPage() {
         {loading ? (
           <p className="mt-6 text-sm text-zinc-400">Loading wallet balances...</p>
         ) : walletBalances.length ? (
-          <div className="mt-6 grid gap-3">
+          <div className="mt-4 grid gap-3">
             {walletBalances.map((balance) => (
-              <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4" key={balance.tokenAccountAddress}>
+              <div className="rounded-xl border border-white/8 bg-[#1B1F24] p-3" key={balance.tokenAccountAddress}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium text-white">

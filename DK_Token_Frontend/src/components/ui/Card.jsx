@@ -4,8 +4,8 @@ function Card({ children, className, padded = true }) {
   return (
     <div
       className={cn(
-        'rounded-xl border border-white/10 bg-zinc-900',
-        padded ? 'p-4 md:p-5' : '',
+        'fintech-panel',
+        padded ? 'p-4 md:p-4' : '',
         className,
       )}
     >

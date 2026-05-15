@@ -1,34 +1,34 @@
-import { ArrowTrendingUpIcon, BanknotesIcon, BoltIcon } from '@heroicons/react/24/outline';
+import {
+  ArrowPathIcon,
+  ArrowTrendingUpIcon,
+  BanknotesIcon,
+  BoltIcon,
+  CheckBadgeIcon,
+  DocumentDuplicateIcon,
+  WalletIcon,
+} from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
+import Card from '../../components/ui/Card';
 import usePortalAuth from '../../hooks/usePortalAuth';
 import { portalApi } from '../../modules/portal/portal.api';
+import { cn } from '../../utils/cn';
 import { getErrorMessage } from '../../utils/error';
 import { formatAmount, truncateMiddle } from '../../utils/format';
 
 const ACTION_CARDS = [
-  {
-    title: 'Buy BTN',
-    description: 'Fund your DK account and begin the request to purchase BTN into your wallet balance.',
-    path: '/portal/buy',
-    icon: BanknotesIcon,
-  },
-  {
-    title: 'Sell BTN',
-    description: 'Create a sell instruction for BTN and capture your preferred payout account details.',
-    path: '/portal/sell',
-    icon: ArrowTrendingUpIcon,
-  },
-  {
-    title: 'Transfer BTN',
-    description: 'Move BTN to another beneficiary without entering the internal token operations dashboard.',
-    path: '/portal/transfer',
-    icon: BoltIcon,
-  },
+  { title: 'Buy BTN', description: 'Fund DK and request BTN issuance.', path: '/portal/buy', icon: BanknotesIcon },
+  { title: 'Sell BTN', description: 'Create fiat payout against BTN holdings.', path: '/portal/sell', icon: ArrowTrendingUpIcon },
+  { title: 'Transfer BTN', description: 'Send BTN to another beneficiary.', path: '/portal/transfer', icon: BoltIcon },
 ];
+
+function splitDisplayValue(value) {
+  const parts = String(value || '').split(' ');
+  if (parts.length < 2) return { main: String(value || ''), unit: '' };
+  return { main: parts.slice(0, -1).join(' '), unit: parts.at(-1) };
+}
 
 function PortalHomePage() {
   const { customer, token } = usePortalAuth();
@@ -38,54 +38,27 @@ function PortalHomePage() {
   const [summaryReloadKey, setSummaryReloadKey] = useState(0);
 
   useEffect(() => {
-    const handleSummaryRefresh = () => {
-      setSummaryReloadKey((current) => current + 1);
-    };
-
+    const handleSummaryRefresh = () => setSummaryReloadKey((current) => current + 1);
     window.addEventListener('portal-summary-refresh', handleSummaryRefresh);
-
-    return () => {
-      window.removeEventListener('portal-summary-refresh', handleSummaryRefresh);
-    };
+    return () => window.removeEventListener('portal-summary-refresh', handleSummaryRefresh);
   }, []);
 
   useEffect(() => {
     let isMounted = true;
-
     const loadSummary = async () => {
       setIsSummaryLoading(true);
       setSummaryError('');
-
       try {
         const response = await portalApi.getSummary(token);
-
-        if (!isMounted) {
-          return;
-        }
-
-        setSummary(response.data);
+        if (isMounted) setSummary(response.data);
       } catch (error) {
-        if (!isMounted) {
-          return;
-        }
-
-        setSummaryError(getErrorMessage(error, 'Unable to load BTN token summary'));
+        if (isMounted) setSummaryError(getErrorMessage(error, 'Unable to load BTN token summary'));
       } finally {
-        if (isMounted) {
-          setIsSummaryLoading(false);
-        }
+        if (isMounted) setIsSummaryLoading(false);
       }
     };
-
-    if (token) {
-      loadSummary();
-    } else {
-      setIsSummaryLoading(false);
-    }
-
-    return () => {
-      isMounted = false;
-    };
+    if (token) loadSummary(); else setIsSummaryLoading(false);
+    return () => { isMounted = false; };
   }, [token, summaryReloadKey]);
 
   const tokenSummary = summary?.token;
@@ -94,179 +67,177 @@ function PortalHomePage() {
   const linkedBankAccounts = summary?.linkedBankAccounts || summary?.customer?.linkedBankAccounts || [];
   const tokenName = tokenSummary?.name || 'BTN Token';
   const tokenSymbol = tokenSummary?.symbol || 'BTN';
-  const walletAddress = summary?.customer?.primaryWalletAddress || customer?.wallets?.[0]?.walletAddress || 'Not linked'; // eslint-disable-line no-unused-vars
+  const walletAddress = summary?.customer?.primaryWalletAddress || customer?.wallets?.[0]?.walletAddress || 'Not linked';
   const linkedBankAccountNumber = summary?.customer?.linkedBankAccountNumber || customer?.linkedBankAccountNumber || 'Not linked';
-  const btnBalance = summary?.customer?.btnBalance != null
-    ? `${formatAmount(summary.customer.btnBalance)} ${tokenSymbol}`
-    : `0 ${tokenSymbol}`;
+  const btnBalance = summary?.customer?.btnBalance != null ? `${formatAmount(summary.customer.btnBalance)} ${tokenSymbol}` : `0 ${tokenSymbol}`;
   const issuerBankLabel = linkedBank ? `${linkedBank.name} (${linkedBank.code})` : 'Not available';
-  const availableBalance = linkedAccount?.availableBalance != null
-    ? `${linkedAccount.currencyCode || 'BTN'} ${formatAmount(linkedAccount.availableBalance)}`
-    : 'Not available';
-  const availableDistribution = tokenSummary?.distributionInventory?.displayAmount != null
-    ? `${formatAmount(tokenSummary.distributionInventory.displayAmount)} ${tokenSymbol}`
-    : 'Not available';
-  const totalSupply = tokenSummary?.totalSupplyDisplay
-    ? `${formatAmount(tokenSummary.totalSupplyDisplay)} ${tokenSymbol}`
-    : 'Not available';
-  const referencePrice = tokenSummary?.referencePrice != null
-    ? `${tokenSummary.referencePriceCurrency} ${formatAmount(tokenSummary.referencePrice)}`
-    : 'Not available';
+  const availableBalance = linkedAccount?.availableBalance != null ? `${linkedAccount.currencyCode || 'BTN'} ${formatAmount(linkedAccount.availableBalance)}` : 'Not available';
+  const availableDistribution = tokenSummary?.distributionInventory?.displayAmount != null ? `${formatAmount(tokenSummary.distributionInventory.displayAmount)} ${tokenSymbol}` : 'Not available';
+  const totalSupply = tokenSummary?.totalSupplyDisplay ? `${formatAmount(tokenSummary.totalSupplyDisplay)} ${tokenSymbol}` : 'Not available';
+  const referencePrice = tokenSummary?.referencePrice != null ? `${tokenSummary.referencePriceCurrency} ${formatAmount(tokenSummary.referencePrice)}` : 'Not available';
+  const activityItems = summary?.recentPayments || [];
+  const statCards = [
+    { label: 'BTN Balance', value: btnBalance, tone: 'text-[var(--text-primary)]' },
+    { label: 'Fiat Balance', value: availableBalance, tone: 'text-[var(--text-primary)]' },
+    { label: 'Reference Price', value: referencePrice, tone: 'text-[var(--accent-gold)]' },
+    { label: 'Distribution', value: availableDistribution, tone: 'text-[var(--text-primary)]' },
+  ];
+  const handleCopyWallet = async () => {
+    if (!walletAddress || walletAddress === 'Not linked' || !navigator?.clipboard) return;
+    await navigator.clipboard.writeText(walletAddress);
+  };
 
   return (
-    <div className="grid gap-6">
-      <Card className="overflow-hidden rounded-[1.75rem] border-emerald-400/10 bg-[linear-gradient(135deg,rgba(16,185,129,0.16),rgba(15,23,42,0.9)_54%,rgba(14,165,233,0.16))] p-0">
-        <div className="grid gap-8 p-6 md:grid-cols-[1.2fr_0.8fr] md:p-8">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">Customer overview</p>
-            <h2 className="mt-4 text-3xl font-semibold tracking-tight text-white">
-              Welcome back, {customer?.fullName}
-            </h2>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-zinc-200/80">
-              Use this portal to manage customer-facing BTN actions only. Buy, sell, and transfer flows are kept separate from the admin operations console.
-            </p>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-1">
-            <div className="rounded-[1.25rem] border border-white/10 bg-black/20 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-zinc-300">Available BTN</p>
-              <p className="mt-3 text-2xl font-semibold text-white">{isSummaryLoading ? 'Loading...' : btnBalance}</p>
-            </div>
-            <div className="rounded-[1.25rem] border border-white/10 bg-black/20 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-zinc-300">Available fiat</p>
-              <p className="mt-3 text-2xl font-semibold text-white">{isSummaryLoading ? 'Loading...' : availableBalance}</p>
-              {linkedAccount?.accountName ? (
-                <p className="mt-2 text-sm text-zinc-300">{linkedAccount.accountName}</p>
-              ) : null}
-            </div>
-            <div className="rounded-[1.25rem] border border-white/10 bg-black/20 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-zinc-300">Fiat account</p>
-              <p className="mt-3 font-mono text-lg text-white">{linkedBankAccountNumber}</p>
-              <p className="mt-2 text-sm text-zinc-300">{linkedBankAccounts.length} linked bank account{linkedBankAccounts.length === 1 ? '' : 's'}</p>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      <Card className="rounded-[1.75rem] border-white/10 bg-zinc-950/70">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">BTN market snapshot</p>
-            <h3 className="mt-4 text-2xl font-semibold tracking-tight text-white">{tokenName}</h3>
-            <p className="mt-2 text-sm leading-7 text-zinc-400">
-              The portal shows the current managed token supply, the backend reference price, and the DK Bank issuer link behind BTN.
-            </p>
-          </div>
-
-          {summaryError ? (
-            <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
-              {summaryError}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="mt-8 grid gap-4 md:grid-cols-4">
-          <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-zinc-400">Token</p>
-            <p className="mt-3 text-2xl font-semibold text-white">{tokenSymbol}</p>
-          </div>
-          <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-zinc-400">Linked bank</p>
-            <p className="mt-3 text-lg font-semibold text-white">{isSummaryLoading ? 'Loading...' : issuerBankLabel}</p>
-          </div>
-          <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-zinc-400">Available distribution</p>
-            <p className="mt-3 text-2xl font-semibold text-white">{isSummaryLoading ? 'Loading...' : availableDistribution}</p>
-          </div>
-          <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-zinc-400">Reference price</p>
-            <p className="mt-3 text-2xl font-semibold text-white">{isSummaryLoading ? 'Loading...' : referencePrice}</p>
-          </div>
-        </div>
-
-        <div className="mt-4 rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4">
-          <p className="text-xs uppercase tracking-[0.18em] text-zinc-400">Total minted supply</p>
-          <p className="mt-2 text-lg font-semibold text-white">{isSummaryLoading ? 'Loading...' : totalSupply}</p>
-        </div>
-
-        {linkedBank?.reserveAccountNumber ? (
-          <div className="mt-4 rounded-[1.25rem] border border-emerald-400/15 bg-emerald-400/[0.06] p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-emerald-300">DK Bank reserve linkage</p>
-            <p className="mt-2 text-sm leading-7 text-zinc-200">
-              BTN is linked to {linkedBank.name} as the issuer bank, with reserve account{' '}
-              <span className="font-mono text-white">{linkedBank.reserveAccountNumber}</span>
-              {linkedBank.reserveAccountName ? ` (${linkedBank.reserveAccountName})` : ''}.
-            </p>
-          </div>
-        ) : null}
-
-        {linkedAccount?.warning ? (
-          <p className="mt-4 text-sm leading-7 text-amber-200/80">{linkedAccount.warning}</p>
-        ) : null}
-
-        {tokenSummary?.warning ? (
-          <p className="mt-4 text-sm leading-7 text-amber-200/80">{tokenSummary.warning}</p>
-        ) : null}
-      </Card>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        {ACTION_CARDS.map((card) => {
-          const Icon = card.icon;
-          return (
-            <Card className="rounded-[1.5rem] border-white/10 bg-zinc-950/70" key={card.path}>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="inline-flex rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-emerald-300">
-                    <Icon className="size-5" />
+    <div className="grid gap-2.5">
+      <Card className="border-[var(--border)] bg-[var(--bg-secondary)]">
+        <div className="grid gap-2.5 xl:grid-cols-[1.35fr_0.95fr]">
+          <div className="grid gap-4">
+            <div className="flex min-h-[80px] items-center justify-between gap-3 px-6 py-4">
+              <div className="min-w-0">
+                <p className="fintech-section-title text-[var(--accent-gold)]">Overview</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <h2 className="text-[22px] font-semibold text-white">Welcome back, {customer?.fullName}</h2>
+                  <div className="inline-flex items-center gap-1.5 rounded-[8px] border border-[var(--border)] bg-[var(--bg-tertiary)] px-[10px] py-[3px] text-[11px] font-medium text-[var(--success)]">
+                    <CheckBadgeIcon className="size-3.5" />
+                    Verified account
                   </div>
-                  <h3 className="mt-4 text-xl font-semibold text-white">{card.title}</h3>
-                  <p className="mt-2 text-sm leading-7 text-zinc-400">{card.description}</p>
+                </div>
+                <p className="mt-1 truncate text-[12px] text-[var(--text-secondary)]">Live customer balance, funding status, token coverage, and recent transfer flow.</p>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {statCards.map((item) => (
+                <div className="group flex min-h-[76px] flex-col justify-between rounded-[8px] border border-[var(--border)] bg-[var(--bg-secondary)] px-4 py-[14px] transition duration-200 ease-out hover:border-[var(--accent-gold)] hover:[box-shadow:inset_2px_0_0_0_var(--accent-gold)]" key={item.label}>
+                  <p className="fintech-label">{item.label}</p>
+                  {isSummaryLoading ? (
+                    <span className="fintech-skeleton block h-6 w-28" />
+                  ) : (
+                    <p className={cn('fintech-value flex flex-wrap items-baseline', item.tone)}>
+                      {(() => {
+                        const { main, unit } = splitDisplayValue(item.value);
+                        const compactValue = main.length > 12;
+                        return (
+                          <>
+                            <span className={cn(compactValue && 'fintech-value-sm')}>{main}</span>
+                            {unit ? <span className="fintech-unit shrink-0">{unit}</span> : null}
+                          </>
+                        );
+                      })()}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-2.5">
+            <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="fintech-section-title">Wallet Summary</p>
+                  <div className="group mt-2 flex items-center gap-2">
+                    <p className="min-w-0 truncate font-mono text-sm text-[var(--text-primary)]">{walletAddress === 'Not linked' ? walletAddress : truncateMiddle(walletAddress, 12, 10)}</p>
+                    {walletAddress !== 'Not linked' ? (
+                      <button className="opacity-0 transition duration-150 ease-out group-hover:opacity-100" onClick={handleCopyWallet} type="button">
+                        <DocumentDuplicateIcon className="size-4 text-[var(--text-secondary)] hover:text-white" />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="size-2 rounded-full bg-[var(--success)]" />
+                  <WalletIcon className="size-5 text-[var(--accent-gold)]" />
                 </div>
               </div>
-              <div className="mt-6">
-                <Button as={Link} className="w-full" to={card.path} variant="secondary">
-                  Open {card.title}
-                </Button>
+              <div className="mt-4 grid gap-3 text-sm">
+                <div className="flex items-center justify-between border-t border-[var(--border)] pt-3">
+                  <span className="text-[var(--text-secondary)]">Linked bank accounts</span>
+                  <span className="fintech-number text-sm text-[var(--text-primary)]">{linkedBankAccounts.length}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[var(--text-secondary)]">Primary fiat account</span>
+                  <span className="font-mono text-xs text-[var(--text-primary)]">{linkedBankAccountNumber}</span>
+                </div>
               </div>
-            </Card>
-          );
-        })}
+            </div>
+            <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+              <div className="flex items-center justify-between gap-3"><p className="mb-2 fintech-section-title">Operational Status</p><ArrowPathIcon className="size-4 text-[var(--text-secondary)] transition duration-150 ease-out hover:rotate-180 hover:text-white" /></div>
+              <div className="mt-4 grid gap-3 text-sm">
+                <div className="flex items-center justify-between border-t border-[var(--border)] pt-3"><span className="text-[var(--text-secondary)]">Issuer Bank</span><span className="text-right text-[var(--text-primary)]">{isSummaryLoading ? 'Loading...' : issuerBankLabel}</span></div>
+                <div className="flex items-center justify-between"><span className="text-[var(--text-secondary)]">Total Supply</span><span className="fintech-number text-sm text-[var(--text-primary)]">{isSummaryLoading ? 'Loading...' : totalSupply}</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <div className="grid gap-2.5 xl:grid-cols-[1.2fr_0.8fr]">
+        <Card className="border-[var(--border)] bg-[var(--bg-secondary)]">
+          <div className="flex items-center justify-between gap-3">
+            <div><p className="mb-2 fintech-section-title">Market Snapshot</p><h3 className="text-lg font-semibold text-white">{tokenName}</h3></div>
+            {summaryError ? <div className="rounded-[8px] border border-[var(--danger)]/20 bg-[var(--danger)]/10 px-3 py-2 text-xs text-rose-200">{summaryError}</div> : null}
+          </div>
+          <div className="mt-[10px] overflow-hidden rounded-[8px] border border-[var(--border)]">
+            <div className="grid grid-cols-2 bg-[var(--bg-tertiary)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)] xl:grid-cols-4">
+              <span>Token</span><span>Reference</span><span>Distribution</span><span>Reserve Link</span>
+            </div>
+            <div className="grid grid-cols-2 items-center bg-[var(--bg-secondary)] px-4 py-3 text-sm transition duration-150 ease-out hover:bg-[rgba(240,185,11,0.04)] xl:grid-cols-4">
+              <span className="fintech-number text-[var(--text-primary)]">{tokenSymbol}</span>
+              <span className="fintech-number text-[var(--accent-gold)]">{isSummaryLoading ? 'Loading...' : referencePrice}</span>
+              <span className="fintech-number text-[var(--text-primary)]">{isSummaryLoading ? 'Loading...' : availableDistribution}</span>
+              <span className="font-mono text-xs text-[var(--text-primary)]">{linkedBank?.reserveAccountNumber || '-'}</span>
+            </div>
+          </div>
+          {(linkedAccount?.warning || tokenSummary?.warning) ? <div className="mt-4 rounded-[8px] border border-[var(--accent-gold-dim)]/20 bg-[var(--accent-gold)]/10 px-3 py-2 text-sm text-amber-100">{linkedAccount?.warning || tokenSummary?.warning}</div> : null}
+        </Card>
+        <Card className="border-[var(--border)] bg-[var(--bg-secondary)]">
+          <p className="mb-2 fintech-section-title">Quick Actions</p>
+          <div className="mt-[10px] overflow-hidden rounded-[8px] border border-[var(--border)]">
+            {ACTION_CARDS.map((card) => {
+              const Icon = card.icon;
+              const iconTone = card.title === 'Buy BTN' ? 'text-[var(--accent-gold)] bg-[var(--accent-gold)]/10' : card.title === 'Sell BTN' ? 'text-[var(--success)] bg-[var(--success)]/10' : 'text-sky-400 bg-sky-400/10';
+              return (
+                <div className="flex h-[52px] items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--bg-secondary)] px-4 last:border-b-0" key={card.path}>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className={cn('rounded-[6px] p-2', iconTone)}><Icon className="size-4" /></div>
+                    <div className="min-w-0"><p className="text-sm font-semibold text-white">{card.title}</p><p className="truncate text-xs text-[var(--text-secondary)]">{card.description}</p></div>
+                  </div>
+                  <Button as={Link} className="h-auto rounded-[4px] px-3 py-1 text-[11px] font-semibold" size="sm" to={card.path} variant="primary">Open</Button>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
       </div>
 
-      <Card className="rounded-[1.75rem] border-white/10 bg-zinc-950/70">
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">Recent activity</p>
-            <h3 className="mt-3 text-2xl font-semibold tracking-tight text-white">Payment history</h3>
+      <div className="grid gap-2.5 xl:grid-cols-[1.15fr_0.85fr]">
+        <Card className="border-[var(--border)] bg-[var(--bg-secondary)]">
+          <div className="flex items-center justify-between gap-3">
+            <div><p className="mb-2 fintech-section-title">Recent Activity</p><h3 className="text-lg font-semibold text-white">Payments and transfer events</h3></div>
+            <p className="text-xs text-[var(--text-secondary)]">{activityItems.length} records</p>
           </div>
-        </div>
-
-        {summary?.recentPayments?.length ? (
-          <div className="mt-6 grid gap-3">
-            {summary.recentPayments.map((payment) => (
-              <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4" key={payment.id}>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-white">{truncateMiddle(payment.paymentReference, 14, 10)}</p>
-                    <p className="mt-1 text-xs uppercase tracking-[0.16em] text-zinc-500">
-                      {payment.status} {payment.fulfillmentStatus ? `• ${payment.fulfillmentStatus}` : ''}
-                    </p>
+          {activityItems.length ? (
+            <div className="mt-[10px] overflow-hidden rounded-[8px] border border-[var(--border)]">
+              <div className="grid grid-cols-[1.6fr_0.7fr_0.8fr] bg-[var(--bg-tertiary)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)]"><span>Reference</span><span>Status</span><span className="text-right">Amount</span></div>
+              <div className="divide-y divide-[var(--border)]">
+                {activityItems.map((payment) => (
+                  <div className="grid grid-cols-[1.6fr_0.7fr_0.8fr] items-center px-4 py-3 text-sm transition duration-150 ease-out hover:bg-[rgba(240,185,11,0.04)]" key={payment.id}>
+                    <div className="min-w-0"><p className="truncate font-medium text-white">{truncateMiddle(payment.paymentReference, 14, 10)}</p><p className="truncate text-xs text-[var(--text-secondary)]">{payment.statusMessage || '-'}</p></div>
+                    <span className="inline-flex w-fit rounded-[6px] border border-[var(--border)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)]">{payment.status}</span>
+                    <p className="fintech-number text-right text-sm text-white">{payment.currency || 'BTN'} {formatAmount(payment.amount)}</p>
                   </div>
-                  <p className="text-sm font-semibold text-white">
-                    {payment.currency || 'BTN'} {formatAmount(payment.amount)}
-                  </p>
-                </div>
-                <p className="mt-3 text-sm text-zinc-400">{payment.statusMessage || '-'}</p>
-                {payment.fulfillmentError ? (
-                  <p className="mt-2 text-sm text-amber-200/80">{payment.fulfillmentError}</p>
-                ) : null}
+                ))}
               </div>
-            ))}
+            </div>
+          ) : <div className="mt-4 rounded-[8px] border border-dashed border-[var(--border)] bg-[var(--bg-secondary)] px-4 py-8 text-center text-sm text-[var(--text-secondary)]">No payment history is available for this customer yet.</div>}
+        </Card>
+        <Card className="border-[var(--border)] bg-[var(--bg-secondary)]">
+          <p className="mb-2 fintech-section-title">Account Controls</p>
+          <div className="mt-[10px] grid gap-3">
+            <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-secondary)] p-4"><p className="text-sm font-semibold text-white">Verification Status</p><p className="mt-1 text-sm text-[var(--text-secondary)]">Customer profile, wallet link, and bank account mapping are active.</p></div>
+            <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-secondary)] p-4"><p className="text-sm font-semibold text-white">Reserve Backing</p><p className="mt-1 text-sm text-[var(--text-secondary)]">{linkedBank?.reserveAccountName || linkedBank?.name || 'Issuer bank'} reserve account is linked for managed BTN issuance.</p></div>
           </div>
-        ) : (
-          <p className="mt-6 text-sm leading-7 text-zinc-400">No payment history is available for this customer yet.</p>
-        )}
-      </Card>
+        </Card>
+      </div>
     </div>
   );
 }

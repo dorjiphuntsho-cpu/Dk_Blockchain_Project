@@ -139,13 +139,13 @@ function PortalBankAccountsPage() {
   };
 
   return (
-    <div className="grid gap-6">
-      <Card className="rounded-[1.75rem] border-white/10 bg-zinc-950/70">
+    <div className="grid gap-4">
+      <Card className="border-white/8 bg-[#14151A]">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">Customer bank accounts</p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white">Manage payout and funding accounts</h2>
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-400">
+            <p className="fintech-label text-[#F0B90B]">Customer bank accounts</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white">Manage payout and funding accounts</h2>
+            <p className="mt-2 max-w-2xl text-sm text-[#848E9C]">
               Add multiple customer bank accounts and choose the bank from existing records so bank codes stay consistent.
             </p>
           </div>
@@ -155,9 +155,9 @@ function PortalBankAccountsPage() {
           </Button>
         </div>
 
-        <div className="mt-8 grid gap-4">
+        <div className="mt-4 grid gap-3">
           {accounts.map((account, index) => (
-            <div className="grid gap-4 rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4 md:grid-cols-[1.2fr_1fr_1fr_auto]" key={`${account.bankId}-${index}-${account.accountNumber}`}>
+            <div className="grid gap-4 rounded-xl border border-white/8 bg-[#1B1F24] p-3 md:grid-cols-[1.2fr_1fr_1fr_auto]" key={`${account.bankId}-${index}-${account.accountNumber}`}>
               <div className="grid gap-2">
                 <span className="text-sm font-medium text-zinc-200">Bank</span>
                 <Select disabled={isLoading || isSaving} name={`bank-${index}`} onChange={(event) => updateAccount(index, 'bankId', event.target.value)} value={account.bankId}>

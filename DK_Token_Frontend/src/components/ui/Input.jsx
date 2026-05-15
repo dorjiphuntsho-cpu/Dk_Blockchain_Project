@@ -7,7 +7,7 @@ const Input = forwardRef(function Input({ className, ...props }, ref) {
     <input
       ref={ref}
       className={cn(
-        'h-10 w-full rounded-lg border border-white/10 bg-zinc-950 px-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-white/15 focus:ring-2 focus:ring-white/20 disabled:cursor-not-allowed disabled:opacity-60',
+        'h-10 w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 text-sm text-[var(--text-primary)] outline-none transition duration-150 ease-out placeholder:text-[var(--text-muted)] focus:border-[var(--accent-gold-dim)] focus:ring-2 focus:ring-[var(--accent-gold)]/10 disabled:cursor-not-allowed disabled:opacity-60',
         className,
       )}
       {...props}

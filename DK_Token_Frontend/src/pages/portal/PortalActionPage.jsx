@@ -12,6 +12,7 @@ import useSolanaWallet from '../../hooks/useSolanaWallet';
 import { portalApi } from '../../modules/portal/portal.api';
 import { signAndSendWalletTransaction } from '../../modules/solana/walletExecution';
 import { getErrorMessage } from '../../utils/error';
+import { cn } from '../../utils/cn';
 import { formatAmount, truncateMiddle } from '../../utils/format';
 import { SOLANA_RPC_URL } from '../../utils/constants';
 
@@ -158,6 +159,7 @@ function PortalActionPage({ mode }) {
   };
 
   const selectedBuyAccount = mode === 'buy' ? getAccountByNumber(linkedBankAccounts, values.debitAccount) : null;
+  const selectedSellAccount = mode === 'sell' ? getAccountByNumber(linkedBankAccounts, values.payoutAccount) : null;
   const issuerBankCode = summary?.linkedBank?.code || null;
   const requiresBuyPhoneNumber = mode === 'buy'
     && Boolean(selectedBuyAccount?.bankCode)
@@ -424,20 +426,32 @@ function PortalActionPage({ mode }) {
   );
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-      <Card className="rounded-[1.75rem] border-white/10 bg-zinc-950/70">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">{config.title}</p>
-        <h2 className="mt-4 text-3xl font-semibold tracking-tight text-white">{config.summary}</h2>
-        <p className="mt-4 text-sm leading-7 text-zinc-400">{config.helper}</p>
+    <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+      <Card className="border-[var(--border)] bg-[var(--bg-secondary)]">
+        <p className="fintech-label text-[#F0B90B]">{config.title}</p>
+        <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white">{config.summary}</h2>
+        <p className="mt-2 text-sm text-[#848E9C]">{config.helper}</p>
 
         {(mode === 'buy' || mode === 'sell') && linkedBankAccounts.length ? (
-          <div className="mt-6 rounded-[1.25rem] border border-emerald-400/15 bg-emerald-400/[0.06] p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-emerald-300">
+          <div className="mt-4 rounded-[6px] border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+            <p className="fintech-label text-[#F0B90B]">
               {mode === 'buy' ? 'Available funding accounts' : 'Available payout accounts'}
             </p>
             <div className="mt-3 grid gap-2">
-              {linkedBankAccounts.map((account) => (
-                <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2" key={`${account.bankId || 'legacy'}-${account.accountNumber}`}>
+              {linkedBankAccounts.map((account) => {
+                const isSelected = mode === 'buy'
+                  ? selectedBuyAccount?.accountNumber === account.accountNumber
+                  : selectedSellAccount?.accountNumber === account.accountNumber;
+                return (
+                <div
+                  className={cn(
+                    'rounded-[6px] border px-4 py-[14px] transition duration-150 ease-out',
+                    isSelected
+                      ? 'border-[var(--accent-gold)] bg-[rgba(240,185,11,0.06)]'
+                      : 'border-[var(--border)] bg-[var(--bg-secondary)] hover:border-[#4a5260]',
+                  )}
+                  key={`${account.bankId || 'legacy'}-${account.accountNumber}`}
+                >
                   <p className="text-sm text-white">
                     {account.bankName || 'Bank'}
                     {account.bankCode ? ` (${account.bankCode})` : ''}
@@ -445,17 +459,17 @@ function PortalActionPage({ mode }) {
                   </p>
                   <p className="mt-1 font-mono text-sm text-zinc-300">{account.accountNumber}</p>
                 </div>
-              ))}
+              )})}
             </div>
           </div>
         ) : null}
 
         {(mode === 'sell' || mode === 'transfer') ? (
-          <div className="mt-6 rounded-[1.25rem] border border-white/10 bg-white/[0.02] p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-emerald-300">
+          <div className="mt-4 rounded-[6px] border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+            <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
               {mode === 'sell' ? 'Automatic sell delegation' : 'Automatic transfer delegation'}
             </p>
-            <p className="mt-2 text-sm leading-7 text-zinc-300">
+            <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">
               {sellDelegationReady
                 ? `This customer wallet has already delegated BTN transfer authority for automatic ${mode} execution.`
                 : `Enable a one-time wallet delegation so BTN can be moved automatically during ${mode} execution.`}
@@ -470,11 +484,11 @@ function PortalActionPage({ mode }) {
             </div>
             <div className="mt-4">
               <Button
-                className="w-full"
+                className="w-full border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:border-[var(--accent-gold)] hover:bg-transparent hover:text-[var(--accent-gold)]"
                 disabled={isApprovingDelegation || !solanaWallet.available || !summary}
                 onClick={handleApproveSellDelegation}
                 type="button"
-                variant={sellDelegationReady ? 'outline' : 'secondary'}
+                variant="outline"
               >
                 {isApprovingDelegation ? <Spinner /> : null}
                 {isApprovingDelegation
@@ -507,7 +521,7 @@ function PortalActionPage({ mode }) {
           </div>
         ) : null}
 
-        <form className="mt-8 grid gap-5" onSubmit={handleSubmit}>
+        <form className="mt-5 grid gap-4" onSubmit={handleSubmit}>
           {visibleFields.map((field) => (
             <label className="grid gap-2" key={field.name}>
               <span className="text-sm font-medium text-zinc-200">{field.label}</span>
@@ -547,16 +561,16 @@ function PortalActionPage({ mode }) {
 
       </Card>
 
-      <div className="grid gap-6">
-        <Card className="rounded-[1.75rem] border-emerald-400/15 bg-emerald-400/[0.06]">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">Integration boundary</p>
-          <p className="mt-3 text-sm leading-7 text-zinc-200">
+      <div className="grid gap-4">
+        <Card className="border-[var(--border)] bg-[var(--bg-secondary)] p-[18px]">
+          <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-muted)]">Integration boundary</p>
+          <p className="mt-2 text-[12px] leading-[1.6] text-[var(--text-secondary)]">
             Buy initiates customer funding, verifies status, and delivers BTN from the distribution account. Sell pays out fiat and returns BTN automatically from the delegated customer wallet. Transfer either moves BTN directly to another customer wallet or falls back to fiat payout plus BTN return to distribution.
           </p>
         </Card>
 
-        <Card className="rounded-[1.75rem] border-white/10 bg-zinc-950/70">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
+        <Card className="border-[var(--border)] bg-[var(--bg-secondary)] p-[18px]">
+          <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-muted)]">
             {mode === 'buy'
               ? 'Latest payment status'
               : mode === 'sell'
@@ -569,23 +583,23 @@ function PortalActionPage({ mode }) {
           {(mode === 'buy' || mode === 'sell' || mode === 'transfer') && paymentDetails ? (
             <div className="mt-4 grid gap-3">
               {(mode === 'buy' ? buySummaryRows : mode === 'sell' ? sellSummaryRows : transferSummaryRows).map((row) => (
-                <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3" key={row.label}>
+                <div className="rounded-[6px] border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-3" key={row.label}>
                   <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">{row.label}</p>
-                  <p className="mt-1 break-all text-sm text-white">{row.value || '-'}</p>
+                  <p className="mt-1 break-all text-[12px] leading-[1.6] text-[var(--text-secondary)]">{row.value || '-'}</p>
                 </div>
               ))}
             </div>
           ) : lastSubmission ? (
             <div className="mt-4 grid gap-3">
               {Object.entries(lastSubmission).map(([key, value]) => (
-                <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3" key={key}>
+                <div className="rounded-[6px] border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-3" key={key}>
                   <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">{key}</p>
-                  <p className="mt-1 text-sm text-white">{value || '-'}</p>
+                  <p className="mt-1 text-[12px] leading-[1.6] text-[var(--text-secondary)]">{value || '-'}</p>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="mt-4 text-sm leading-7 text-zinc-400">
+            <p className="mt-4 text-[12px] leading-[1.6] text-[var(--text-secondary)]">
               {mode === 'buy'
                 ? 'After submission, the generated payment reference and current gateway-tracked status will appear here when the gateway callback updates the backend.'
                 : mode === 'sell'
