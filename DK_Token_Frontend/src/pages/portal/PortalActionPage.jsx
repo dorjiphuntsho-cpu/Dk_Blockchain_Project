@@ -27,7 +27,7 @@ const ACTION_CONFIG = {
   buy: {
     title: 'Buy BTN',
     summary: 'Move fiat into DK Bank and request BTN issuance to your customer balance.',
-    buttonLabel: 'Submit Buy Request',
+    buttonLabel: 'Buy BTN Coin ',
     helper: 'Use this flow after the customer confirms the source account and funding amount.',
     fields: [
       { name: 'amount', label: 'BTN Coin Amount', placeholder: '250.00' },
@@ -38,7 +38,7 @@ const ACTION_CONFIG = {
   sell: {
     title: 'Sell BTN',
     summary: 'Payout fiat to the customer and return BTN back into DK distribution inventory automatically.',
-    buttonLabel: 'Submit Sell Request',
+    buttonLabel: 'Sell BTN Coin',
     helper: 'This flow pays out fiat and then automatically returns the sold BTN amount back to the DK distribution wallet from the delegated customer wallet.',
     fields: [
       { name: 'amount', label: 'BTN Amount to Sell', placeholder: '100.00' },
@@ -60,7 +60,7 @@ const ACTION_CONFIG = {
   transfer: {
     title: 'Transfer BTN',
     summary: 'Transfer BTN directly to another customer wallet, or fall back to fiat payout if the recipient has no wallet.',
-    buttonLabel: 'Submit Transfer Request',
+    buttonLabel: ' Transfer BTN Coin ',
     helper: 'If the recipient has an active wallet, BTN is transferred there directly. Otherwise the recipient receives fiat and the sender BTN is returned to DK distribution inventory.',
     fields: [
       { name: 'amount', label: 'BTN Amount to Transfer', placeholder: '40.00' },
@@ -75,6 +75,13 @@ function buildInitialValues(fields) {
 
 function getAccountByNumber(accounts, accountNumber) {
   return accounts.find((account) => account.accountNumber === accountNumber) || null;
+}
+
+function buildTransferFallbackMessage(paymentDetails) {
+  const payoutAccountNumber = paymentDetails?.parsedPayload?.payoutAccountNumber;
+  return payoutAccountNumber
+    ? `Recipient does not have a wallet right now. The transfer has been switched to the registered fiat account ${payoutAccountNumber} instead of BTN.`
+    : 'Recipient does not have a wallet right now. The transfer has been switched to the registered fiat account instead of BTN.';
 }
 
 function PortalActionPage({ mode }) {
@@ -298,24 +305,29 @@ function PortalActionPage({ mode }) {
 
       const transaction = response.data;
       await loadPaymentDetails(transaction.paymentReference);
+      let nextPaymentDetails;
       if (
         transaction.mode === 'FIAT_FALLBACK'
         || mode === 'sell'
         || (mode === 'buy' && transaction.transaction?.parsedPayload?.buyRail !== 'PULL_PAYMENT')
       ) {
-        await verifyAndReloadPaymentDetails(transaction.paymentReference);
+        nextPaymentDetails = await verifyAndReloadPaymentDetails(transaction.paymentReference);
       } else {
-        await loadPaymentDetails(transaction.paymentReference);
+        nextPaymentDetails = await loadPaymentDetails(transaction.paymentReference);
       }
       await refreshSummary();
-      enqueueSnackbar(
-        mode === 'buy'
-          ? 'BTN buy authorization submitted successfully'
-          : mode === 'sell'
-            ? 'BTN sell request submitted successfully'
-            : 'BTN transfer request submitted successfully',
-        { variant: 'success' },
-      );
+      if (mode === 'transfer' && transaction.mode === 'FIAT_FALLBACK') {
+        enqueueSnackbar(buildTransferFallbackMessage(nextPaymentDetails), { variant: 'warning' });
+      } else {
+        enqueueSnackbar(
+          mode === 'buy'
+            ? 'BTN buy authorization submitted successfully'
+            : mode === 'sell'
+              ? 'BTN sell request submitted successfully'
+              : 'BTN transfer request submitted successfully',
+          { variant: 'success' },
+        );
+      }
     } catch (error) {
       const fallbackMessage = mode === 'buy'
         ? 'Unable to submit BTN buy request'
@@ -342,8 +354,8 @@ function PortalActionPage({ mode }) {
         value:
           paymentDetails.parsedPayload?.fulfillment?.status
           || (paymentDetails.status === 'INITIATED'
-              ? 'Waiting for payment confirmation'
-              : 'Not started'),
+            ? 'Waiting for payment confirmation'
+            : 'Not started'),
       },
       {
         label: 'Delivery message',
@@ -432,6 +444,12 @@ function PortalActionPage({ mode }) {
         <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white">{config.summary}</h2>
         <p className="mt-2 text-sm text-[#848E9C]">{config.helper}</p>
 
+        {mode === 'transfer' && paymentDetails?.parsedPayload?.transferMode === 'FIAT_FALLBACK' ? (
+          <div className="mt-4 rounded-[6px] border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            {buildTransferFallbackMessage(paymentDetails)}
+          </div>
+        ) : null}
+
         {(mode === 'buy' || mode === 'sell') && linkedBankAccounts.length ? (
           <div className="mt-4 rounded-[6px] border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
             <p className="fintech-label text-[#F0B90B]">
@@ -443,23 +461,24 @@ function PortalActionPage({ mode }) {
                   ? selectedBuyAccount?.accountNumber === account.accountNumber
                   : selectedSellAccount?.accountNumber === account.accountNumber;
                 return (
-                <div
-                  className={cn(
-                    'rounded-[6px] border px-4 py-[14px] transition duration-150 ease-out',
-                    isSelected
-                      ? 'border-[var(--accent-gold)] bg-[rgba(240,185,11,0.06)]'
-                      : 'border-[var(--border)] bg-[var(--bg-secondary)] hover:border-[#4a5260]',
-                  )}
-                  key={`${account.bankId || 'legacy'}-${account.accountNumber}`}
-                >
-                  <p className="text-sm text-white">
-                    {account.bankName || 'Bank'}
-                    {account.bankCode ? ` (${account.bankCode})` : ''}
-                    {account.isPrimary ? ' - Primary' : ''}
-                  </p>
-                  <p className="mt-1 font-mono text-sm text-zinc-300">{account.accountNumber}</p>
-                </div>
-              )})}
+                  <div
+                    className={cn(
+                      'rounded-[6px] border px-4 py-[14px] transition duration-150 ease-out',
+                      isSelected
+                        ? 'border-[var(--accent-gold)] bg-[rgba(240,185,11,0.06)]'
+                        : 'border-[var(--border)] bg-[var(--bg-secondary)] hover:border-[#4a5260]',
+                    )}
+                    key={`${account.bankId || 'legacy'}-${account.accountNumber}`}
+                  >
+                    <p className="text-sm text-white">
+                      {account.bankName || 'Bank'}
+                      {account.bankCode ? ` (${account.bankCode})` : ''}
+                      {account.isPrimary ? ' - Primary' : ''}
+                    </p>
+                    <p className="mt-1 font-mono text-sm text-zinc-300">{account.accountNumber}</p>
+                  </div>
+                )
+              })}
             </div>
           </div>
         ) : null}
